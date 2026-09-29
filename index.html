@@ -96,6 +96,7 @@ main.posmain{padding:14px;max-width:none}
 .t td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
 .t tr:last-child td{border-bottom:0}
 .t .r{text-align:right}
+.t .nw,.t.nw td{white-space:nowrap}
 .code{font-size:12.5px;color:var(--muted);letter-spacing:.03em}
 .chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:800;background:var(--blue-l);color:var(--blue);white-space:nowrap}
 .chip.ok{background:var(--ok-l);color:var(--ok)}.chip.warn{background:var(--warn-l);color:var(--warn)}.chip.bad{background:var(--bad-l);color:var(--bad)}
@@ -117,7 +118,8 @@ main.posmain{padding:14px;max-width:none}
 .input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-l)}
 .input.xl{font-size:30px;font-weight:900;min-height:66px;text-align:center}
 .frow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media(max-width:560px){.frow{grid-template-columns:1fr}}
+.frow.three{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:560px){.frow,.frow.three{grid-template-columns:1fr}}
 .search{display:flex;align-items:center;gap:8px;background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:0 13px;min-height:48px;flex:1;max-width:440px;color:var(--muted)}
 .search input{border:0;background:transparent;flex:1;outline:none;font-size:15.5px;min-width:0}
 .toolbar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
@@ -183,9 +185,9 @@ main.posmain{padding:14px;max-width:none}
 @media(max-width:880px){.login{grid-template-columns:1fr}.hero{padding:26px}.steps{display:none}.hero h1{font-size:34px}}
 
 /* POS */
-.pos{display:grid;grid-template-columns:1fr 410px;gap:14px;height:calc(100vh - 92px)}
+.pos{display:grid;grid-template-columns:minmax(0,1fr) 410px;gap:14px;height:calc(100vh - 92px)}
 @media(max-width:1020px){.pos{grid-template-columns:1fr;height:auto}}
-.pos-left{display:flex;flex-direction:column;gap:12px;min-height:0}
+.pos-left{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
 .scan{display:flex;align-items:center;gap:10px;background:var(--card);border:2.5px solid var(--blue);border-radius:var(--r);padding:6px 6px 6px 16px;color:var(--blue)}
 .scan>svg{font-size:28px}
 .scan input{flex:1;border:0;background:transparent;font-size:19px;padding:12px 0;outline:none;min-width:0;font-weight:600}
@@ -298,10 +300,10 @@ button.uchip svg{font-size:11px}
 
 <script>
 /* =========================================================
-   SIM – Smart Invoice Management · cosmetics retail · demo v2
+   SIM – Smart Invoice Management · cosmetics retail · demo v3
    Storage: localStorage (this device) + offline sync queue.
    ========================================================= */
-const DBK='sim_db_v2', QK='sim_queue_v2', SK='sim_session_v2', IDLE_MIN=15;
+const DBK='sim_db_v3', QK='sim_queue_v3', SK='sim_session_v3', IDLE_MIN=15;
 const mem={};
 const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return mem[k]??null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){mem[k]=v}},del:k=>{try{localStorage.removeItem(k)}catch(e){delete mem[k]}}};
 const sstore={get:k=>{try{return sessionStorage.getItem(k)}catch(e){return mem['s_'+k]??null}},set:(k,v)=>{try{sessionStorage.setItem(k,v)}catch(e){mem['s_'+k]=v}},del:k=>{try{sessionStorage.removeItem(k)}catch(e){delete mem['s_'+k]}}};
@@ -310,6 +312,7 @@ let db=null, me=null, view='home', simOffline=false, flushing=false;
 let cart=[], cartDiscPct=0, posCat='All', posQuery='';
 let invQ='', invF='today', invS='';
 let rFrom='', rTo='', rShop='all';
+let ssQ='', ssShop='all', dlvQ='', impRows=[];
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -335,6 +338,7 @@ const CATS=['Skin care','Hair care','Make-up','Fragrance','Bath & body','Accesso
 const CATICON={All:'grid','Skin care':'lotion','Hair care':'comb','Make-up':'lipstick',Fragrance:'perfume','Bath & body':'soap',Accessories:'mirror'};
 const UPCATS=['Rent','Electricity & fuel','Security','Salaries','Transport','Maintenance','Taxes & licences','Other'];
 const UNITNAMES=['pcs','dzn','carton','box','set','pack'];
+const cats=()=>[...new Set([...CATS,...db.products.map(p=>p.category).filter(Boolean)])];
 
 /* ---------- icons ---------- */
 const I={
@@ -440,29 +444,33 @@ function returnStock(sid,items){
     } else st[it.pid]=(st[it.pid]||0)+it.qty*it.mult;
   });
 }
+/* carton items: stock counted in pcs, sold by pcs, dozen or carton */
+function cartonUnits(pc,dzn,per,ctn){const u=[{u:'pcs',mult:1,priceUSD:pc}];if(dzn>0&&per!==12)u.push({u:'dzn',mult:12,priceUSD:dzn});u.push({u:'carton',mult:per,priceUSD:ctn});return u}
+function ctnTxt(p,q){const per=p.perCarton||0,a=Math.abs(q||0);if(p.isBundle||per<2||a<per)return '';const c=Math.floor(a/per),r=a%per;return `${q<0?'-':''}${c} ctn${r?` + ${r} pcs`:''}`}
+const qtyCell=(p,q,cls)=>`<span class="chip ${cls||''}">${q} ${esc(p.stockUnit||'pcs')}</span>${ctnTxt(p,q)?`<div class="code">${ctnTxt(p,q)}</div>`:''}`;
 function cartBase(pid){return sum(cart.filter(l=>l.pid===pid),l=>{const u=unitAt(prod(l.pid),l.ui);return u.piece?0:u.mult*l.qty})}
 
 /* ---------- seed demo data ---------- */
 async function seed(){
   const rng=mulberry(20260927), now=Date.now(), D=864e5;
-  /* name, category, cost, price per piece, wh qty, reorder, extra units */
+  /* name, category, carton cost, pcs per carton, price per pc, per dozen (0 = not by dozen), per carton, store pcs, reorder pcs */
   const P=[
-    ['Shea body lotion 400 ml','Skin care',3.2,5,180,40,[12,24]],
-    ['Petroleum jelly 250 ml','Skin care',1.1,2,260,50,[12]],
-    ['Brightening face cream 50 g','Skin care',3,5.5,130,30,[12]],
-    ['Hair relaxer kit','Hair care',4.5,7,90,20,[12]],
-    ['Braiding hair pack','Hair care',1.8,3,300,60,[12,60]],
-    ['Coconut hair oil 200 ml','Hair care',2.2,3.5,150,30,[12]],
-    ['Matte lipstick','Make-up',1.6,3,220,50,[12]],
-    ['Foundation stick','Make-up',3.5,6,120,25,[12]],
-    ['Face powder compact','Make-up',2.8,4.5,140,30,[12]],
-    ['Nail polish','Make-up',.8,1.5,400,80,[12,72]],
-    ['Eau de parfum 100 ml','Fragrance',9,15,70,15,[6]],
-    ['Body spray 150 ml','Fragrance',2,3.5,200,40,[12,48]],
-    ['Glycerin soap 150 g','Bath & body',.6,1,600,120,[12,144]],
-    ['Shower gel 750 ml','Bath & body',2.4,4,160,35,[12]],
-    ['Cotton wool 100 g','Accessories',.5,1,300,60,[12]],
-    ['Hair clips card','Accessories',.4,.8,280,60,[12]]
+    ['Shea body lotion 400 ml','Skin care',76,24,5,57,108,192,48],
+    ['Petroleum jelly 250 ml','Skin care',52,48,2,22,86,288,48],
+    ['Brightening face cream 50 g','Skin care',72,24,5.5,63,120,120,24],
+    ['Hair relaxer kit','Hair care',54,12,7,0,80,96,24],
+    ['Braiding hair pack','Hair care',108,60,3,33,165,300,60],
+    ['Coconut hair oil 200 ml','Hair care',52,24,3.5,40,78,144,24],
+    ['Matte lipstick','Make-up',76,48,3,33,130,240,48],
+    ['Foundation stick','Make-up',84,24,6,68,130,120,24],
+    ['Face powder compact','Make-up',67,24,4.5,51,100,144,24],
+    ['Nail polish','Make-up',57,72,1.5,16,95,432,72],
+    ['Eau de parfum 100 ml','Fragrance',54,6,15,0,85,72,12],
+    ['Body spray 150 ml','Fragrance',96,48,3.5,39,155,192,48],
+    ['Glycerin soap 150 g','Bath & body',86,144,1,11,130,576,144],
+    ['Shower gel 750 ml','Bath & body',28.8,12,4,0,44,156,36],
+    ['Cotton wool 100 g','Accessories',24,48,1,10.5,42,288,48],
+    ['Hair clips card','Accessories',38.4,96,.8,8.5,68,288,96]
   ];
   const B=[
     ['Make-up brush set, 12 assorted','Accessories',6,14,1.8,12,40,10],
@@ -471,9 +479,8 @@ async function seed(){
   ];
   const products=[];
   P.forEach((p,i)=>{
-    const units=[{u:'pcs',mult:1,priceUSD:p[3]}];
-    (p[6]||[]).forEach(m=>units.push({u:m===12?'dzn':(m>=48?'carton':'box'),mult:m,priceUSD:Math.round(p[3]*m*0.96*100)/100}));
-    products.push({id:'P'+(i+1),sku:'SK-'+String(101+i),name:p[0],category:p[1],stockUnit:'pcs',costUSD:p[2],priceUSD:p[3],units,whQty:p[4],reorder:p[5],isBundle:false,created:now});
+    products.push({id:'P'+(i+1),sku:'SK-'+String(101+i),name:p[0],category:p[1],stockUnit:'pcs',cartonCostUSD:p[2],perCarton:p[3],costUSD:p[2]/p[3],priceUSD:p[4],dozenUSD:p[3]===12?0:p[5],cartonUSD:p[6],
+      units:cartonUnits(p[4],p[5],p[3],p[6]),whQty:p[7],reorder:p[8],isBundle:false,created:now});
   });
   B.forEach((b,i)=>{
     products.push({id:'B'+(i+1),sku:'ST-'+String(201+i),name:b[0],category:b[1],stockUnit:'set',costUSD:b[2],priceUSD:b[3],
@@ -483,16 +490,15 @@ async function seed(){
   const shopStock={S1:{},S2:{}};
   products.forEach((p,i)=>{shopStock.S1[p.id]=Math.max(0,Math.round(p.whQty*(.25+(i%4)*.05)));shopStock.S2[p.id]=Math.max(0,Math.round(p.whQty*(.15+(i%3)*.05)))});
   shopStock.S1['P7']=4;shopStock.S1['P11']=2;shopStock.S2['B1']=3;
-  db={v:2,created:now,lastSync:now,
+  db={v:3,created:now,lastSync:now,
     settings:{rate:2850,vat:16,company:{name:'SIM Beauté Distribution SARL',address:'Avenue du Commerce 45, Gombe, Kinshasa, RDC',phone:'+243 81 000 0000',email:'contact@sim-demo.cd',rccm:'CD/KNG/RCCM/24-B-00000',idnat:'01-0000-N00000A',nif:'A0000000B',footer:'Merci pour votre achat !'}},
     shops:[{id:'S1',code:'GOM',name:'SIM Beauté Gombe',address:'Boulevard du 30 Juin, Gombe, Kinshasa'},{id:'S2',code:'LIM',name:'SIM Beauté Limete',address:'7e Rue, Limete, Kinshasa'}],
     users:[],products,shopStock,openPieces:{S1:{B1:5,B2:0,B3:0},S2:{}},
     orders:[
-      {id:'ORD-0001',shopId:'S1',items:[{pid:'P1',qty:24},{pid:'P7',qty:36},{pid:'B1',qty:6}],status:'dispatched',t:now-3*D,by:'Patrick Kabongo',doneAt:now-3*D+4*36e5,doneBy:'Joseph Mbala',rate:2850},
-      {id:'ORD-0002',shopId:'S2',items:[{pid:'P12',qty:48},{pid:'P13',qty:60},{pid:'B3',qty:5}],status:'pending',t:now-5*36e5,by:'Aline Mukendi'},
-      {id:'ORD-0003',shopId:'S1',items:[{pid:'P11',qty:12},{pid:'P4',qty:20}],status:'pending',t:now-2*36e5,by:'Patrick Kabongo'}
+      {id:'DEL-0001',shopId:'S1',items:[{pid:'P1',qty:24,priceUSD:5},{pid:'P7',qty:48,priceUSD:3},{pid:'B1',qty:6,priceUSD:14}],status:'dispatched',t:now-3*D,by:'Joseph Mbala',doneAt:now-3*D,doneBy:'Joseph Mbala',rate:2850,edits:[]},
+      {id:'DEL-0002',shopId:'S2',items:[{pid:'P12',qty:48,priceUSD:3.5},{pid:'P13',qty:144,priceUSD:1},{pid:'B3',qty:5,priceUSD:22}],status:'dispatched',t:now-D,by:'Joseph Mbala',doneAt:now-D,doneBy:'Joseph Mbala',rate:2850,edits:[]}
     ],
-    upkeep:[],purchases:[],invoices:[],audit:[],seq:{order:3,S1:1000,S2:1000}
+    upkeep:[],purchases:[],invoices:[],audit:[],seq:{order:2,S1:1000,S2:1000}
   };
   [['Rent','Shop and store rent',1500,1],['Salaries','Staff wages',1900,2],['Electricity & fuel','Generator diesel, 300 L',390,3],['Transport','Delivery to shops',160,4],['Security','Guards, day and night',520,5],['Maintenance','Display shelves repair',120,9],['Taxes & licences','Municipal trading licence',280,12],['Transport','Delivery to Limete',85,20]]
     .forEach((u,i)=>db.upkeep.push({id:'X'+i,category:u[0],desc:u[1],amountUSD:u[2],date:ld(now-u[3]*D),by:'Mireille Tshibanda',t:now-u[3]*D}));
@@ -600,16 +606,16 @@ const shortCDF=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1000?Math.round(n/1000)+'k':S
 
 /* ---------- navigation ---------- */
 const NAV={
-  admin:[['home','Dashboard','home'],['inventory','Inventory','box'],['orders','Shop orders','truck'],['upkeep','Upkeep','wallet'],['reports','Reports','chart'],['users','Users','users'],['settings','Settings','settings'],['audit','Activity','shield']],
-  whop:[['inventory','Inventory','box'],['orders','Shop orders','truck']],
-  shopadmin:[['home','Home','home'],['pos','Till','cart'],['invoices','Invoices','receipt'],['stock','Stock','box'],['request','Order stock','truck'],['reports','Reports','chart']],
+  admin:[['home','Dashboard','home'],['inventory','Inventory','box'],['orders','Deliveries','truck'],['shopstock','Shop stock','store'],['upkeep','Upkeep','wallet'],['reports','Reports','chart'],['users','Users','users'],['settings','Settings','settings'],['audit','Activity','shield']],
+  whop:[['inventory','Inventory','box'],['orders','Deliveries','truck'],['shopstock','Shop stock','store']],
+  shopadmin:[['home','Home','home'],['pos','Till','cart'],['invoices','Invoices','receipt'],['stock','Stock','box'],['deliveries','Deliveries','truck'],['reports','Reports','chart']],
   till:[['pos','Till','cart'],['invoices','Invoices','receipt']]
 };
 function go(v){if(!NAV[me.role].some(n=>n[0]===v)){toast('You do not have access to this screen','bad');return}view=v;render();scrollTo(0,0)}
 function render(){
   if(!me){$('#app').innerHTML=loginView();setTimeout(()=>{const u=$('#lu');u&&u.focus()},40);return}
   if(!NAV[me.role].some(n=>n[0]===view))view=NAV[me.role][0][0];
-  const V={home:me.role==='admin'?whHome:shopHome,inventory:inventoryView,orders:ordersView,upkeep:upkeepView,reports:reportsView,users:usersView,settings:settingsView,audit:auditView,pos:posView,invoices:invoicesView,stock:stockView,request:requestView};
+  const V={home:me.role==='admin'?whHome:shopHome,inventory:inventoryView,orders:ordersView,upkeep:upkeepView,reports:reportsView,users:usersView,settings:settingsView,audit:auditView,pos:posView,invoices:invoicesView,stock:stockView,deliveries:deliveriesView,shopstock:shopstockView};
   const shop=me.shopId?shopOf(me.shopId):null;
   $('#app').innerHTML=`<header class="top"><div class="brand"><div class="logo">SIM</div><div style="min-width:0"><div class="bt">Smart Invoice Management</div><div class="bs">${shop?esc(shop.name):'Central store, Kinshasa'}</div></div></div><div class="sp"></div>
   <button id="sync" class="pill" onclick="toggleOffline()" title="Demo: tap to switch the internet off or on"></button>
@@ -626,8 +632,9 @@ function loginView(){
   <h1>Smart Invoice Management</h1>
   <p>Cosmetics retail, from the store room to the till. Prices are set once by the Admin and sold exactly as set.</p>
   <ol class="steps">
-    <li>Sign in as Admin to price items, set sets and piece prices, and create logins.</li>
-    <li>Sign in as Till in a second tab, pick items by icon, choose the unit and take cash.</li>
+    <li>Sign in as Admin to price items by pc, dozen and carton, import items from Excel, and create logins.</li>
+    <li>Sign in as Store operator to send stock to one or more shops and see what every shop has.</li>
+    <li>Sign in as Till in a second tab, pick items by icon, choose the unit and take cash. The invoice prints at once.</li>
     <li>Tap the internet button to go offline, keep selling, then switch it back on and watch it sync.</li>
   </ol></section>
   <section class="panel"><div class="lcard" id="lcard"><h2>Sign in</h2><p>Use the login given to you by the Admin.</p>
@@ -668,20 +675,20 @@ function whHome(){
   const stockCost=sum(db.products,p=>p.costUSD*p.whQty), stockRetail=sum(db.products,p=>p.priceUSD*p.whQty);
   const m=today().slice(0,7), upM=sum(db.upkeep.filter(u=>u.date.startsWith(m)),u=>u.amountUSD);
   const invT=db.invoices.filter(i=>ld(i.t)===today());
-  const pending=db.orders.filter(o=>o.status==='pending'), low=db.products.filter(p=>p.whQty<=p.reorder);
+  const low=db.products.filter(p=>p.whQty<=p.reorder), sl=shopLows();
   return head('Admin dashboard',`Exchange rate today: 1 USD = ${fCDF(rate())}`)
   +`<div class="kpis">${kpi('box','Store stock at cost',dual(stockCost))}${kpi('tag','Same stock at selling price',dual(stockRetail))}${kpi('wallet','Upkeep this month',dual(upM),'warn')}${kpi('chart','All shops, sales today',`<span class="dual"><b>${fUSD(sum(invT,i=>i.total/i.rate))}</b><small>${fCDF(sum(invT,i=>i.total))} from ${invT.length} invoices</small></span>`,'ok')}</div>
-  <div class="tiles">${tile('plus','Add new item','openItem()')}${tile('truck','Dispatch orders'+(pending.length?`<em>${pending.length}</em>`:''),"go('orders')")}${tile('chart','Sales report',"go('reports')")}${tile('key','Create login','openUser()')}</div>
+  <div class="tiles">${tile('plus','Add new item','openItem()')}${tile('truck','Send stock to shops','openDelivery()')}${tile('download','Import items from Excel','openImport()')}${tile('store','Shop stock',"go('shopstock')")}${tile('chart','Sales report',"go('reports')")}${tile('key','Create login','openUser()')}</div>
   <div class="cols">
-   <div class="card p0"><div style="padding:16px 16px 0"><h3>${ic('alert')} Low stock in the store</h3></div>${low.length?`<div class="tw"><table class="t"><thead><tr><th>Item</th><th class="r">In store</th><th class="r">Reorder at</th><th></th></tr></thead><tbody>${low.map(p=>`<tr><td><b>${esc(p.name)}</b></td><td class="r"><span class="chip bad">${p.whQty}</span></td><td class="r">${p.reorder}</td><td><div class="act"><button title="Receive stock" onclick="openItem('${p.id}')">${ic('plus')}</button></div></td></tr>`).join('')}</tbody></table></div>`:empty('check','All items above reorder level')}</div>
-   <div class="card p0"><div style="padding:16px 16px 0"><h3>${ic('truck')} Waiting for dispatch</h3></div>${pending.length?`<div class="tw"><table class="t"><tbody>${pending.map(o=>`<tr><td><b>${o.id}</b><div class="code">${esc(shopOf(o.shopId).name)}, ${tm(o.t)}</div></td><td>${o.items.length} items</td><td><div class="act"><button class="btn primary sm" style="width:auto" onclick="go('orders')">Open</button></div></td></tr>`).join('')}</tbody></table></div>`:empty('check','No orders waiting')}</div>
+   <div class="card p0"><div style="padding:16px 16px 0"><h3>${ic('alert')} Low stock in the store</h3></div>${low.length?`<div class="tw"><table class="t"><thead><tr><th>Item</th><th class="r">In store</th><th class="r">Reorder at</th><th></th></tr></thead><tbody>${low.map(p=>`<tr><td><b>${esc(p.name)}</b></td><td class="r">${qtyCell(p,p.whQty,'bad')}</td><td class="r">${p.reorder}</td><td><div class="act"><button title="Receive stock" onclick="openItem('${p.id}')">${ic('plus')}</button></div></td></tr>`).join('')}</tbody></table></div>`:empty('check','All items above reorder level')}</div>
+   <div class="card p0"><div style="padding:16px 16px 0"><h3>${ic('store')} Running low in the shops</h3></div>${sl.length?`<div class="tw"><table class="t"><tbody>${sl.slice(0,12).map(x=>`<tr><td><b>${esc(x.p.name)}</b><div class="code">${esc(x.s.name)}</div></td><td class="r"><span class="chip ${x.q>0?'warn':'bad'}">${x.q>0?x.q+' left':(x.q<0?Math.abs(x.q)+' sold on order':'None left')}</span></td><td><div class="act"><button title="Send to this shop" onclick="openDelivery('','${x.p.id}','${x.s.id}')">${ic('truck')}</button></div></td></tr>`).join('')}</tbody></table></div>${sl.length>12?`<div style="padding:12px 16px"><button class="btn ghost" onclick="go('shopstock')">See all ${sl.length} in Shop stock</button></div>`:''}`:empty('check','Shop stock levels look good')}</div>
   </div>`;
 }
 
 function inventoryView(){
   const isAdmin=seesCost();
   return head('Inventory',isAdmin?'Selling prices, sets and piece prices are set here only. Shops see them in Francs and cannot change them.':'Item names, units and quantities. Prices are set by the Admin.',
-    isAdmin?`<button class="btn primary" onclick="openItem()">${ic('plus')} Add new item</button>`:'')
+    isAdmin?`<button class="btn ghost" onclick="openImport()">${ic('download')} Import from Excel</button><button class="btn primary" onclick="openItem()">${ic('plus')} Add new item</button>`:'')
   +`<div class="toolbar"><div class="search">${ic('search')}<input placeholder="Search by name, code or category" value="${esc(invQ)}" oninput="invQ=this.value;$('#invTable').innerHTML=invTable()"></div><span class="chip">${db.products.length} items</span>${isAdmin?'':`<span class="chip warn">${ic('lock')} Cost prices hidden for your role</span>`}</div>
   <div class="card p0"><div class="tw" id="invTable">${invTable()}</div></div>`;
 }
@@ -689,134 +696,423 @@ function invTable(){
   const isAdmin=seesCost(),q=invQ.toLowerCase();
   const list=db.products.filter(p=>!q||(p.name+' '+p.sku+' '+p.category).toLowerCase().includes(q));
   if(!list.length)return empty('search','No items match your search');
-  return `<table class="t"><thead><tr><th>Item</th><th>Category</th><th>Sold as</th><th class="r">In store</th>${isAdmin?'<th>Cost price</th>':''}<th>Selling price</th>${isAdmin?'<th class="r">Margin</th>':''}<th></th></tr></thead><tbody>${list.map(p=>{
+  return `<table class="t"><thead><tr><th>Item</th><th>Category</th><th class="r">In store</th>${isAdmin?'<th>Cost</th>':''}<th>Selling prices</th>${isAdmin?'<th class="r">Margin</th>':''}<th></th></tr></thead><tbody>${list.map(p=>{
     const u=unitsOf(p);
     return `<tr>
-  <td><b>${esc(p.name)}</b><div class="code">${p.sku}${p.isBundle?' · mixed set':''}</div></td><td>${esc(p.category)}</td>
-  <td>${u.map(x=>`<span class="uchip">${esc(unitLabel(x))}</span>`).join(' ')}</td>
-  <td class="r"><span class="chip ${p.whQty<=p.reorder?'bad':'ok'}">${p.whQty} ${esc(p.stockUnit)}</span></td>
-  ${isAdmin?`<td>${dual(p.costUSD)}</td>`:''}
-  <td>${isAdmin?dual(p.priceUSD):`<b>${fCDF(toCDF(p.priceUSD))}</b><div class="code">per ${esc(p.stockUnit)}</div>`}${p.isBundle?`<div class="code">piece: ${fCDF(toCDF(p.pieceUSD))}</div>`:''}</td>
-  ${isAdmin?`<td class="r"><b>${Math.round((p.priceUSD-p.costUSD)/p.priceUSD*100)}%</b></td>`:''}
+  <td><b>${esc(p.name)}</b><div class="code">${p.sku}${p.isBundle?` · mixed set of ${p.piecesPerSet}`:(p.perCarton>1?` · ${p.perCarton} pcs per carton`:'')}</div></td><td>${esc(p.category)}</td>
+  <td class="r">${qtyCell(p,p.whQty,p.whQty<=p.reorder?'bad':'ok')}</td>
+  ${isAdmin?`<td>${p.isBundle?`${dual(p.costUSD)}<div class="code">per set</div>`:`${dual(p.cartonCostUSD||p.costUSD)}<div class="code">per carton, ${fUSD(p.costUSD)} per pc</div>`}</td>`:''}
+  <td>${u.map(x=>`<div style="white-space:nowrap"><span class="uchip">${esc(unitLabel(x))}</span> <b>${fCDF(toCDF(x.priceUSD))}</b>${isAdmin?` <span class="code">${fUSD(x.priceUSD)}</span>`:''}</div>`).join('')}</td>
+  ${isAdmin?`<td class="r"><b>${p.priceUSD>0?Math.round((p.priceUSD-p.costUSD)/p.priceUSD*100):0}%</b><div class="code">per ${p.isBundle?'set':'pc'}</div></td>`:''}
   <td><div class="act">${isAdmin?`<button title="Edit item and prices" onclick="openItem('${p.id}')">${ic('edit')}</button>`:`<button title="Receive stock" onclick="openReceive('${p.id}')">${ic('plus')}</button>`}</div></td></tr>`}).join('')}</tbody></table>`;
 }
 function openReceive(id){
-  if(!need('whop','admin'))return;const p=prod(id);
-  modal('Receive stock','box',`<p><b>${esc(p.name)}</b><br><span class="code">${p.sku}, currently ${p.whQty} ${esc(p.stockUnit)} in the store</span></p>
-  <div class="frow"><div class="field"><label>Quantity received (${esc(p.stockUnit)})</label><input id="rq" class="input" type="number" min="1" step="1" autofocus></div>
-  <div class="field"><label>Supplier or delivery note</label><input id="rs" class="input" maxlength="60"></div></div>
+  if(!need('whop','admin'))return;const p=prod(id),ctn=!p.isBundle&&p.perCarton>1;
+  modal('Receive stock','box',`<p><b>${esc(p.name)}</b><br><span class="code">${p.sku}, currently ${p.whQty} ${esc(p.stockUnit)} in the store${ctnTxt(p,p.whQty)?` (${ctnTxt(p,p.whQty)})`:''}${ctn?`, ${p.perCarton} pcs per carton`:''}</span></p>
+  <div class="frow">${ctn?`<div class="field"><label>Cartons received</label><input id="rqc" class="input" type="number" min="0" step="1" autofocus></div>`:''}
+  <div class="field"><label>${ctn?'Loose pcs received':`Quantity received (${esc(p.stockUnit)})`}</label><input id="rq" class="input" type="number" min="0" step="1" ${ctn?'':'autofocus'}></div></div>
+  <div class="field"><label>Supplier or delivery note</label><input id="rs" class="input" maxlength="60"></div>
   <div class="note">${ic('lock')}<div>Prices are not part of this screen. Only the Admin sets cost and selling prices.</div></div><div id="rerr2" class="lerr"></div>`,
   `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveReceive('${id}')">${ic('check')} Add to store stock</button>`);
 }
 function saveReceive(id){
-  if(!need('whop','admin'))return;const p=prod(id),q=parseInt($('#rq').value)||0,s=$('#rs').value.trim();
+  if(!need('whop','admin'))return;const p=prod(id),c=$('#rqc')?Math.max(0,parseInt($('#rqc').value)||0):0,q=c*(p.perCarton||0)+Math.max(0,parseInt($('#rq').value)||0),s=$('#rs').value.trim();
   if(q<1)return $('#rerr2').textContent='Enter a quantity of 1 or more';
   p.whQty+=q;db.purchases.unshift({t:Date.now(),pid:p.id,qty:q,costUSD:null,supplier:s,by:me.name});
   commit('receive',`Received ${q} ${p.stockUnit} of ${p.name}`);closeModal();render();toast('Stock received');
 }
+/* one validation for the item form and the Excel import; returns an error text or the priced fields */
+function itemFields(o){
+  if(!o.name)return 'Enter the item name';
+  if(!o.category)return 'Enter the category';
+  if(o.isBundle){
+    if(!(o.setCost>=0)||!(o.setPrice>0))return 'Enter the cost and selling price of one set';
+    if(o.setPrice<o.setCost)return 'Set price cannot be below its cost';
+    if(!(o.pcs>1)||!(o.piece>0))return 'For a mixed set, enter the pieces per set and the last price for one piece';
+    return{stockUnit:'set',costUSD:o.setCost,priceUSD:o.setPrice,units:[{u:'set',mult:1,priceUSD:o.setPrice},{u:'piece',mult:0,piece:true,priceUSD:o.piece}],
+      isBundle:true,piecesPerSet:o.pcs,pieceUSD:o.piece,cartonCostUSD:0,perCarton:0,dozenUSD:0,cartonUSD:0};
+  }
+  if(!(o.cartonCost>=0))return 'Enter the cost of one carton';
+  if(!(o.perCarton>=2)||o.perCarton%1)return 'Enter how many pcs are in one carton (2 or more)';
+  if(!(o.pc>0))return 'Enter the selling price per pc';
+  if(!(o.ctn>0))return 'Enter the selling price per carton';
+  if(o.dzn<0)return 'Price per dozen cannot be negative';
+  const cpc=o.cartonCost/o.perCarton,dzn=o.perCarton===12?0:(o.dzn||0);
+  if(o.pc<cpc-1e-9)return `Price per pc is below the cost of one pc (${fUSD(cpc)})`;
+  if(dzn>0&&dzn<cpc*12-1e-9)return `Price per dozen is below the cost of 12 pcs (${fUSD(cpc*12)})`;
+  if(o.ctn<o.cartonCost)return 'Price per carton cannot be below the carton cost';
+  return{stockUnit:'pcs',costUSD:cpc,priceUSD:o.pc,units:cartonUnits(o.pc,dzn,o.perCarton,o.ctn),
+    isBundle:false,piecesPerSet:0,pieceUSD:0,cartonCostUSD:o.cartonCost,perCarton:o.perCarton,dozenUSD:dzn,cartonUSD:o.ctn};
+}
+function newProduct(f,extra){
+  let k=300+db.products.length;while(db.products.some(x=>x.sku==='SK-'+k))k++;
+  const p=Object.assign({id:uid('P'),sku:extra.sku||('SK-'+k),name:extra.name,category:extra.category,whQty:extra.qty||0,reorder:extra.reorder||0,created:Date.now()},f);
+  db.products.push(p);db.shops.forEach(s=>{db.shopStock[s.id]=db.shopStock[s.id]||{};if(db.shopStock[s.id][p.id]===undefined)db.shopStock[s.id][p.id]=0});
+  return p;
+}
 function openItem(id){
   if(!need('admin'))return;
-  const p=id?prod(id):{name:'',category:CATS[0],stockUnit:'pcs',costUSD:'',priceUSD:'',reorder:20,whQty:0,isBundle:false,piecesPerSet:12,pieceUSD:'',units:[{u:'pcs',mult:1}]};
-  const extra=unitsOf(p).filter(u=>!u.piece&&u.mult>1);
+  const p=id?prod(id):{name:'',category:CATS[0],isBundle:false,cartonCostUSD:'',perCarton:'',priceUSD:'',dozenUSD:'',cartonUSD:'',costUSD:'',piecesPerSet:12,pieceUSD:'',reorder:20,whQty:0};
+  const v=x=>x===''||x==null||(x===0&&!id)?'':x, b=p.isBundle;
   modal(id?'Edit item and prices':'Add new item','box',`
-  <div class="field"><label>Item name</label><input id="in" class="input" value="${esc(p.name)}" maxlength="60" placeholder="e.g. Shea body lotion 400 ml"></div>
-  <div class="frow"><div class="field"><label>Category</label><select id="ic" class="input">${CATS.map(c=>`<option ${c===p.category?'selected':''}>${c}</option>`).join('')}</select></div>
-  <div class="field"><label>Stock is counted in</label><select id="iu" class="input">${['pcs','set','pack','box'].map(u=>`<option ${u===p.stockUnit?'selected':''}>${u}</option>`).join('')}</select></div></div>
-  <div class="frow"><div class="field"><label>Cost price (USD)</label><input id="icost" class="input" type="number" min="0" step="0.01" value="${p.costUSD}" oninput="itemPreview()"></div>
-  <div class="field"><label>Selling price for one ${esc(p.stockUnit||'pcs')} (USD)</label><input id="isell" class="input" type="number" min="0" step="0.01" value="${p.priceUSD}" oninput="itemPreview()"></div></div>
+  <div class="frow"><div class="field"><label>Item name</label><input id="in" class="input" value="${esc(p.name)}" maxlength="60" placeholder="e.g. Shea body lotion 400 ml"></div>
+  <div class="field"><label>Category</label><input id="ic" class="input" list="catlist" value="${esc(p.category)}" maxlength="30"><datalist id="catlist">${cats().map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div></div>
+  <label class="switch"><input type="checkbox" id="ibundle" ${b?'checked':''} onchange="itemMode()"><span>This is a mixed set sold together, for example assorted brushes or clips</span></label>
+  <div id="cwrap" style="display:${b?'none':''}">
+   <div class="frow"><div class="field"><label>Cost of one carton (USD)</label><input id="icc" class="input" type="number" min="0" step="0.01" value="${v(p.cartonCostUSD)}" oninput="itemPreview()"></div>
+   <div class="field"><label>Pcs in one carton</label><input id="ipc" class="input" type="number" min="2" step="1" value="${v(p.perCarton)}" oninput="itemPreview()"></div></div>
+   <div class="frow three"><div class="field"><label>Selling price per pc (USD)</label><input id="isell" class="input" type="number" min="0" step="0.01" value="${b?'':v(p.priceUSD)}" oninput="itemPreview()"></div>
+   <div class="field"><label>Per dozen (USD)</label><input id="idz" class="input" type="number" min="0" step="0.01" value="${v(p.dozenUSD)||''}" placeholder="Optional" oninput="itemPreview()"></div>
+   <div class="field"><label>Per carton (USD)</label><input id="ictn" class="input" type="number" min="0" step="0.01" value="${v(p.cartonUSD)}" oninput="itemPreview()"></div></div>
+   <span class="hint" style="display:block;margin:-6px 0 12px">Leave the dozen price empty if the item is not sold by the dozen. Stock is counted in pcs.</span>
+  </div>
+  <div id="bwrap" style="display:${b?'':'none'}">
+   <div class="frow"><div class="field"><label>Cost of one set (USD)</label><input id="iscost" class="input" type="number" min="0" step="0.01" value="${b?p.costUSD:''}" oninput="itemPreview()"></div>
+   <div class="field"><label>Selling price for one set (USD)</label><input id="isset" class="input" type="number" min="0" step="0.01" value="${b?p.priceUSD:''}" oninput="itemPreview()"></div></div>
+   <div class="frow"><div class="field"><label>Pieces in one set</label><input id="ipcs" class="input" type="number" min="2" value="${p.piecesPerSet||12}" oninput="itemPreview()"></div>
+   <div class="field"><label>Last price for one piece (USD)</label><input id="ippu" class="input" type="number" min="0" step="0.01" value="${p.pieceUSD||''}" oninput="itemPreview()"></div></div>
+   <div class="note">${ic('gift')}<div>The shop can sell the whole set, or one piece at the last price you set here. Only you can change this price.</div></div></div>
   <div id="iprev" class="note">${ic('exchange')}<div>Enter prices to see the shop price in Francs.</div></div>
-  <div class="field"><label>Other selling units at the till</label>
-   <div class="frow"><input id="iu1" class="input" type="number" min="0" placeholder="Pieces in a dozen or carton, e.g. 12" value="${extra[0]?extra[0].mult:''}" oninput="itemPreview()"><input id="iu2" class="input" type="number" min="0" placeholder="A second bulk unit, e.g. 48" value="${extra[1]?extra[1].mult:''}" oninput="itemPreview()"></div>
-   <span class="hint">Leave empty if the item is only sold one by one. The till shows these as dzn, box or carton.</span></div>
-  <label class="switch"><input type="checkbox" id="ibundle" ${p.isBundle?'checked':''} onchange="$('#bwrap').style.display=this.checked?'':'none';itemPreview()"><span>This is a mixed set sold together, for example assorted brushes or clips</span></label>
-  <div id="bwrap" style="display:${p.isBundle?'':'none'}"><div class="frow"><div class="field"><label>Pieces in one set</label><input id="ipcs" class="input" type="number" min="2" value="${p.piecesPerSet||12}" oninput="itemPreview()"></div>
-  <div class="field"><label>Last price for one piece (USD)</label><input id="ippu" class="input" type="number" min="0" step="0.01" value="${p.pieceUSD||''}" oninput="itemPreview()"></div></div>
-  <div class="note">${ic('gift')}<div>The shop can sell the whole set, or one piece at the last price you set here. Only you can change this price.</div></div></div>
-  <div class="frow"><div class="field"><label>${id?'Quantity received now':'Opening quantity'}</label><input id="iq" class="input" type="number" min="0" step="1" value="0"><span class="hint">${id?`Currently ${p.whQty} in the store`:''}</span></div>
-  <div class="field"><label>Reorder when below</label><input id="ir" class="input" type="number" min="0" value="${p.reorder}"></div></div>
-  <div class="field"><label>Supplier (optional)</label><input id="isup" class="input" maxlength="60"></div>
+  <div class="frow"><div class="field" id="iqcf" style="display:${b?'none':''}"><label>${id?'Cartons received now':'Opening stock, cartons'}</label><input id="iqc" class="input" type="number" min="0" step="1" value="0"></div>
+  <div class="field"><label id="iql">${b?(id?'Sets received now':'Opening stock, sets'):(id?'Loose pcs received now':'Opening stock, loose pcs')}</label><input id="iq" class="input" type="number" min="0" step="1" value="0"><span class="hint">${id?`Currently ${p.whQty} ${esc(p.stockUnit)} in the store${ctnTxt(p,p.whQty)?`, ${ctnTxt(p,p.whQty)}`:''}`:''}</span></div></div>
+  <div class="frow"><div class="field"><label id="irl">Reorder when the store has less than (${b?'sets':'pcs'})</label><input id="ir" class="input" type="number" min="0" value="${p.reorder}"></div>
+  <div class="field"><label>Supplier (optional)</label><input id="isup" class="input" maxlength="60"></div></div>
   <div id="ierr" class="lerr"></div>`,
   `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveItem('${id||''}')">${ic('check')} Save item</button>`,true);
   itemPreview();
 }
+function itemMode(){
+  const b=$('#ibundle').checked,edit=/Edit/.test($('#modal header span').textContent);
+  $('#cwrap').style.display=b?'none':'';$('#bwrap').style.display=b?'':'none';$('#iqcf').style.display=b?'none':'';
+  $('#iql').textContent=b?(edit?'Sets received now':'Opening stock, sets'):(edit?'Loose pcs received now':'Opening stock, loose pcs');
+  $('#irl').textContent=`Reorder when the store has less than (${b?'sets':'pcs'})`;
+  itemPreview();
+}
+function itemForm(){
+  const n=id=>parseFloat($(id).value);
+  return{name:$('#in').value.trim(),category:$('#ic').value.trim(),isBundle:$('#ibundle').checked,
+    cartonCost:n('#icc'),perCarton:parseInt($('#ipc').value)||0,pc:n('#isell'),dzn:n('#idz')||0,ctn:n('#ictn'),
+    setCost:n('#iscost'),setPrice:n('#isset'),pcs:parseInt($('#ipcs').value)||0,piece:n('#ippu')};
+}
 function itemPreview(){
-  const c=parseFloat($('#icost').value),s=parseFloat($('#isell').value),el=$('#iprev');if(!el)return;
-  if(!(s>0)){el.className='note';el.innerHTML=ic('exchange')+'<div>Enter prices to see the shop price in Francs.</div>';return}
-  const m=c>=0?Math.round((s-c)/s*100):0, b=$('#ibundle').checked, pp=parseFloat($('#ippu').value), n=parseInt($('#ipcs').value)||0;
-  const u1=parseInt($('#iu1').value)||0,u2=parseInt($('#iu2').value)||0;
-  let extra='';
-  [u1,u2].filter(x=>x>1).forEach(x=>{extra+=` ${x} for ${fCDF(toCDF(s*x*0.96))}.`});
-  let bundle='';
-  if(b&&pp>0)bundle=` One piece at the last price: <b>${fCDF(toCDF(pp))}</b>${n?`, ${n} pieces per set worth ${fCDF(toCDF(pp*n))}`:''}.`;
-  el.className='note'+(c>s?' warn':'');
-  el.innerHTML=ic(c>s?'alert':'lock')+`<div>Shops will sell at <b>${fCDF(toCDF(s))}</b>, locked.${extra}${bundle} ${c>=0?`Margin ${m}%.`:''}${c>s?' Selling price is below cost.':''}</div>`;
+  const el=$('#iprev');if(!el)return;const o=itemForm();
+  const row=(u,price,cost)=>price>0?`<tr><td><b>${u}</b></td><td class="r"><b>${fCDF(toCDF(price))}</b></td><td class="r">${fUSD(price)}</td><td class="r">${cost>=0?fUSD(cost):'-'}</td><td class="r">${cost>=0?`<span class="chip ${price<cost?'bad':'ok'}">${Math.round((price-cost)/price*100)}%</span>`:''}</td></tr>`:'';
+  let rows='';
+  if(o.isBundle){rows=row('1 set',o.setPrice,o.setCost)+row('1 piece',o.piece,o.setCost>=0&&o.pcs>1?o.setCost/o.pcs:-1)}
+  else{const cpc=o.cartonCost>=0&&o.perCarton>1?o.cartonCost/o.perCarton:-1;
+    rows=row('1 pc',o.pc,cpc)+(o.perCarton!==12?row('1 dozen (12 pcs)',o.dzn,cpc>=0?cpc*12:-1):'')+row(`1 carton${o.perCarton>1?` (${o.perCarton} pcs)`:''}`,o.ctn,o.cartonCost>=0?o.cartonCost:-1)}
+  if(!rows){el.className='note';el.innerHTML=ic('exchange')+'<div>Enter prices to see the shop price in Francs.</div>';return}
+  const f=itemFields(o),bad=typeof f==='string'&&/below/.test(f);
+  el.className='note'+(bad?' warn':'');
+  el.innerHTML=ic(bad?'alert':'lock')+`<div style="flex:1;min-width:0"><div style="margin-bottom:6px">Shops sell at these prices, locked. 1 USD = ${fCDF(rate())}.${bad?` <b>${esc(f)}.</b>`:''}</div><div class="tw"><table class="t" style="font-size:13.5px"><thead><tr><th>Unit</th><th class="r">Shop price</th><th class="r">USD</th><th class="r">Cost</th><th class="r">Margin</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 function saveItem(id){
   if(!need('admin'))return;
-  const name=$('#in').value.trim(),cat=$('#ic').value,su=$('#iu').value,cost=parseFloat($('#icost').value),sell=parseFloat($('#isell').value),
-        qty=parseInt($('#iq').value)||0,reo=parseInt($('#ir').value)||0,sup=$('#isup').value.trim(),err=$('#ierr'),
-        isB=$('#ibundle').checked,pcs=parseInt($('#ipcs').value)||0,ppu=parseFloat($('#ippu').value),
-        u1=parseInt($('#iu1').value)||0,u2=parseInt($('#iu2').value)||0;
-  if(!name)return err.textContent='Enter the item name';
-  if(!(cost>=0)||!(sell>0))return err.textContent='Enter valid cost and selling prices';
-  if(sell<cost)return err.textContent='Selling price cannot be below cost price';
-  if(isB&&(!(pcs>1)||!(ppu>0)))return err.textContent='For a mixed set, enter the pieces per set and the last price for one piece';
-  if(qty<0)return err.textContent='Quantity cannot be negative';
-  const units=[{u:su,mult:1,priceUSD:sell}];
-  [u1,u2].filter(x=>x>1).forEach(x=>units.push({u:x===12?'dzn':(x>=48?'carton':'box'),mult:x,priceUSD:Math.round(sell*x*0.96*100)/100}));
-  if(isB)units.push({u:'piece',mult:0,piece:true,priceUSD:ppu});
+  const o=itemForm(),err=$('#ierr'),f=itemFields(o);
+  if(typeof f==='string')return err.textContent=f;
+  const qc=Math.max(0,parseInt($('#iqc').value)||0),ql=parseInt($('#iq').value)||0,reo=parseInt($('#ir').value)||0,sup=$('#isup').value.trim();
+  if(ql<0)return err.textContent='Quantity cannot be negative';
+  const qty=(f.isBundle?0:qc*f.perCarton)+ql;
   let p;
-  if(id){p=prod(id);const old=p.priceUSD,oldP=p.pieceUSD;
-    Object.assign(p,{name,category:cat,stockUnit:su,costUSD:cost,priceUSD:sell,reorder:reo,units,isBundle:isB,piecesPerSet:isB?pcs:0,pieceUSD:isB?ppu:0});
+  if(id){p=prod(id);const oldU=unitsOf(p).map(u=>unitLabel(u)+' '+fUSD(u.priceUSD)).join(', ');
+    Object.assign(p,f,{name:o.name,category:o.category,reorder:reo});
     p.whQty+=qty;
-    if(old!==sell)log(`Price changed: ${name} ${fUSD(old)} to ${fUSD(sell)}`);
-    if(isB&&oldP!==ppu)log(`Piece price for ${name} set to ${fUSD(ppu)}`);
-  }else{
-    p={id:'P'+(Date.now()%1e7),sku:'SK-'+String(300+db.products.length),name,category:cat,stockUnit:su,costUSD:cost,priceUSD:sell,units,whQty:qty,reorder:reo,isBundle:isB,piecesPerSet:isB?pcs:0,pieceUSD:isB?ppu:0,created:Date.now()};
-    db.products.push(p);db.shops.forEach(s=>{if(db.shopStock[s.id]&&db.shopStock[s.id][p.id]===undefined)db.shopStock[s.id][p.id]=0});
-  }
-  if(qty>0)db.purchases.unshift({t:Date.now(),pid:p.id,qty,costUSD:cost,supplier:sup,by:me.name});
-  commit('item',`${id?'Updated':'Added'} item ${name}${qty?`, received ${qty}`:''}`);
+    const newU=unitsOf(p).map(u=>unitLabel(u)+' '+fUSD(u.priceUSD)).join(', ');
+    if(oldU!==newU)log(`Prices changed for ${o.name}: ${oldU} to ${newU}`);
+  }else p=newProduct(f,{name:o.name,category:o.category,qty,reorder:reo});
+  if(qty>0)db.purchases.unshift({t:Date.now(),pid:p.id,qty,costUSD:p.costUSD,supplier:sup,by:me.name});
+  commit('item',`${id?'Updated':'Added'} item ${o.name}${qty?`, received ${qty} ${p.stockUnit}`:''}`);
   closeModal();render();toast(id?'Item saved':'Item added');
 }
 
+/* ---------- deliveries: the store sends stock straight to the shops ---------- */
+const dlvTotal=o=>sum(o.items,it=>toCDF(it.priceUSD??prod(it.pid).priceUSD)*it.qty);
 function ordersView(){
-  const os=[...db.orders].sort((a,b)=>(a.status==='pending'?0:1)-(b.status==='pending'?0:1)||b.t-a.t);
-  return head('Shop orders','Send stock to the shops. The selling price travels with the goods and shops cannot change it.')
-  +(os.length?os.map(o=>orderCard(o,true)).join(''):`<div class="card">${empty('truck','No orders from shops yet')}</div>`);
+  const q=dlvQ.trim().toLowerCase();
+  const os=[...db.orders].filter(o=>!q||(o.id+' '+shopOf(o.shopId).name).toLowerCase().includes(q)).sort((a,b)=>b.t-a.t);
+  return head('Deliveries to shops','Pick the outlets and the quantities, then send. Shop stock goes up at once and the selling price travels with the goods. A delivery can be corrected later.',
+    `<button class="btn ghost" onclick="go('shopstock')">${ic('store')} Shop stock</button><button class="btn primary" onclick="openDelivery()">${ic('truck')} New delivery</button>`)
+  +`<div class="toolbar"><div class="search">${ic('search')}<input placeholder="Delivery number or shop" value="${esc(dlvQ)}" oninput="dlvQ=this.value;$('#dlvList').innerHTML=ordersList()"></div><span class="chip">${db.orders.length} deliveries</span></div><div id="dlvList">${ordersList(os)}</div>`;
+}
+function ordersList(os){
+  if(!os){const q=dlvQ.trim().toLowerCase();os=[...db.orders].filter(o=>!q||(o.id+' '+shopOf(o.shopId).name).toLowerCase().includes(q)).sort((a,b)=>b.t-a.t)}
+  return os.length?os.map(o=>orderCard(o,true)).join(''):`<div class="card">${empty('truck','No deliveries yet')}</div>`;
+}
+function deliveriesView(){
+  const mine=db.orders.filter(o=>o.shopId===me.shopId).sort((a,b)=>b.t-a.t);
+  return head('Deliveries received','Stock sent to this shop by the central store. It is added to the shop stock as soon as the store sends it.')
+  +(mine.length?mine.map(o=>orderCard(o,false)).join(''):`<div class="card">${empty('truck','No deliveries received yet')}</div>`);
 }
 function orderCard(o,store){
-  const shop=shopOf(o.shopId),pend=o.status==='pending',showUSD=store&&seesCost();
-  const chip=o.status==='pending'?'<span class="chip warn">Waiting</span>':o.status==='dispatched'?'<span class="chip ok">Dispatched</span>':'<span class="chip bad">Rejected</span>';
-  const rows=o.items.map(it=>{const p=prod(it.pid);const price=it.priceUSD??p.priceUSD;const short=store&&pend&&p.whQty<it.qty;
-    return `<tr><td><b>${esc(p.name)}</b><div class="code">${p.sku}</div></td><td class="r"><b>${it.qty}</b> ${esc(p.stockUnit)}</td>${store&&pend?`<td class="r"><span class="chip ${short?'bad':'ok'}">${p.whQty}</span></td>`:''}<td>${showUSD?dual(price):`<b>${fCDF(toCDF(price))}</b>`}</td><td>${showUSD?dual(price*it.qty):`<b>${fCDF(toCDF(price)*it.qty)}</b>`}</td></tr>`}).join('');
+  const shop=shopOf(o.shopId),showUSD=store&&seesCost(),edited=o.edits&&o.edits.length;
+  const rows=o.items.map(it=>{const p=prod(it.pid);const price=it.priceUSD??p.priceUSD;
+    return `<tr><td><b>${esc(p.name)}</b><div class="code">${p.sku}</div></td><td class="r"><b>${it.qty}</b> ${esc(p.stockUnit)}${ctnTxt(p,it.qty)?`<div class="code">${ctnTxt(p,it.qty)}</div>`:''}</td><td>${showUSD?dual(price):`<b>${fCDF(toCDF(price))}</b>`}</td><td>${showUSD?dual(price*it.qty):`<b>${fCDF(toCDF(price)*it.qty)}</b>`}</td></tr>`}).join('');
   const total=sum(o.items,it=>(it.priceUSD??prod(it.pid).priceUSD)*it.qty);
-  return `<div class="card p0"><div style="padding:14px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)"><b style="font-size:17px">${o.id}</b>${chip}<span style="color:var(--muted)">${esc(shop.name)}, requested by ${esc(o.by)} on ${dt(o.t)}</span><span class="sp"></span>
-  ${store&&pend?`<button class="btn sm" onclick="rejectOrder('${o.id}')">${ic('x')} Reject</button><button class="btn primary sm" onclick="dispatchOrder('${o.id}')">${ic('truck')} Dispatch</button>`:''}
-  ${o.status==='dispatched'?`<button class="btn ghost sm" onclick="deliveryNote('${o.id}')">${ic('doc')} Delivery note</button>`:''}</div>
-  <div class="tw"><table class="t"><thead><tr><th>Item</th><th class="r">Qty</th>${store&&pend?'<th class="r">Store has</th>':''}<th>Unit price</th><th>Line value</th></tr></thead><tbody>${rows}</tbody></table></div>
-  <div style="padding:12px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px;align-items:center"><span style="color:var(--muted);font-weight:700">Order value at selling price</span>${showUSD?dual(total):`<b style="font-size:18px">${fCDF(toCDF(total))}</b>`}</div></div>`;
+  return `<div class="card p0"><div style="padding:14px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)"><b style="font-size:17px">${o.id}</b><span class="chip ok">${ic('truck')} Delivered</span>${edited?`<span class="chip warn" title="${esc(o.edits[o.edits.length-1].reason)}">Edited</span>`:''}<span style="color:var(--muted)">${esc(shop.name)}, sent by ${esc(o.by)} on ${dt(o.t)}</span><span class="sp"></span>
+  ${store&&(me.role==='admin'||me.role==='whop')?`<button class="btn sm" onclick="openDelivery('${o.id}')">${ic('edit')} Edit</button>`:''}
+  <button class="btn ghost sm" onclick="deliveryNote('${o.id}')">${ic('doc')} Delivery note</button></div>
+  ${edited?`<div class="note warn" style="margin:12px 16px 0">${ic('edit')}<div>Changed by ${esc(o.edits[o.edits.length-1].by)} on ${dt(o.edits[o.edits.length-1].t)}: ${esc(o.edits[o.edits.length-1].reason)}</div></div>`:''}
+  <div class="tw"><table class="t"><thead><tr><th>Item</th><th class="r">Qty</th><th>Unit price</th><th>Line value</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div style="padding:12px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px;align-items:center"><span style="color:var(--muted);font-weight:700">Value at selling price</span>${showUSD?dual(total):`<b style="font-size:18px">${fCDF(dlvTotal(o))}</b>`}</div></div>`;
 }
-function dispatchOrder(id){
+/* delivery form state */
+let dlv=null;
+function openDelivery(id,pid,sid){
   if(!need('admin','whop'))return;
-  const o=db.orders.find(x=>x.id===id);if(!o||o.status!=='pending')return;
-  const short=o.items.filter(it=>prod(it.pid).whQty<it.qty);
-  if(short.length){toast(`Not enough in the store: ${short.map(it=>prod(it.pid).name).join(', ')}`,'bad');return}
-  o.items.forEach(it=>{const p=prod(it.pid);p.whQty-=it.qty;it.priceUSD=p.priceUSD;db.shopStock[o.shopId][it.pid]=(db.shopStock[o.shopId][it.pid]||0)+it.qty});
-  Object.assign(o,{status:'dispatched',doneAt:Date.now(),doneBy:me.name,rate:rate()});
-  commit('dispatch',`Dispatched ${o.id} to ${shopOf(o.shopId).name}`);render();deliveryNote(id);toast('Order dispatched. Shop stock updated.');
+  const o=id?db.orders.find(x=>x.id===id):null;
+  dlv={id:o?o.id:null,shops:o?[o.shopId]:(sid?[sid]:[]),lines:{},q:''};
+  if(o)o.items.forEach(it=>{const p=prod(it.pid),per=p&&!p.isBundle&&p.perCarton>1?p.perCarton:0;dlv.lines[it.pid]=per&&it.qty%per===0?{n:it.qty/per,u:'ctn'}:{n:it.qty,u:'pcs'}});
+  if(pid){const p=prod(pid);if(p){dlv.q=p.name;if(!dlv.lines[pid])dlv.lines[pid]={n:'',u:!p.isBundle&&p.perCarton>1?'ctn':'pcs'}}}
+  modal(o?'Edit delivery '+o.id:'New delivery to shops','truck',`
+  <div class="field"><label>${o?'Deliver to (one outlet)':'Send to these outlets'}</label><div style="display:flex;gap:8px;flex-wrap:wrap" id="dshops">${dlvShops()}</div>
+  ${o?'':'<span class="hint">Tick one or more outlets. Each ticked outlet gets the same quantities and its own delivery note.</span>'}</div>
+  <div class="search" style="max-width:none;margin-bottom:10px">${ic('search')}<input id="dq" placeholder="Find an item by name, code or category" value="${esc(dlv.q)}" oninput="dlv.q=this.value;dlvDraw()"></div>
+  <div class="tw" id="dtable" style="max-height:48vh;overflow:auto;border:1px solid var(--line);border-radius:12px"></div>
+  <div id="dsum" class="note" style="margin-top:12px"></div>
+  ${o?`<div class="field"><label>Reason for the change</label><input id="dreason" class="input" maxlength="80" placeholder="e.g. Wrong quantity counted at loading"></div>`:''}
+  <div id="derr" class="lerr"></div>`,
+  `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveDelivery()">${ic('check')} ${o?'Save changes':'Send stock'}</button>`,true);
+  dlvDraw();
 }
-function rejectOrder(id){if(!need('admin','whop'))return;const o=db.orders.find(x=>x.id===id);if(!o)return;Object.assign(o,{status:'rejected',doneAt:Date.now(),doneBy:me.name});commit('reject',`Rejected ${o.id}`);render();toast('Order rejected','warn')}
+function dlvShops(){return db.shops.map(s=>`<label class="chip" style="cursor:pointer;padding:8px 12px;font-size:14px;${dlv.shops.includes(s.id)?'background:var(--btn);color:#fff':''}"><input type="${dlv.id?'radio':'checkbox'}" name="dshop" style="accent-color:#fff" ${dlv.shops.includes(s.id)?'checked':''} onchange="dlvShop('${s.id}',this.checked)"> ${esc(s.name)}</label>`).join('')}
+function dlvShop(sid,on){
+  if(dlv.id)dlv.shops=[sid];else dlv.shops=on?[...new Set([...dlv.shops,sid])]:dlv.shops.filter(x=>x!==sid);
+  $('#dshops').innerHTML=dlvShops();dlvDraw();
+}
+const dlvPer=p=>!p.isBundle&&p.perCarton>1?p.perCarton:0;
+function dlvPcs(pid){const l=dlv.lines[pid],p=prod(pid);if(!l||!p)return 0;const n=Math.max(0,parseInt(l.n)||0);return l.u==='ctn'?n*dlvPer(p):n}
+function dlvOld(pid){const o=dlv.id&&db.orders.find(x=>x.id===dlv.id);return o?sum(o.items.filter(i=>i.pid===pid),i=>i.qty):0}
+function dlvDraw(){
+  const el=$('#dtable');if(!el)return;const q=dlv.q.trim().toLowerCase(),shops=dlv.shops.map(shopOf);
+  const list=db.products.filter(p=>dlvPcs(p.id)>0||!q||(p.name+' '+p.sku+' '+p.category).toLowerCase().includes(q))
+    .sort((a,b)=>(dlvPcs(b.id)>0)-(dlvPcs(a.id)>0));
+  el.innerHTML=list.length?`<table class="t"><thead><tr><th>Item</th><th class="r">Store has</th>${shops.map(s=>`<th class="r">${esc(s.code)} has</th>`).join('')}<th style="width:200px">Send</th></tr></thead><tbody>${list.slice(0,120).map(p=>{
+    const l=dlv.lines[p.id]||{n:'',u:dlvPer(p)?'ctn':'pcs'},per=dlvPer(p);
+    return `<tr><td><b>${esc(p.name)}</b><div class="code">${p.sku}${per?` · ${per} pcs per carton`:''}</div></td>
+    <td class="r">${qtyCell(p,p.whQty+dlvOld(p.id),p.whQty+dlvOld(p.id)<=0?'bad':'')}</td>
+    ${shops.map(s=>{const v=(db.shopStock[s.id]||{})[p.id]||0;return `<td class="r">${qtyCell(p,v,v<=0?'bad':v<=5?'warn':'ok')}</td>`}).join('')}
+    <td><div style="display:flex;gap:6px"><input class="input" type="number" min="0" inputmode="numeric" placeholder="0" value="${esc(l.n)}" style="min-height:42px;width:84px" oninput="dlvSet('${p.id}',this.value,null)">
+    ${per?`<select class="input" style="min-height:42px;width:auto;padding:0 8px" onchange="dlvSet('${p.id}',null,this.value)"><option value="ctn" ${l.u==='ctn'?'selected':''}>ctn</option><option value="pcs" ${l.u==='pcs'?'selected':''}>pcs</option></select>`:`<span class="code" style="align-self:center">${esc(p.stockUnit)}</span>`}</div></td></tr>`}).join('')}</tbody></table>`:empty('search','No items match');
+  dlvSum();
+}
+function dlvSet(pid,n,u){const p=prod(pid);const l=dlv.lines[pid]||(dlv.lines[pid]={n:'',u:dlvPer(p)?'ctn':'pcs'});if(n!==null)l.n=n;if(u!==null)l.u=u;dlvSum()}
+function dlvCollect(){return db.products.map(p=>({pid:p.id,qty:dlvPcs(p.id)})).filter(x=>x.qty>0)}
+function dlvShort(lines){const k=Math.max(1,dlv.shops.length);return lines.filter(l=>{const p=prod(l.pid);return p.whQty+dlvOld(l.pid)<l.qty*k})}
+function dlvSum(){
+  const el=$('#dsum');if(!el)return;const lines=dlvCollect(),k=dlv.shops.length,short=dlvShort(lines);
+  el.className='note'+(short.length||!k?' warn':'');
+  el.innerHTML=ic(short.length?'alert':'truck')+`<div>${lines.length} item${lines.length===1?'':'s'}, ${sum(lines,l=>l.qty)} units to ${k?(k===1?'each outlet':`each of ${k} outlets`):'<b>no outlet yet</b>'}${k>1?`, ${sum(lines,l=>l.qty)*k} units in all`:''}.${short.length?` <b>Not enough in the store:</b> ${short.map(l=>esc(prod(l.pid).name)).join(', ')}.`:''}</div>`;
+}
+function saveDelivery(){
+  if(!need('admin','whop'))return;const err=$('#derr'),lines=dlvCollect();
+  if(!dlv.shops.length)return err.textContent='Pick at least one outlet';
+  if(!lines.length)return err.textContent='Enter a quantity for at least one item';
+  const short=dlvShort(lines);if(short.length)return err.textContent='Not enough in the store: '+short.map(l=>prod(l.pid).name).join(', ');
+  if(dlv.id){
+    const o=db.orders.find(x=>x.id===dlv.id),reason=$('#dreason').value.trim();if(!o)return;
+    if(reason.length<4)return err.textContent='Write a short reason for the change';
+    const oldShop=o.shopId,oldQty=sum(o.items,i=>i.qty),price={};o.items.forEach(it=>price[it.pid]=it.priceUSD);
+    o.items.forEach(it=>{const p=prod(it.pid);if(p)p.whQty+=it.qty;const st=db.shopStock[oldShop]||(db.shopStock[oldShop]={});st[it.pid]=(st[it.pid]||0)-it.qty});
+    const sid=dlv.shops[0],st=db.shopStock[sid]||(db.shopStock[sid]={});
+    o.items=lines.map(l=>{const p=prod(l.pid);p.whQty-=l.qty;st[l.pid]=(st[l.pid]||0)+l.qty;return{pid:l.pid,qty:l.qty,priceUSD:price[l.pid]??p.priceUSD}});
+    o.shopId=sid;o.edits=o.edits||[];o.edits.push({t:Date.now(),by:me.name,reason,fromShop:oldShop,fromQty:oldQty});
+    const neg=db.products.filter(p=>((db.shopStock[oldShop]||{})[p.id]||0)<0&&price[p.id]!==undefined);
+    commit('delivery',`Delivery ${o.id} edited by ${me.name}${oldShop!==sid?`, moved from ${shopOf(oldShop).name} to ${shopOf(sid).name}`:''}: ${oldQty} to ${sum(o.items,i=>i.qty)} units, ${reason}`);
+    closeModal();render();toast(neg.length?`Delivery updated. ${shopOf(oldShop).name} is now short on ${neg.length} item${neg.length>1?'s':''}.`:'Delivery updated. Stock corrected.',neg.length?'warn':'ok');
+    return;
+  }
+  const made=dlv.shops.map(sid=>{
+    db.seq.order++;const st=db.shopStock[sid]||(db.shopStock[sid]={});
+    const o={id:'DEL-'+String(db.seq.order).padStart(4,'0'),shopId:sid,status:'dispatched',t:Date.now(),by:me.name,doneAt:Date.now(),doneBy:me.name,rate:rate(),edits:[],
+      items:lines.map(l=>{const p=prod(l.pid);p.whQty-=l.qty;st[l.pid]=(st[l.pid]||0)+l.qty;return{pid:l.pid,qty:l.qty,priceUSD:p.priceUSD}})};
+    db.orders.push(o);return o;
+  });
+  commit('delivery',`Sent ${made.map(o=>`${o.id} to ${shopOf(o.shopId).name}`).join(', ')}`);
+  closeModal();view='orders';render();
+  if(made.length===1)deliveryNote(made[0].id);
+  toast(made.length===1?`${made[0].id} sent. Shop stock updated.`:`${made.length} deliveries sent: ${made.map(o=>o.id).join(', ')}`);
+}
 function deliveryNote(id){
-  const o=db.orders.find(x=>x.id===id),shop=shopOf(o.shopId),c=db.settings.company,r=o.rate||rate(),showUSD=seesCost();
-  const total=sum(o.items,it=>(it.priceUSD??prod(it.pid).priceUSD)*it.qty);
-  const html=`<div class="doc" id="dn"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2>${esc(c.name)}</h2><div>Central store, ${esc(c.address)}</div><div>RCCM ${esc(c.rccm)}, NIF ${esc(c.nif)}</div></div><div style="text-align:right"><h2>Delivery note</h2><div><b>DN-${o.id.slice(4)}</b></div><div>${dt(o.doneAt)}</div></div></div>
+  const o=db.orders.find(x=>x.id===id),shop=shopOf(o.shopId),c=db.settings.company,r=o.rate||rate(),showUSD=seesCost(),edited=o.edits&&o.edits.length;
+  const cdfOf=u=>Math.round(u*r/10)*10;
+  const total=sum(o.items,it=>(it.priceUSD??prod(it.pid).priceUSD)*it.qty),totalCDF=sum(o.items,it=>cdfOf(it.priceUSD??prod(it.pid).priceUSD)*it.qty);
+  const html=`<div class="doc" id="dn"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2>${esc(c.name)}</h2><div>Central store, ${esc(c.address)}</div><div>RCCM ${esc(c.rccm)}, NIF ${esc(c.nif)}</div></div><div style="text-align:right"><h2>Delivery note${edited?' (REVISED)':''}</h2><div><b>DN-${o.id.slice(4)}</b></div><div>${dt(o.doneAt||o.t)}</div></div></div>
   <hr style="border:0;border-top:1px solid #ccc;margin:14px 0"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><div><b>Deliver to:</b> ${esc(shop.name)}, ${esc(shop.address)}</div><div><b>Rate:</b> 1 USD = ${fCDF(r)}</div></div>
-  <div class="tw" style="margin-top:12px"><table class="t"><thead><tr><th>Item</th><th>Code</th><th class="r">Qty</th>${showUSD?'<th class="r">Price USD</th>':''}<th class="r">Price FC</th>${showUSD?'<th class="r">Total USD</th>':''}<th class="r">Total FC</th></tr></thead><tbody>${o.items.map(it=>{const p=prod(it.pid);const u=it.priceUSD??p.priceUSD;const cdf=Math.round(u*r/10)*10;return `<tr><td>${esc(p.name)}</td><td>${p.sku}</td><td class="r">${it.qty} ${esc(p.stockUnit)}</td>${showUSD?`<td class="r">${fUSD(u)}</td>`:''}<td class="r">${fCDF(cdf)}</td>${showUSD?`<td class="r">${fUSD(u*it.qty)}</td>`:''}<td class="r">${fCDF(cdf*it.qty)}</td></tr>`}).join('')}
-  <tr><td colspan="${showUSD?5:4}"><b>Total</b></td>${showUSD?`<td class="r"><b>${fUSD(total)}</b></td>`:''}<td class="r"><b>${fCDF(total*r)}</b></td></tr></tbody></table></div>
+  ${edited?`<p style="margin:8px 0 0;color:#000">Revised ${dt(o.edits[o.edits.length-1].t)} by ${esc(o.edits[o.edits.length-1].by)}: ${esc(o.edits[o.edits.length-1].reason)}</p>`:''}
+  <div class="tw" style="margin-top:12px"><table class="t"><thead><tr><th>Item</th><th>Code</th><th class="r">Qty</th>${showUSD?'<th class="r">Price USD</th>':''}<th class="r">Price FC</th>${showUSD?'<th class="r">Total USD</th>':''}<th class="r">Total FC</th></tr></thead><tbody>${o.items.map(it=>{const p=prod(it.pid);const u=it.priceUSD??p.priceUSD;const cdf=cdfOf(u);return `<tr><td>${esc(p.name)}</td><td>${p.sku}</td><td class="r">${it.qty} ${esc(p.stockUnit)}${ctnTxt(p,it.qty)?`<br><small>${ctnTxt(p,it.qty)}</small>`:''}</td>${showUSD?`<td class="r">${fUSD(u)}</td>`:''}<td class="r">${fCDF(cdf)}</td>${showUSD?`<td class="r">${fUSD(u*it.qty)}</td>`:''}<td class="r">${fCDF(cdf*it.qty)}</td></tr>`}).join('')}
+  <tr><td colspan="${showUSD?5:4}"><b>Total</b></td>${showUSD?`<td class="r"><b>${fUSD(total)}</b></td>`:''}<td class="r"><b>${fCDF(totalCDF)}</b></td></tr></tbody></table></div>
   <p style="margin:12px 0 0;color:#000"><b>Selling prices are fixed by the Admin and cannot be changed at the shop.</b></p>
-  <div style="display:flex;justify-content:space-between;margin-top:26px;gap:20px"><div>Dispatched by: ${esc(o.doneBy)}<br><br>Signature ____________</div><div>Received by (shop):<br><br>Signature ____________</div></div></div>`;
+  <div style="display:flex;justify-content:space-between;margin-top:26px;gap:20px"><div>Sent by: ${esc(o.by)}<br><br>Signature ____________</div><div>Received by (shop):<br><br>Signature ____________</div></div></div>`;
   modal('Delivery note','doc',html,`<button class="btn" onclick="closeModal()">Close</button><button class="btn primary" onclick="printHTML($('#dn').outerHTML)">${ic('printer')} Print or save as PDF</button>`,true);
+}
+/* the store sees every shop's stock */
+function shopstockView(){
+  return head('Shop stock','What each outlet has right now, next to the central store. Send stock straight from here.',`<button class="btn primary" onclick="openDelivery()">${ic('truck')} New delivery</button>`)
+  +`<div class="toolbar"><div class="search">${ic('search')}<input placeholder="Search by name, code or category" value="${esc(ssQ)}" oninput="ssQ=this.value;$('#ssTable').innerHTML=ssTable()"></div>
+  <select class="input" style="width:auto" onchange="ssShop=this.value;$('#ssTable').innerHTML=ssTable()"><option value="all">All outlets</option>${db.shops.map(s=>`<option value="${s.id}" ${ssShop===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+  <span class="chip warn">5 or fewer</span><span class="chip bad">None or sold on order</span></div>
+  <div class="card p0"><div class="tw" id="ssTable">${ssTable()}</div></div>`;
+}
+function ssTable(){
+  const q=ssQ.trim().toLowerCase(),shops=ssShop==='all'?db.shops:db.shops.filter(s=>s.id===ssShop);
+  const list=db.products.filter(p=>!q||(p.name+' '+p.sku+' '+p.category).toLowerCase().includes(q));
+  if(!list.length)return empty('search','No items match your search');
+  return `<table class="t"><thead><tr><th>Item</th><th class="r">Central store</th>${shops.map(s=>`<th class="r">${esc(s.name)}</th>`).join('')}<th></th></tr></thead><tbody>${list.map(p=>`<tr><td><b>${esc(p.name)}</b><div class="code">${p.sku} · ${esc(p.category)}</div></td>
+  <td class="r">${qtyCell(p,p.whQty,p.whQty<=p.reorder?'bad':'')}</td>
+  ${shops.map(s=>{const v=(db.shopStock[s.id]||{})[p.id];return `<td class="r">${v===undefined?'<span class="code">Not stocked</span>':qtyCell(p,v,v<=0?'bad':v<=5?'warn':'ok')}</td>`}).join('')}
+  <td><div class="act"><button title="Send to shops" onclick="openDelivery('','${p.id}'${ssShop!=='all'?`,'${ssShop}'`:''})">${ic('truck')}</button></div></td></tr>`).join('')}</tbody></table>`;
+}
+function shopLows(){const out=[];db.shops.forEach(s=>{const st=db.shopStock[s.id]||{};db.products.forEach(p=>{if(st[p.id]!==undefined&&st[p.id]<=5)out.push({p,s,q:st[p.id]})})});return out.sort((a,b)=>a.q-b.q)}
+
+/* =========================================================
+   BULK IMPORT from Excel (.xlsx) or CSV, no outside library
+   ========================================================= */
+const IMPCOLS=['Name','Category','Carton cost USD','Pcs per carton','Price per pc USD','Price per dozen USD','Price per carton USD','Opening cartons','Opening pcs','Reorder at (pcs)','SKU'];
+const IMPKEYS={name:['name','item','itemname','nom','article','designation','produit'],category:['category','categorie','cat'],
+  cartonCost:['cartoncost','costcarton','costofcarton','costofonecarton','coutcarton','prixachatcarton'],perCarton:['pcspercarton','piecespercarton','percarton','pcscarton','qtypercarton','pcsparcarton','piecesparcarton'],
+  pc:['priceperpc','pricepc','pcprice','priceperpiece','prixpiece','prixparpiece'],dzn:['priceperdozen','pricedozen','dozenprice','prixdouzaine','prixpardouzaine'],
+  ctn:['pricepercarton','pricecarton','cartonprice','prixcarton','prixparcarton'],openCtn:['openingcartons','cartons','stockcartons','openingstockcartons'],
+  openPcs:['openingpcs','loosepcs','stockpcs','openingstockpcs','openingloosepcs'],reorder:['reorderat','reorder','reorderlevel','reorderatpcs','reorderwhenbelow'],sku:['sku','code','itemcode','ref','reference']};
+const hkey=h=>String(h??'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'').replace(/usd$/,'').replace(/fc$/,'');
+function inum(v){if(typeof v==='number')return v;let t=String(v??'').replace(/[\s$ ]/g,'');if(!t)return NaN;if(t.includes(',')&&!t.includes('.'))t=t.replace(',','.');else t=t.replace(/,/g,'');return Number(t)}
+function openImport(){
+  if(!need('admin'))return;impRows=[];
+  modal('Import items from Excel','download',`
+  <div class="note">${ic('doc')}<div>One row per new item. Prices are in USD, like the item form. Stock is counted in pcs. Leave <b>Price per dozen</b> empty when an item is not sold by the dozen. Items whose name or code already exists are skipped, so nothing is overwritten.</div></div>
+  <div class="tw" style="margin-bottom:12px"><table class="t nw" style="font-size:13px"><thead><tr>${IMPCOLS.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody><tr><td>Aloe vera gel 300 ml</td><td>Skin care</td><td>60</td><td>24</td><td>4</td><td>45</td><td>90</td><td>5</td><td>0</td><td>24</td><td></td></tr></tbody></table></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px"><button class="btn ghost" onclick="impTemplate()">${ic('download')} Download Excel template</button>
+  <label class="btn primary" style="cursor:pointer">${ic('plus')} Choose Excel file<input type="file" accept=".xlsx,.csv,.txt" style="display:none" onchange="impFile(this.files[0])"></label><span class="hint" id="impName">.xlsx or .csv</span></div>
+  <div id="impPrev"></div><div id="imperr" class="lerr"></div>`,
+  `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="impBtn" onclick="doImport()" disabled>${ic('check')} Import items</button>`,true);
+}
+function saveBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000)}
+/* tiny ZIP writer (stored, no compression) for the .xlsx template */
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(u){let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=CRC[(c^u[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+function zipStore(files){
+  const enc=new TextEncoder(),parts=[],cd=[];let off=0;
+  files.forEach(f=>{const name=enc.encode(f.name),data=enc.encode(f.data),crc=crc32(data);
+    const h=new DataView(new ArrayBuffer(30));[[0,0x04034b50,4],[4,20,2],[6,0x0800,2],[8,0,2],[10,0,2],[12,33,2],[14,crc,4],[18,data.length,4],[22,data.length,4],[26,name.length,2],[28,0,2]].forEach(([o,v,s])=>s===4?h.setUint32(o,v,true):h.setUint16(o,v,true));
+    const c=new DataView(new ArrayBuffer(46));[[0,0x02014b50,4],[4,20,2],[6,20,2],[8,0x0800,2],[10,0,2],[12,0,2],[14,33,2],[16,crc,4],[20,data.length,4],[24,data.length,4],[28,name.length,2],[30,0,2],[32,0,2],[34,0,2],[36,0,2],[38,0,4],[42,off,4]].forEach(([o,v,s])=>s===4?c.setUint32(o,v,true):c.setUint16(o,v,true));
+    parts.push(h,name,data);cd.push(c,name);off+=30+name.length+data.length});
+  const cdSize=sum(cd,x=>x.byteLength),e=new DataView(new ArrayBuffer(22));
+  [[0,0x06054b50,4],[4,0,2],[6,0,2],[8,files.length,2],[10,files.length,2],[12,cdSize,4],[16,off,4],[20,0,2]].forEach(([o,v,s])=>s===4?e.setUint32(o,v,true):e.setUint16(o,v,true));
+  return new Blob([...parts,...cd,e],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+function impTemplate(){
+  const X=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const col=i=>String.fromCharCode(65+i);
+  const rows=[IMPCOLS,['Aloe vera gel 300 ml','Skin care',60,24,4,45,90,5,0,24,''],['Argan oil shampoo 500 ml','Hair care',72,12,9,'',100,2,6,12,''],['Rose body mist 100 ml','Fragrance',84,36,3.5,38,120,3,0,36,'']];
+  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols>${IMPCOLS.map((c,i)=>`<col min="${i+1}" max="${i+1}" width="${i===0?34:i===1?16:19}" customWidth="1"/>`).join('')}</cols><sheetData>${rows.map((r,ri)=>`<row r="${ri+1}">${r.map((v,ci)=>v===''?'':typeof v==='number'?`<c r="${col(ci)}${ri+1}"><v>${v}</v></c>`:`<c r="${col(ci)}${ri+1}" t="inlineStr"><is><t>${X(v)}</t></is></c>`).join('')}</row>`).join('')}</sheetData></worksheet>`;
+  saveBlob(zipStore([
+    {name:'[Content_Types].xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'},
+    {name:'_rels/.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+    {name:'xl/workbook.xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Items" sheetId="1" r:id="rId1"/></sheets></workbook>'},
+    {name:'xl/_rels/workbook.xml.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'},
+    {name:'xl/worksheets/sheet1.xml',data:sheet}]),'SIM-items-template.xlsx');
+}
+/* tiny ZIP + XML reader for .xlsx, using the browser's own inflate */
+async function readXlsx(buf){
+  const u8=new Uint8Array(buf),dv=new DataView(buf),dec=new TextDecoder();
+  let e=-1;for(let i=u8.length-22;i>=Math.max(0,u8.length-66000);i--)if(dv.getUint32(i,true)===0x06054b50){e=i;break}
+  if(e<0)throw new Error('This file is not a valid .xlsx workbook');
+  const n=dv.getUint16(e+10,true),ent={};let p=dv.getUint32(e+16,true);
+  for(let k=0;k<n;k++){if(dv.getUint32(p,true)!==0x02014b50)break;
+    const nl=dv.getUint16(p+28,true),el=dv.getUint16(p+30,true),cl=dv.getUint16(p+32,true);
+    ent[dec.decode(u8.subarray(p+46,p+46+nl))]={m:dv.getUint16(p+10,true),cs:dv.getUint32(p+20,true),lo:dv.getUint32(p+42,true)};p+=46+nl+el+cl}
+  const file=async name=>{const f=ent[name];if(!f)return null;const lo=f.lo,st=lo+30+dv.getUint16(lo+26,true)+dv.getUint16(lo+28,true),d=u8.slice(st,st+f.cs);
+    if(f.m===0)return dec.decode(d);
+    if(f.m!==8)throw new Error('Unsupported compression in this workbook');
+    if(typeof DecompressionStream==='undefined')throw new Error('This browser cannot open .xlsx files. Save the sheet as .csv and import that.');
+    return await new Response(new Blob([d]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text()};
+  const xml=t=>new DOMParser().parseFromString(t,'application/xml'),tags=(d,t)=>[...d.getElementsByTagNameNS('*',t)];
+  const wb=await file('xl/workbook.xml');if(!wb)throw new Error('This file is not a valid .xlsx workbook');
+  const sh=tags(xml(wb),'sheet')[0],rid=sh&&(sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id')||sh.getAttribute('r:id'));
+  let target='worksheets/sheet1.xml';const rels=await file('xl/_rels/workbook.xml.rels');
+  if(rels&&rid){const r=tags(xml(rels),'Relationship').find(x=>x.getAttribute('Id')===rid);if(r)target=r.getAttribute('Target')}
+  const path=target.startsWith('/')?target.slice(1):'xl/'+target.replace(/^\.\//,'');
+  const ss=[],sst=await file('xl/sharedStrings.xml');
+  if(sst)tags(xml(sst),'si').forEach(si=>ss.push(tags(si,'t').filter(t=>t.parentNode.localName!=='rPh').map(t=>t.textContent).join('')));
+  const sx=await file(path);if(!sx)throw new Error('The first sheet could not be found in this workbook');
+  const out=[];
+  tags(xml(sx),'row').forEach((row,ri)=>{const rn=(parseInt(row.getAttribute('r'))||ri+1)-1,cells=out[rn]=[];let ci=0;
+    tags(row,'c').forEach(c=>{const ref=c.getAttribute('r');if(ref){ci=0;for(const ch of ref.replace(/\d+/g,''))ci=ci*26+ch.charCodeAt(0)-64;ci--}
+      const t=c.getAttribute('t'),v=tags(c,'v')[0],vt=v?v.textContent:'';
+      cells[ci]=t==='s'?ss[+vt]??'':t==='inlineStr'?tags(c,'t').map(x=>x.textContent).join(''):t==='str'||t==='e'?vt:t==='b'?vt==='1':vt===''?'':Number(vt);ci++})});
+  return [...out].map(r=>r||[]);
+}
+function readCSV(text){
+  text=text.replace(/^﻿/,'');const lines=text.split(/\r?\n/);if(/^sep=.$/i.test(lines[0]))text=lines.slice(1).join('\n');
+  const first=text.split(/\r?\n/)[0]||'',d=[';',',','\t'].sort((a,b)=>first.split(b).length-first.split(a).length)[0];
+  const rows=[];let row=[],f='',q=false;
+  for(let i=0;i<text.length;i++){const ch=text[i];
+    if(q){if(ch==='"'){if(text[i+1]==='"'){f+='"';i++}else q=false}else f+=ch}
+    else if(ch==='"')q=true;else if(ch===d){row.push(f);f=''}
+    else if(ch==='\n'||ch==='\r'){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(f);rows.push(row);row=[];f=''}
+    else f+=ch}
+  if(f||row.length){row.push(f);rows.push(row)}
+  return rows;
+}
+async function impFile(file){
+  if(!file)return;const err=$('#imperr'),prev=$('#impPrev');err.textContent='';prev.innerHTML=`<div class="empty">${ic('refresh')}<p>Reading ${esc(file.name)}</p></div>`;$('#impName').textContent=file.name;
+  try{
+    const ext=file.name.toLowerCase().split('.').pop();let rows;
+    if(ext==='xls')throw new Error('Old .xls files are not supported. In Excel choose File, Save As, Excel Workbook (.xlsx).');
+    if(ext==='xlsx')rows=await readXlsx(await file.arrayBuffer());
+    else if(ext==='csv'||ext==='txt')rows=readCSV(await file.text());
+    else throw new Error('Choose an .xlsx or .csv file');
+    impRows=impParse(rows);impDraw();
+  }catch(e){impRows=[];prev.innerHTML='';err.textContent=e.message||'This file could not be read';$('#impBtn').disabled=true}
+}
+function impParse(rows){
+  const hi=rows.findIndex(r=>r&&r.some(c=>IMPKEYS.name.includes(hkey(c))));
+  if(hi<0)throw new Error('No header row found. The first row needs column names such as Name, Category, Carton cost USD. Download the template to see them.');
+  const col={};rows[hi].forEach((h,i)=>{const k=hkey(h);Object.entries(IMPKEYS).forEach(([f,al])=>{if(col[f]===undefined&&al.includes(k))col[f]=i})});
+  const miss=['name','cartonCost','perCarton','pc','ctn'].filter(f=>col[f]===undefined);
+  if(miss.length)throw new Error('Missing columns: '+miss.map(f=>({name:'Name',cartonCost:'Carton cost USD',perCarton:'Pcs per carton',pc:'Price per pc USD',ctn:'Price per carton USD'})[f]).join(', '));
+  const g=(r,f)=>col[f]===undefined?'':r[col[f]]??'';
+  const names=new Set(db.products.map(p=>p.name.trim().toLowerCase())),skus=new Set(db.products.map(p=>p.sku.toLowerCase()));
+  const out=[];
+  rows.slice(hi+1).forEach((r,i)=>{
+    if(!r||!r.some(c=>String(c??'').trim()!==''))return;
+    const name=String(g(r,'name')).trim().replace(/\s+/g,' ').slice(0,60),sku=String(g(r,'sku')).trim().slice(0,20),dz=inum(g(r,'dzn'));
+    const o={name,category:String(g(r,'category')).trim().slice(0,30)||'Other',isBundle:false,cartonCost:inum(g(r,'cartonCost')),perCarton:inum(g(r,'perCarton')),pc:inum(g(r,'pc')),dzn:isNaN(dz)?0:dz,ctn:inum(g(r,'ctn'))};
+    const oc=inum(g(r,'openCtn')),op=inum(g(r,'openPcs')),ro=inum(g(r,'reorder'));
+    const row={n:hi+i+2,o,sku,status:'ok',msg:''};
+    if(name&&names.has(name.toLowerCase())){row.status='skip';row.msg='Name already exists'}
+    else if(sku&&skus.has(sku.toLowerCase())){row.status='skip';row.msg='Code already exists'}
+    else{const f=itemFields(o);
+      if(typeof f==='string'){row.status='bad';row.msg=f}
+      else if((oc<0)||(op<0)||(ro<0)){row.status='bad';row.msg='Stock and reorder cannot be negative'}
+      else if([oc,op,ro].some(x=>!isNaN(x)&&x%1)){row.status='bad';row.msg='Stock and reorder must be whole numbers'}
+      else{row.f=f;row.qty=(isNaN(oc)?0:oc)*o.perCarton+(isNaN(op)?0:op);row.reorder=isNaN(ro)?o.perCarton:ro;names.add(name.toLowerCase());if(sku)skus.add(sku.toLowerCase())}}
+    out.push(row);
+  });
+  if(!out.length)throw new Error('The sheet has a header row but no items under it');
+  return out;
+}
+function impDraw(){
+  const ok=impRows.filter(r=>r.status==='ok'),bad=impRows.filter(r=>r.status==='bad'),skip=impRows.filter(r=>r.status==='skip');
+  const fp=v=>v>0?fCDF(toCDF(v)):'-';
+  $('#impPrev').innerHTML=`<div class="toolbar"><span class="chip ok">${ic('check')} ${ok.length} ready</span>${bad.length?`<span class="chip bad">${ic('alert')} ${bad.length} with errors</span>`:''}${skip.length?`<span class="chip warn">${skip.length} skipped, already in the catalogue</span>`:''}</div>
+  <div class="tw" style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:12px"><table class="t" style="font-size:13.5px"><thead><tr><th>Row</th><th>Item</th><th>Carton</th><th class="r">Per pc</th><th class="r">Per dozen</th><th class="r">Per carton</th><th class="r">Opening</th><th>Status</th></tr></thead><tbody>${impRows.slice(0,500).map(r=>`<tr>
+  <td class="code">${r.n}</td><td><b>${esc(r.o.name||'(no name)')}</b><div class="code">${esc(r.o.category)}${r.sku?' · '+esc(r.sku):''}</div></td>
+  <td class="nw">${isNaN(r.o.cartonCost)?'-':fUSD(r.o.cartonCost)}<div class="code">${isNaN(r.o.perCarton)?'-':r.o.perCarton} pcs</div></td>
+  <td class="r nw">${fp(r.o.pc)}</td><td class="r nw">${r.o.perCarton===12?'<span class="code">= carton</span>':fp(r.o.dzn)}</td><td class="r nw">${fp(r.o.ctn)}</td><td class="r nw">${r.status==='ok'?r.qty+' pcs':''}</td>
+  <td>${r.status==='ok'?'<span class="chip ok">Ready</span>':r.status==='skip'?`<span class="chip warn">${esc(r.msg)}</span>`:`<span class="chip bad">${esc(r.msg)}</span>`}</td></tr>`).join('')}</tbody></table></div>
+  ${impRows.length>500?`<p class="hint">Showing the first 500 of ${impRows.length} rows.</p>`:''}
+  ${bad.length?`<div class="note warn" style="margin-top:12px">${ic('alert')}<div>Rows with errors are not imported. Fix them in Excel and import the file again; items already imported are skipped.</div></div>`:''}`;
+  const b=$('#impBtn');b.disabled=!ok.length;b.innerHTML=`${ic('check')} Import ${ok.length} item${ok.length===1?'':'s'}`;
+}
+function doImport(){
+  if(!need('admin'))return;const ok=impRows.filter(r=>r.status==='ok');if(!ok.length)return;
+  const names=new Set(db.products.map(p=>p.name.trim().toLowerCase()));let n=0,stock=0;
+  ok.forEach(r=>{if(names.has(r.o.name.toLowerCase()))return;
+    const p=newProduct(r.f,{name:r.o.name,category:r.o.category,qty:r.qty,reorder:r.reorder,sku:r.sku||null});names.add(r.o.name.toLowerCase());n++;stock+=r.qty;
+    if(r.qty>0)db.purchases.unshift({t:Date.now(),pid:p.id,qty:r.qty,costUSD:p.costUSD,supplier:'Excel import',by:me.name})});
+  impRows=[];
+  commit('import',`Imported ${n} new items from Excel${stock?`, ${stock} pcs opening stock`:''}`);
+  closeModal();view='inventory';render();toast(`${n} item${n===1?'':'s'} imported`);
 }
 
 function upkeepView(){
@@ -918,7 +1214,7 @@ function usersView(){
   <td>${u.shopId?esc(shopOf(u.shopId).name):'Central store'}</td>
   <td>${u.active?'<span class="chip ok">Active</span>':'<span class="chip bad">Disabled</span>'}</td>
   <td><div class="act"><button title="Reset password" onclick="openReset('${u.id}')">${ic('key')}</button>${u.id!==me.id?`<button title="${u.active?'Disable account':'Enable account'}" onclick="toggleUser('${u.id}')">${ic(u.active?'lock':'unlock')}</button>`:''}</div></td></tr>`).join('')}</tbody></table></div></div>
-  <div class="note">${ic('shield')}<div>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives stock and dispatches shop orders, with no cost prices and no price changes. <b>Shop Admin</b>: till, invoices, discount on an invoice, editing a confirmed invoice, reprints and reports. <b>Till Operator</b>: sells and prints at the moment of the sale only.</div></div>
+  <div class="note">${ic('shield')}<div>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives stock, sees every shop's stock, and sends and corrects deliveries to the shops, with no cost prices and no price changes. <b>Shop Admin</b>: till, invoices, discount on an invoice, editing a confirmed invoice, reprints, deliveries received and reports. <b>Till Operator</b>: sells and prints at the moment of the sale only.</div></div>
   <div class="note">${ic('lock')}<div>Passwords are never stored as text. Each one is protected with a unique salt and PBKDF2 hashing. Five wrong attempts lock the account for one minute, and sessions end after ${IDLE_MIN} minutes without activity.</div></div>`;
 }
 function openUser(){
@@ -991,7 +1287,7 @@ function resetDemo(){
 }
 async function doReset(){closeModal();$('#app').innerHTML=`<div class="empty tall">${ic('refresh')}<p>Restoring demo data</p></div>`;await seed();persist();store.set(QK,'[]');me=null;sstore.del(SK);render();toast('Demo data restored')}
 function auditView(){
-  return head('Activity log','Every sign-in, price change, dispatch, sale, invoice edit, reprint and blocked attempt.')
+  return head('Activity log','Every sign-in, price change, delivery, sale, invoice edit, reprint and blocked attempt.')
   +`<div class="card p0"><div class="tw"><table class="t"><thead><tr><th>When</th><th>User</th><th>What happened</th></tr></thead><tbody>${db.audit.slice(0,250).map(a=>`<tr><td style="white-space:nowrap">${dt(a.t)}</td><td>${esc(a.user)}</td><td>${/Blocked|Failed/.test(a.action)?`<span class="chip bad">${esc(a.action)}</span>`:esc(a.action)}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 
@@ -1001,39 +1297,23 @@ function auditView(){
 function shopHome(){
   const sid=me.shopId,t=db.invoices.filter(i=>i.shopId===sid&&ld(i.t)===today());
   const st=db.shopStock[sid]||{},low=db.products.filter(p=>st[p.id]!==undefined&&st[p.id]<=5);
-  const pend=db.orders.filter(o=>o.shopId===sid&&o.status==='pending').length;
+  const lastDel=db.orders.filter(o=>o.shopId===sid).sort((a,b)=>b.t-a.t)[0];
   const edited=db.invoices.filter(i=>i.shopId===sid&&ld(i.t)===today()&&i.edits&&i.edits.length).length;
   return head(`Good ${new Date().getHours()<12?'morning':'afternoon'}, ${esc(me.name.split(' ')[0])}`,`${esc(shopOf(sid).name)}, ${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}`)
   +`<div class="kpis">${kpi('chart','Sales today',`<span class="dual"><b>${fCDF(sum(t,i=>i.total))}</b><small>${t.length} invoices</small></span>`,'ok')}${kpi('cash','Cash taken',`<span class="dual"><b>${fCDF(sum(t,i=>i.total))}</b><small>cash only</small></span>`)}${kpi('edit','Invoices edited today',`<span class="dual"><b>${edited}</b><small>by the shop admin</small></span>`,edited?'warn':'')}${kpi('alert','Items running low',`<span class="dual"><b>${low.length}</b><small>5 or fewer left</small></span>`,low.length?'bad':'')}</div>
-  <div class="tiles">${tile('cart','Open till',"go('pos')")}${tile('receipt','Invoices',"go('invoices')")}${tile('truck','Order stock'+(pend?`<em>${pend}</em>`:''),"go('request')")}${tile('chart','Sales report',"go('reports')")}</div>
-  <div class="card p0"><div style="padding:16px 16px 0"><h3>${ic('alert')} Running low or sold on order</h3></div>${low.length?`<div class="tw"><table class="t"><tbody>${low.map(p=>`<tr><td><b>${esc(p.name)}</b></td><td class="r"><span class="chip ${st[p.id]>0?'warn':'bad'}">${st[p.id]>0?st[p.id]+' left':(st[p.id]<0?Math.abs(st[p.id])+' sold on order':'None left')}</span></td></tr>`).join('')}</tbody></table></div><div style="padding:12px 16px"><button class="btn primary" onclick="go('request')">${ic('truck')} Order from the store</button></div>`:empty('check','Stock levels look good')}</div>`;
+  <div class="tiles">${tile('cart','Open till',"go('pos')")}${tile('receipt','Invoices',"go('invoices')")}${tile('truck','Deliveries received',"go('deliveries')")}${tile('chart','Sales report',"go('reports')")}</div>
+  <div class="card p0"><div style="padding:16px 16px 0"><h3>${ic('alert')} Running low or sold on order</h3></div>${low.length?`<div class="tw"><table class="t"><tbody>${low.map(p=>`<tr><td><b>${esc(p.name)}</b></td><td class="r"><span class="chip ${st[p.id]>0?'warn':'bad'}">${st[p.id]>0?st[p.id]+' left':(st[p.id]<0?Math.abs(st[p.id])+' sold on order':'None left')}</span></td></tr>`).join('')}</tbody></table></div><div class="note" style="margin:12px 16px">${ic('truck')}<div>The central store sees this list and sends stock directly.${lastDel?` Last delivery: <b>${lastDel.id}</b> on ${dt(lastDel.t)}.`:''}</div></div>`:empty('check','Stock levels look good')}</div>`;
 }
 function stockView(){
   const sid=me.shopId,st=db.shopStock[sid]||{},list=db.products.filter(p=>st[p.id]!==undefined);
   return head('Shop stock','Prices come from the Admin and are locked. Items can still be sold when stock reaches zero; the shortage shows here in red.')
-  +`<div class="card p0"><div class="tw"><table class="t"><thead><tr><th>Item</th><th>Category</th><th>Sold as</th><th class="r">In shop</th><th>Price</th><th>Piece price</th></tr></thead><tbody>${list.map(p=>{
+  +`<div class="card p0"><div class="tw"><table class="t"><thead><tr><th>Item</th><th>Category</th><th>Sold as</th><th class="r">In shop</th><th>Prices</th></tr></thead><tbody>${list.map(p=>{
     const q=st[p.id],op=openPcs(sid,p.id);
     return `<tr><td><b>${esc(p.name)}</b><div class="code">${p.sku}${p.isBundle?`, set of ${p.piecesPerSet}${op?`, ${op} pieces already sold from an open set`:''}`:''}</div></td><td>${esc(p.category)}</td>
     <td>${unitsOf(p).map(u=>`<span class="uchip">${esc(unitLabel(u))}</span>`).join(' ')}</td>
-    <td class="r"><span class="chip ${q<0?'bad':q<=5?'warn':'ok'}">${q<0?Math.abs(q)+' on order':q}</span></td>
-    <td><span style="display:inline-flex;gap:6px;align-items:center">${ic('lock')} ${fCDF(toCDF(p.priceUSD))}</span><div class="code">per ${esc(p.stockUnit)}</div></td>
-    <td>${p.isBundle?`<b>${fCDF(toCDF(p.pieceUSD))}</b>`:'<span class="code">Not sold by piece</span>'}</td></tr>`}).join('')}</tbody></table></div></div>`;
+    <td class="r"><span class="chip ${q<0?'bad':q<=5?'warn':'ok'}">${q<0?Math.abs(q)+' on order':q}</span>${q>0&&ctnTxt(p,q)?`<div class="code">${ctnTxt(p,q)}</div>`:''}</td>
+    <td>${unitsOf(p).map(u=>`<div style="white-space:nowrap">${ic('lock')} <b>${fCDF(toCDF(u.priceUSD))}</b> <span class="code">per ${esc(unitLabel(u))}</span></div>`).join('')}</td></tr>`}).join('')}</tbody></table></div></div>`;
 }
-function requestView(){
-  const sid=me.shopId,st=db.shopStock[sid]||{};const mine=db.orders.filter(o=>o.shopId===sid).sort((a,b)=>b.t-a.t);
-  return head('Order stock from the store','Enter how many you need, then send the order. The store dispatches it.')
-  +`<div class="card p0"><div class="tw"><table class="t"><thead><tr><th>Item</th><th class="r">In shop</th><th class="r">In store</th><th>Price</th><th style="width:130px">Order qty</th></tr></thead><tbody>${db.products.map(p=>`<tr><td><b>${esc(p.name)}</b><div class="code">${p.sku}</div></td><td class="r"><span class="chip ${(st[p.id]||0)<=5?'warn':''}">${st[p.id]||0}</span></td><td class="r">${p.whQty}</td><td>${fCDF(toCDF(p.priceUSD))}</td><td><input class="input" data-req="${p.id}" type="number" min="0" max="9999" inputmode="numeric" placeholder="0" style="min-height:42px"></td></tr>`).join('')}</tbody></table></div>
-  <div style="padding:14px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end"><button class="btn primary" onclick="submitRequest()">${ic('truck')} Send order</button></div></div>
-  <h2 style="margin:22px 0 10px;font-size:20px">Your orders</h2>${mine.length?mine.map(o=>orderCard(o,false)).join(''):`<div class="card">${empty('truck','No orders sent yet')}</div>`}`;
-}
-function submitRequest(){
-  if(!need('shopadmin'))return;const items=[];
-  document.querySelectorAll('[data-req]').forEach(i=>{const q=parseInt(i.value)||0;if(q>0)items.push({pid:i.dataset.req,qty:Math.min(q,9999)})});
-  if(!items.length){toast('Enter a quantity for at least one item','bad');return}
-  db.seq.order++;const o={id:'ORD-'+String(db.seq.order).padStart(4,'0'),shopId:me.shopId,items,status:'pending',t:Date.now(),by:me.name};
-  db.orders.push(o);commit('order',`Order ${o.id} sent`);render();toast(`Order ${o.id} sent to the store`);
-}
-
 /* ---------- POS / till ---------- */
 function posView(){
   return `<div class="pos"><section class="pos-left">
@@ -1041,7 +1321,7 @@ function posView(){
   <div class="cats" id="cats">${catsHTML()}</div><div class="pgrid" id="pgrid"></div></section>
   <section class="cart" id="cart"></section></div>`;
 }
-function catsHTML(){return ['All',...CATS].map(c=>`<button class="${posCat===c?'on':''}" onclick="posCat='${c}';$('#cats').innerHTML=catsHTML();drawGrid()">${ic(CATICON[c])}<span>${c}</span></button>`).join('')}
+function catsHTML(){return ['All',...cats()].map((c,i)=>`<button class="${posCat===c?'on':''}" onclick="posCat=${i?`cats()[${i-1}]`:"'All'"};$('#cats').innerHTML=catsHTML();drawGrid()">${ic(CATICON[c])}<span>${esc(c)}</span></button>`).join('')}
 function posAfter(){drawGrid();drawCart();const s=$('#scan');if(s){s.value=posQuery;if(matchMedia('(pointer:fine)').matches)s.focus()}}
 function drawGrid(){
   const g=$('#pgrid');if(!g)return;const sid=me.shopId,st=db.shopStock[sid]||{},q=posQuery.trim().toLowerCase();
@@ -1104,7 +1384,8 @@ function drawCart(flash){
   <div class="row muted"><span>Includes VAT ${db.settings.vat}%</span><span>${fCDF(T.vat)}</span></div>
   <div class="grand"><span>To pay</span><b>${fCDF(T.total)}</b></div>
   ${me.role==='shopadmin'&&cart.length?`<button class="btn ghost full disc-btn" onclick="openCartDisc()">${ic('tag')} ${cartDiscPct?`Invoice discount ${cartDiscPct}%, change`:'Discount on this invoice'}</button>`:(cart.length?`<div class="note" style="margin:0 0 10px">${ic('lock')}<div>Only the shop admin can give a discount.</div></div>`:'')}
-  <div class="paybtns one"><button class="paybtn cash" onclick="pay()" ${cart.length?'':'disabled'}>${ic('cash')} Take cash</button></div></div>`;
+  <div class="paybtns one"><button class="paybtn cash" onclick="pay()" ${cart.length?'':'disabled'}>${ic('cash')} Take cash and print</button></div>
+  ${lastSale&&db.invoices.find(i=>i.no===lastSale)?(()=>{const li=db.invoices.find(i=>i.no===lastSale);return `<div class="row muted" style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px"><span class="chip ok">${ic('check')} Last sale</span><span style="flex:1"><b>${li.no}</b>, <span style="white-space:nowrap">${fCDF(li.total)}</span></span><button class="btn sm" onclick="showInvoice('${li.no}')">${ic('eye')} View</button></div>`})():''}</div>`;
 }
 function openCartDisc(){
   if(!need('shopadmin'))return;
@@ -1113,35 +1394,19 @@ function openCartDisc(){
   `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="applyCartDisc(parseInt($('#cdp').value)||0)">${ic('check')} Apply</button>`);
 }
 function applyCartDisc(v){if(!need('shopadmin'))return;if(v<0||v>30){toast('Discount must be between 0% and 30%','bad');return}cartDiscPct=v;log(`Invoice discount set to ${v}%`);persist();closeModal();drawCart()}
+/* Take cash: the sale goes through at once, cash received = total, and both copies print straight away */
+let lastSale=null;
 function pay(){
-  if(!need('till','shopadmin')||!cart.length)return;const T=calc(cart,cartDiscPct);
-  modal('Cash payment','cash',`<div class="paytotal"><small>Customer pays</small><b>${fCDF(T.total)}</b></div>
-  <div class="field" style="margin-bottom:0"><label for="recv">Cash received (FC)</label><input id="recv" class="input xl" inputmode="numeric" autocomplete="off" oninput="updChange(${T.total})" onkeydown="if(event.key==='Enter')completeSale()" autofocus></div>
-  <div class="notes"><button class="exact" onclick="setRecv(${T.total},${T.total})">Exact</button>${[1000,5000,10000,20000].map(n=>`<button onclick="addRecv(${n},${T.total})">+${fCDF(n).replace(' FC','')}</button>`).join('')}<button onclick="setRecv(0,${T.total})">${ic('x')}</button></div>
-  <div id="chg" class="change">Enter the cash received</div>
-  <div class="note" style="margin:14px 0 0">${ic('printer')}<div>Finishing the sale prints two copies at once: one for the customer and one for the shop.</div></div>`,
-  `<button class="btn" onclick="closeModal()">Back</button><button class="btn primary" id="done" onclick="completeSale()" disabled>${ic('check')} Finish sale and print</button>`);
-}
-function recvVal(){return Number(($('#recv').value||'').replace(/\D/g,''))}
-function setRecv(v,total){$('#recv').value=v?v.toLocaleString('en-US').replace(/,/g,' '):'';updChange(total)}
-function addRecv(n,total){setRecv(recvVal()+n,total)}
-function updChange(total){
-  const r=recvVal(),el=$('#chg'),b=$('#done');
-  if(!r){el.className='change';el.textContent='Enter the cash received';b.disabled=true;return}
-  if(r<total){el.className='change bad';el.textContent=`Still needed: ${fCDF(total-r)}`;b.disabled=true}
-  else{el.className='change ok';el.textContent=`Give change: ${fCDF(r-total)}`;b.disabled=false}
-}
-function completeSale(){
   if(!need('till','shopadmin')||!cart.length)return;
-  const sid=me.shopId,T=calc(cart,cartDiscPct),tendered=recvVal();
-  if(tendered<T.total){toast('Cash received is less than the total','bad');return}
-  const inv=buildInvoice(cart,sid,cartDiscPct,tendered,me.name,me.id,Date.now());
+  const sid=me.shopId,T=calc(cart,cartDiscPct);
+  const inv=buildInvoice(cart,sid,cartDiscPct,T.total,me.name,me.id,Date.now());
   takeStock(sid,inv.items);db.invoices.unshift(inv);
-  cart=[];cartDiscPct=0;
+  cart=[];cartDiscPct=0;lastSale=inv.no;
   commit('invoice',`Invoice ${inv.no}, cash, ${fCDF(inv.total)}${inv.disc?`, discount ${inv.discPct}%`:''}`);
-  closeModal();drawCart();drawGrid();beep(true);
-  showInvoice(inv.no,true);
-  setTimeout(()=>printSale(inv.no),500);
+  drawCart();drawGrid();beep(true);
+  toast(`Sale ${inv.no} done, ${fCDF(inv.total)}. Printing.`);
+  printSale(inv.no);
+  const s=$('#scan');s&&s.focus();
 }
 
 /* ---------- invoices: print once, edit by shop admin ---------- */
@@ -1155,7 +1420,7 @@ function receiptHTML(inv,opt){
   <table>${inv.items.map(it=>`<tr><td colspan="2">${esc(it.name)}</td></tr><tr><td>&nbsp;${it.qty} x ${esc(it.unit)} @ ${fCDF(it.price)}</td><td class="r">${fCDF(it.line)}</td></tr>`).join('')}</table><hr>
   <table>${row('Sous-total',fCDF(inv.gross))}${inv.disc?row(`Remise ${inv.discPct}%`,'- '+fCDF(inv.disc)):''}${row('Total HT',fCDF(inv.ht))}${row(`TVA ${inv.vatRate}%`,fCDF(inv.vat))}</table>
   <div class="rtotal"><span>TOTAL TTC</span><span>${fCDF(inv.total)}</span></div>
-  <table>${row('Espèces reçues',fCDF(inv.tendered))}${row('Monnaie rendue',fCDF(inv.change))}${row('Articles',sum(inv.items,i=>i.qty))}</table><hr>
+  <table>${row('Espèces reçues',fCDF(inv.tendered))}${inv.change>0?row('Monnaie rendue',fCDF(inv.change)):''}${row('Articles',sum(inv.items,i=>i.qty))}</table><hr>
   ${edited?`<div class="c small">Modifiée le ${dt(inv.edits[inv.edits.length-1].t)} par ${esc(inv.edits[inv.edits.length-1].by)}</div>`:''}
   <div class="c">${esc(c.footer)}</div><div class="c small">Montants en Francs congolais (FC), TVA incluse.</div><div class="c small">Marchandise ni reprise ni échangée sans facture.</div></div>`;
 }
@@ -1192,8 +1457,7 @@ function editInvoice(no){
   <div class="tw"><table class="t"><thead><tr><th>Item</th><th>Unit</th><th class="r">Price</th><th style="width:120px">Qty</th></tr></thead><tbody>
   ${inv.items.map((it,i)=>`<tr><td><b>${esc(it.name)}</b></td><td><span class="uchip">${esc(it.unit)}</span></td><td class="r">${fCDF(it.price)}</td><td><input class="input" data-eq="${i}" type="number" min="0" value="${it.qty}" style="min-height:42px" oninput="previewEdit('${no}')"></td></tr>`).join('')}
   </tbody></table></div>
-  <div class="frow"><div class="field"><label>Discount on this invoice (%)</label><input id="edp" class="input" type="number" min="0" max="30" value="${inv.discPct||0}" oninput="previewEdit('${no}')"></div>
-  <div class="field"><label>Cash received (FC)</label><input id="etend" class="input" type="number" min="0" value="${inv.tendered}" oninput="previewEdit('${no}')"></div></div>
+  <div class="field"><label>Discount on this invoice (%)</label><input id="edp" class="input" type="number" min="0" max="30" value="${inv.discPct||0}" oninput="previewEdit('${no}')"></div>
   <div class="field"><label>Reason for the change</label><input id="ereason" class="input" maxlength="80" placeholder="e.g. Customer returned one lipstick" oninput="previewEdit('${no}')"></div>
   <div id="eprev" class="note"></div><div id="eerr" class="lerr"></div>`,
   `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveEdit('${no}')">${ic('check')} Save changes</button>`,true);
@@ -1207,18 +1471,17 @@ function editLines(inv){
 function previewEdit(no){
   const inv=db.invoices.find(i=>i.no===no),el=$('#eprev');if(!el)return;
   const items=editLines(inv),dp=Math.min(30,Math.max(0,parseInt($('#edp').value)||0)),T=totalsFrom(items,dp,inv.vatRate);
-  const tend=parseInt($('#etend').value)||0;
-  el.className='note'+(T.total>tend?' warn':'');
-  el.innerHTML=ic('receipt')+`<div>New total <b>${fCDF(T.total)}</b>, was ${fCDF(inv.total)}. ${items.length} line${items.length===1?'':'s'}. ${T.total>tend?'Cash received is lower than the new total, adjust it.':`Change to give back: ${fCDF(tend-T.total)}`}</div>`;
+  const d=T.total-inv.total;
+  el.className='note'+(d>0?' warn':'');
+  el.innerHTML=ic('receipt')+`<div>New total <b>${fCDF(T.total)}</b>, was ${fCDF(inv.total)}. ${items.length} line${items.length===1?'':'s'}. ${d<0?`Give back to the customer: <b>${fCDF(-d)}</b>`:d>0?`Collect from the customer: <b>${fCDF(d)}</b>`:'No money changes hands.'}</div>`;
 }
 function saveEdit(no){
   if(!need('shopadmin'))return;
   const inv=db.invoices.find(i=>i.no===no);if(!inv||inv.shopId!==me.shopId)return;
-  const items=editLines(inv),dp=Math.min(30,Math.max(0,parseInt($('#edp').value)||0)),reason=$('#ereason').value.trim(),tend=parseInt($('#etend').value)||0,err=$('#eerr');
+  const items=editLines(inv),dp=Math.min(30,Math.max(0,parseInt($('#edp').value)||0)),reason=$('#ereason').value.trim(),err=$('#eerr');
   if(!items.length)return err.textContent='Keep at least one line on the invoice';
   if(reason.length<4)return err.textContent='Write a short reason for the change';
-  const T=totalsFrom(items,dp,inv.vatRate);
-  if(tend<T.total)return err.textContent='Cash received cannot be less than the new total';
+  const T=totalsFrom(items,dp,inv.vatRate),tend=T.total;
   const before={total:inv.total,qty:sum(inv.items,i=>i.qty)};
   returnStock(inv.shopId,inv.items);takeStock(inv.shopId,items);
   inv.items=items;inv.discPct=dp;inv.gross=T.gross;inv.disc=T.disc;inv.total=T.total;inv.vat=T.vat;inv.ht=T.ht;inv.tendered=tend;inv.change=tend-T.total;inv.synced=false;
@@ -1255,7 +1518,7 @@ addEventListener('keydown',e=>{
 (async function boot(){
   $('#app').innerHTML=`<div class="empty tall" style="min-height:100vh">${ic('refresh')}<p>Starting SIM</p></div>`;
   const raw=store.get(DBK);if(raw){try{db=JSON.parse(raw)}catch(e){db=null}}
-  if(!db||db.v!==2){await seed();persist()}
+  if(!db||db.v!==3){await seed();persist()}
   if(!db.openPieces)db.openPieces={};
   db.shops.forEach(s=>{if(!db.openPieces[s.id])db.openPieces[s.id]={}});
   restore();if(me)view=NAV[me.role][0][0];
