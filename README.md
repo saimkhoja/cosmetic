@@ -15,7 +15,7 @@ Password for every account: `Demo@2026`
 | `admin` | Admin | Everything: carton cost, pc/dozen/carton prices, set and piece prices, Excel import, deliveries, upkeep, users, settings, reports |
 | `operator` | Warehouse Operator | Item names, units and quantities, receive stock, see every shop's stock, send and correct deliveries. No cost prices, no price changes |
 | `admin.gombe` | Shop Admin | Till, invoice discount, edit a confirmed invoice, duplicates, deliveries received, reports |
-| `till.gombe` | Till Operator | Sell and print at the moment of the sale only |
+| `till.gombe` | Till Operator | Sell and print at the moment of the sale only, in Francs. No invoice list, no reports |
 | `admin.limete`, `till.limete` | Second shop | Same as above for Shop Limete |
 
 ## What the demo covers
@@ -32,6 +32,7 @@ Password for every account: `Demo@2026`
 - **Editable invoices.** The Shop Admin can correct a confirmed invoice with a reason; stock is adjusted and the change is logged.
 - **Invoice discounts**, per invoice only, Shop Admin only, capped at 30%.
 - **Sales reports** over any date range, printable or saveable as PDF.
+- **Day end report.** Printing a single day (for example Today) gives one slip per cashier in the shop's shift end format: total invoices, invoice value in USD and FC, collected, returned and balance. It has no invoice or item lines. Only the Admin and the Shop Admin can print it. The till takes Francs only, so the USD collected and returned lines are 0, and Return FC is money given back when an invoice was corrected.
 - **Dual currency.** The warehouse side works in USD and Congolese Francs; customer invoices show Francs only.
 - **Works offline.** Everything is saved on the device and syncs when the connection returns. Tap the connection pill to simulate losing Wi-Fi.
 - **Security.** PBKDF2 password hashing with per-user salts, account lockout after five wrong attempts, 15-minute idle sign-out, role checks on every action, and a full activity log.
