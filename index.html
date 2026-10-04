@@ -257,6 +257,7 @@ main.posmain{padding:14px;max-width:none}
 .receipt .big{font-size:15px;font-weight:700}
 .receipt .small{font-size:10.5px}
 .receipt .rlogo{display:inline-grid;place-items:center;width:46px;height:46px;border:2px solid #000;border-radius:11px;font-weight:900;margin-bottom:6px;font-family:var(--font);font-size:15px}
+.receipt.slip{font-size:12.5px}.receipt.slip td{padding:2px 0}.receipt.slip td:first-child{padding-right:10px}
 .receipt .rtotal{display:flex;justify-content:space-between;font-size:17px;font-weight:700;border:2px solid #000;padding:6px 8px;margin:8px 0}
 .doc{background:#fff;color:#000;padding:22px;border-radius:6px;font-size:13.5px}
 .doc .t th{background:#EEF2F9;color:#000}.doc .t td{border-color:#D8DEE9}
@@ -609,7 +610,7 @@ const NAV={
   admin:[['home','Dashboard','home'],['inventory','Inventory','box'],['orders','Deliveries','truck'],['shopstock','Shop stock','store'],['upkeep','Upkeep','wallet'],['reports','Reports','chart'],['users','Users','users'],['settings','Settings','settings'],['audit','Activity','shield']],
   whop:[['inventory','Inventory','box'],['orders','Deliveries','truck'],['shopstock','Shop stock','store']],
   shopadmin:[['home','Home','home'],['pos','Till','cart'],['invoices','Invoices','receipt'],['stock','Stock','box'],['deliveries','Deliveries','truck'],['reports','Reports','chart']],
-  till:[['pos','Till','cart'],['invoices','Invoices','receipt']]
+  till:[['pos','Till','cart']]
 };
 function go(v){if(!NAV[me.role].some(n=>n[0]===v)){toast('You do not have access to this screen','bad');return}view=v;render();scrollTo(0,0)}
 function render(){
@@ -1166,8 +1167,8 @@ function reportsView(){
   const top={};list.forEach(i=>i.items.forEach(x=>{top[x.pid]=top[x.pid]||{name:x.name,qty:0,val:0};top[x.pid].qty+=x.qty;top[x.pid].val+=x.line}));
   const topArr=Object.values(top).sort((a,b)=>b.val-a.val).slice(0,8).map(x=>({name:x.name,val:x.val,txt:fCDF(x.val)}));
   const byC={};list.forEach(i=>{byC[i.cashier]=(byC[i.cashier]||0)+i.total});
-  return head('Sales report','Pick the dates, then print the report or save it as a PDF.',
-   `<button class="btn primary" onclick="printReport()">${ic('printer')} Print or save as PDF</button>`)
+  return head('Sales report','Pick the dates, then print. A single day, such as Today, prints the day end report: one slip per cashier.',
+   `<button class="btn primary" onclick="printReport()">${ic('printer')} ${rFrom===rTo?'Print day end report':'Print or save as PDF'}</button>`)
   +`<div class="card"><div class="rangebar">
     <div class="field"><label>From</label><input type="date" class="input" value="${rFrom}" max="${today()}" onchange="rFrom=this.value;render()"></div>
     <div class="field"><label>To</label><input type="date" class="input" value="${rTo}" max="${today()}" onchange="rTo=this.value;render()"></div>
@@ -1182,8 +1183,41 @@ function reportsView(){
   <div class="card"><h3>${ic('users')} By cashier</h3>${hlist(Object.entries(byC).map(([n,v])=>({name:n,val:v,txt:fCDF(v)})))}</div></div>
   <div class="card p0"><div style="padding:16px 16px 0"><h3>${ic('receipt')} Invoices in this period</h3></div>${list.length?`<div class="tw"><table class="t"><thead><tr><th>Invoice</th><th>Date</th>${sid==='all'?'<th>Shop</th>':''}<th>Cashier</th><th class="r">Items</th><th class="r">Discount</th><th class="r">Total</th></tr></thead><tbody>${list.slice(0,150).map(i=>`<tr><td><b>${i.no}</b>${i.edits&&i.edits.length?' <span class="chip warn">Edited</span>':''}</td><td>${dt(i.t)}</td>${sid==='all'?`<td>${esc(shopOf(i.shopId).name)}</td>`:''}<td>${esc(i.cashier)}</td><td class="r">${sum(i.items,x=>x.qty)}</td><td class="r">${i.disc?fCDF(i.disc):'-'}</td><td class="r"><b>${fCDF(i.total)}</b></td></tr>`).join('')}</tbody></table></div>`:empty('receipt','No invoices in these dates')}</div>`;
 }
+/* day end report: one slip per cashier, same layout as the shop's shift end slips. FC only at the till */
+function cashFlow(i){
+  const e=i.edits||[],orig=e.length?e[0].fromTotal:i.total;
+  return{col:orig+sum(e,x=>Math.max(0,x.toTotal-x.fromTotal)),ret:sum(e,x=>Math.max(0,x.fromTotal-x.toTotal))};
+}
+function shiftSlipHTML(list,user,shop,day){
+  const d=new Date(),isToday=day===today();
+  const ddmm=day.slice(8,10)+'-'+day.slice(5,7)+'-'+day.slice(0,4);
+  const when=isToday?`${ddmm} ${d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`:ddmm;
+  const col=sum(list,i=>cashFlow(i).col),ret=sum(list,i=>cashFlow(i).ret);
+  const u3=n=>(Math.round(n*1000)/1000).toFixed(3),fc=n=>String(Math.round(n));
+  const row=(a,b)=>`<tr><td style="white-space:nowrap">${a}</td><td style="white-space:nowrap">: ${b}</td></tr>`;
+  const hr='<tr><td colspan="2"><hr></td></tr>',bold=(a,b)=>row(a,b).replace('<tr>','<tr style="font-weight:700;font-size:13.5px">');
+  return `<div class="receipt slip"><div class="c" style="font-size:19px;font-weight:700;letter-spacing:.04em;margin:4px 0 6px">Shift End Report</div><table>${hr}
+  ${row('Date',when)}${row('User',esc(user))}${shop?row('Shop',esc(shop)):''}${row('TAUX',fc(rate()))}${hr}
+  ${row('Total Invoice',list.length)}${row('Invoice Value USD',u3(sum(list,i=>i.total/i.rate)))}${row('Invoice Value FC',fc(sum(list,i=>i.total)))}${hr}
+  ${row('Collected USD',u3(0))}${row('Collected FC',fc(col))}${row('Return USD',u3(0))}${row('Return FC',fc(ret))}${hr}
+  ${bold('Balance USD',u3(0))}${bold('Balance FC',fc(col-ret))}</table></div>`;
+}
+function printDaySlips(sid,list){
+  const day=rFrom,groups={};
+  list.forEach(i=>{const k=i.shopId+'|'+(i.cashierId||i.cashier);(groups[k]=groups[k]||[]).push(i)});
+  const keys=Object.keys(groups).sort((a,b)=>a.localeCompare(b));
+  const slips=keys.map(k=>{const g=groups[k],u=db.users.find(x=>x.id===g[0].cashierId);return shiftSlipHTML(g,u?u.username:g[0].cashier,sid==='all'?shopOf(g[0].shopId).name:'',day)});
+  if(keys.length!==1)slips.push(shiftSlipHTML(list,'All users',sid==='all'?'All shops':'',day));
+  const html=slips.join('<div class="pagebreak"></div>');
+  modal('Day end report','doc',`<div class="rwrap" id="slips" style="display:grid;gap:14px">${html}</div>`,
+    `<button class="btn" onclick="closeModal()">Close</button><button class="btn primary" onclick="printHTML($('#slips').innerHTML)">${ic('printer')} Print</button>`);
+  log(`Day end report printed for ${day}${sid==='all'?', all shops':', '+shopOf(sid).name}`);persist();
+  setTimeout(()=>printHTML(html),400);
+}
 function printReport(){
+  if(!need('admin','shopadmin'))return;
   const isAdmin=me.role==='admin',{sid,list}=reportRange(),c=db.settings.company;
+  if(rFrom===rTo)return printDaySlips(sid,list);
   const total=sum(list,i=>i.total),disc=sum(list,i=>i.disc),vat=sum(list,i=>i.vat),items=sum(list,i=>sum(i.items,x=>x.qty));
   const days={};list.forEach(i=>{const k=ld(i.t);days[k]=days[k]||{n:0,q:0,d:0,v:0};days[k].n++;days[k].q+=sum(i.items,x=>x.qty);days[k].d+=i.disc;days[k].v+=i.total});
   const top={};list.forEach(i=>i.items.forEach(x=>{top[x.pid]=top[x.pid]||{name:x.name,qty:0,val:0};top[x.pid].qty+=x.qty;top[x.pid].val+=x.line}));
@@ -1214,7 +1248,7 @@ function usersView(){
   <td>${u.shopId?esc(shopOf(u.shopId).name):'Central store'}</td>
   <td>${u.active?'<span class="chip ok">Active</span>':'<span class="chip bad">Disabled</span>'}</td>
   <td><div class="act"><button title="Reset password" onclick="openReset('${u.id}')">${ic('key')}</button>${u.id!==me.id?`<button title="${u.active?'Disable account':'Enable account'}" onclick="toggleUser('${u.id}')">${ic(u.active?'lock':'unlock')}</button>`:''}</div></td></tr>`).join('')}</tbody></table></div></div>
-  <div class="note">${ic('shield')}<div>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives stock, sees every shop's stock, and sends and corrects deliveries to the shops, with no cost prices and no price changes. <b>Shop Admin</b>: till, invoices, discount on an invoice, editing a confirmed invoice, reprints, deliveries received and reports. <b>Till Operator</b>: sells and prints at the moment of the sale only.</div></div>
+  <div class="note">${ic('shield')}<div>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives stock, sees every shop's stock, and sends and corrects deliveries to the shops, with no cost prices and no price changes. <b>Shop Admin</b>: till, invoices, discount on an invoice, editing a confirmed invoice, reprints, deliveries received and reports. <b>Till Operator</b>: sells and prints at the moment of the sale only, in Francs; no invoice list and no reports.</div></div>
   <div class="note">${ic('lock')}<div>Passwords are never stored as text. Each one is protected with a unique salt and PBKDF2 hashing. Five wrong attempts lock the account for one minute, and sessions end after ${IDLE_MIN} minutes without activity.</div></div>`;
 }
 function openUser(){
@@ -1385,7 +1419,7 @@ function drawCart(flash){
   <div class="grand"><span>To pay</span><b>${fCDF(T.total)}</b></div>
   ${me.role==='shopadmin'&&cart.length?`<button class="btn ghost full disc-btn" onclick="openCartDisc()">${ic('tag')} ${cartDiscPct?`Invoice discount ${cartDiscPct}%, change`:'Discount on this invoice'}</button>`:(cart.length?`<div class="note" style="margin:0 0 10px">${ic('lock')}<div>Only the shop admin can give a discount.</div></div>`:'')}
   <div class="paybtns one"><button class="paybtn cash" onclick="pay()" ${cart.length?'':'disabled'}>${ic('cash')} Take cash and print</button></div>
-  ${lastSale&&db.invoices.find(i=>i.no===lastSale)?(()=>{const li=db.invoices.find(i=>i.no===lastSale);return `<div class="row muted" style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px"><span class="chip ok">${ic('check')} Last sale</span><span style="flex:1"><b>${li.no}</b>, <span style="white-space:nowrap">${fCDF(li.total)}</span></span><button class="btn sm" onclick="showInvoice('${li.no}')">${ic('eye')} View</button></div>`})():''}</div>`;
+  ${lastSale&&db.invoices.find(i=>i.no===lastSale)?(()=>{const li=db.invoices.find(i=>i.no===lastSale);return `<div class="row muted" style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px"><span class="chip ok">${ic('check')} Last sale</span><span style="flex:1"><b>${li.no}</b>, <span style="white-space:nowrap">${fCDF(li.total)}</span></span>${me.role==='shopadmin'?`<button class="btn sm" onclick="showInvoice('${li.no}')">${ic('eye')} View</button>`:''}</div>`})():''}</div>`;
 }
 function openCartDisc(){
   if(!need('shopadmin'))return;
@@ -1425,6 +1459,7 @@ function receiptHTML(inv,opt){
   <div class="c">${esc(c.footer)}</div><div class="c small">Montants en Francs congolais (FC), TVA incluse.</div><div class="c small">Marchandise ni reprise ni échangée sans facture.</div></div>`;
 }
 function showInvoice(no,fresh){
+  if(!need('shopadmin'))return;
   const inv=db.invoices.find(i=>i.no===no);if(!inv)return;
   const isAdmin=me.role==='shopadmin';
   const canPrint=fresh||isAdmin;
