@@ -1167,7 +1167,7 @@ function reportsView(){
   const top={};list.forEach(i=>i.items.forEach(x=>{top[x.pid]=top[x.pid]||{name:x.name,qty:0,val:0};top[x.pid].qty+=x.qty;top[x.pid].val+=x.line}));
   const topArr=Object.values(top).sort((a,b)=>b.val-a.val).slice(0,8).map(x=>({name:x.name,val:x.val,txt:fCDF(x.val)}));
   const byC={};list.forEach(i=>{byC[i.cashier]=(byC[i.cashier]||0)+i.total});
-  return head('Sales report','Pick the dates, then print. A single day, such as Today, prints the day end report: one slip per cashier.',
+  return head('Sales report','Pick the dates, then print. A single day, such as Today, prints the day end report for the shop.',
    `<button class="btn primary" onclick="printReport()">${ic('printer')} ${rFrom===rTo?'Print day end report':'Print or save as PDF'}</button>`)
   +`<div class="card"><div class="rangebar">
     <div class="field"><label>From</label><input type="date" class="input" value="${rFrom}" max="${today()}" onchange="rFrom=this.value;render()"></div>
@@ -1183,7 +1183,7 @@ function reportsView(){
   <div class="card"><h3>${ic('users')} By cashier</h3>${hlist(Object.entries(byC).map(([n,v])=>({name:n,val:v,txt:fCDF(v)})))}</div></div>
   <div class="card p0"><div style="padding:16px 16px 0"><h3>${ic('receipt')} Invoices in this period</h3></div>${list.length?`<div class="tw"><table class="t"><thead><tr><th>Invoice</th><th>Date</th>${sid==='all'?'<th>Shop</th>':''}<th>Cashier</th><th class="r">Items</th><th class="r">Discount</th><th class="r">Total</th></tr></thead><tbody>${list.slice(0,150).map(i=>`<tr><td><b>${i.no}</b>${i.edits&&i.edits.length?' <span class="chip warn">Edited</span>':''}</td><td>${dt(i.t)}</td>${sid==='all'?`<td>${esc(shopOf(i.shopId).name)}</td>`:''}<td>${esc(i.cashier)}</td><td class="r">${sum(i.items,x=>x.qty)}</td><td class="r">${i.disc?fCDF(i.disc):'-'}</td><td class="r"><b>${fCDF(i.total)}</b></td></tr>`).join('')}</tbody></table></div>`:empty('receipt','No invoices in these dates')}</div>`;
 }
-/* day end report: one slip per cashier, same layout as the shop's shift end slips. FC only at the till */
+/* day end report: one slip per shop, same layout as the shop's shift end slips. FC only at the till */
 function cashFlow(i){
   const e=i.edits||[],orig=e.length?e[0].fromTotal:i.total;
   return{col:orig+sum(e,x=>Math.max(0,x.toTotal-x.fromTotal)),ret:sum(e,x=>Math.max(0,x.fromTotal-x.toTotal))};
@@ -1203,11 +1203,10 @@ function shiftSlipHTML(list,user,shop,day){
   ${bold('Balance USD',u3(0))}${bold('Balance FC',fc(col-ret))}</table></div>`;
 }
 function printDaySlips(sid,list){
-  const day=rFrom,groups={};
-  list.forEach(i=>{const k=i.shopId+'|'+(i.cashierId||i.cashier);(groups[k]=groups[k]||[]).push(i)});
-  const keys=Object.keys(groups).sort((a,b)=>a.localeCompare(b));
-  const slips=keys.map(k=>{const g=groups[k],u=db.users.find(x=>x.id===g[0].cashierId);return shiftSlipHTML(g,u?u.username:g[0].cashier,sid==='all'?shopOf(g[0].shopId).name:'',day)});
-  if(keys.length!==1)slips.push(shiftSlipHTML(list,'All users',sid==='all'?'All shops':'',day));
+  /* one slip per shop, whoever sold; User is the person printing */
+  const day=rFrom,shops=sid==='all'?db.shops:[shopOf(sid)];
+  const slips=shops.map(s=>shiftSlipHTML(list.filter(i=>i.shopId===s.id),me.username,s.name,day));
+  if(shops.length>1)slips.push(shiftSlipHTML(list,me.username,'All shops',day));
   const html=slips.join('<div class="pagebreak"></div>');
   modal('Day end report','doc',`<div class="rwrap" id="slips" style="display:grid;gap:14px">${html}</div>`,
     `<button class="btn" onclick="closeModal()">Close</button><button class="btn primary" onclick="printHTML($('#slips').innerHTML)">${ic('printer')} Print</button>`);

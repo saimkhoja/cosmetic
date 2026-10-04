@@ -32,7 +32,7 @@ Password for every account: `Demo@2026`
 - **Editable invoices.** The Shop Admin can correct a confirmed invoice with a reason; stock is adjusted and the change is logged.
 - **Invoice discounts**, per invoice only, Shop Admin only, capped at 30%.
 - **Sales reports** over any date range, printable or saveable as PDF.
-- **Day end report.** Printing a single day (for example Today) gives one slip per cashier in the shop's shift end format: total invoices, invoice value in USD and FC, collected, returned and balance. It has no invoice or item lines. Only the Admin and the Shop Admin can print it. The till takes Francs only, so the USD collected and returned lines are 0, and Return FC is money given back when an invoice was corrected.
+- **Day end report.** Printing a single day (for example Today) gives one slip for the shop, covering every cashier, in the shop's shift end format: total invoices, invoice value in USD and FC, collected, returned and balance. It has no invoice or item lines. The Admin printing for all shops gets one slip per shop plus an all-shops total. Only the Admin and the Shop Admin can print it. The till takes Francs only, so the USD collected and returned lines are 0, and Return FC is money given back when an invoice was corrected.
 - **Dual currency.** The warehouse side works in USD and Congolese Francs; customer invoices show Francs only.
 - **Works offline.** Everything is saved on the device and syncs when the connection returns. Tap the connection pill to simulate losing Wi-Fi.
 - **Security.** PBKDF2 password hashing with per-user salts, account lockout after five wrong attempts, 15-minute idle sign-out, role checks on every action, and a full activity log.
