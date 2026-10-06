@@ -18,8 +18,13 @@ export async function rpc<T = unknown>(fn: string, args: Record<string, unknown>
 export async function invoke<T = unknown>(fn: string, body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke(fn, { body });
   if (error) {
+    // the request never got a readable answer: offline, or the function is missing or blocked
+    if (error.name === 'FunctionsFetchError' || error.name === 'FunctionsRelayError') {
+      if (!navigator.onLine) throw new Error('No connection to the server. Try again when the internet is back.');
+      throw new Error(`The server function "${fn}" could not be reached. In Supabase, check under Edge Functions that "${fn}" is deployed with exactly that name and that "Verify JWT" is off for it. If you set the SIM_ALLOWED_ORIGIN secret, it must be this site's address (${location.origin}). Opening ${url ?? ''}/functions/v1/${fn} in the browser should show "Method not allowed".`);
+    }
     let msg = error.message;
-    try { const j = await (error as { context?: Response }).context?.json(); if (j?.error) msg = j.error; } catch { /* keep message */ }
+    try { const j = await (error as { context?: Response }).context?.json(); if (j?.error) msg = j.error; else if (j?.message) msg = `${fn}: ${j.message}`; } catch { /* keep message */ }
     throw new Error(msg);
   }
   return data as T;
