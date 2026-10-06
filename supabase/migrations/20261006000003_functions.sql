@@ -174,7 +174,7 @@ begin
   insert into profiles (id, username, name, role, must_change_password) values (p_user, lower(p_username), btrim(p_name), 'admin', false)
   returning * into u;
   update settings set rate = coalesce(app.num(p->>'rate'), rate), vat = coalesce(app.num(p->>'vat'), vat),
-    company = coalesce(p->'company', '{}'::jsonb), updated_at = now();
+    company = coalesce(p->'company', '{}'::jsonb), updated_at = now() where id = 1;
   for s in select * from jsonb_array_elements(coalesce(p->'shops','[]'::jsonb)) loop
     insert into shops (code, name, address) values (upper(btrim(s->>'code')), btrim(s->>'name'), btrim(coalesce(s->>'address','')));
   end loop;

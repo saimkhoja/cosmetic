@@ -1,0 +1,22 @@
+# Supabase CLI settings for SIM. Link your project with: supabase link --project-ref <your-ref>
+project_id = "sim"
+
+[api]
+schemas = ["public", "graphql_public"]
+max_rows = 2000
+
+[auth]
+site_url = "http://localhost:5173"
+enable_signup = false
+minimum_password_length = 10
+password_requirements = "letters_digits"
+
+[auth.email]
+enable_signup = false
+enable_confirmations = false
+
+[functions.setup]
+verify_jwt = false
+
+[functions.admin-users]
+verify_jwt = true
