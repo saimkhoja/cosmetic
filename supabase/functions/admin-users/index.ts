@@ -3,14 +3,33 @@
 // Single file so it can be pasted into the Supabase dashboard editor as is.
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
-const cors = {
-  'Access-Control-Allow-Origin': Deno.env.get('SIM_ALLOWED_ORIGIN') ?? '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+// SIM_ALLOWED_ORIGIN: unset = any site; otherwise one or more addresses, comma-separated.
+// A trailing slash or capital letters in the secret do not matter.
+const norm = (s: string) => s.trim().replace(/\/+$/, '').toLowerCase();
+const ALLOWED = (Deno.env.get('SIM_ALLOWED_ORIGIN') ?? '').split(',').map(norm).filter(Boolean);
+function corsFor(req: Request): Record<string, string> {
+  const origin = req.headers.get('Origin') ?? '';
+  return {
+    'Access-Control-Allow-Origin': !ALLOWED.length ? '*' : ALLOWED.includes(norm(origin)) ? origin : ALLOWED[0],
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  };
+}
+/** Every reply, errors included, carries the CORS headers so the browser shows the real message. */
+function serveWithCors(handle: (req: Request) => Promise<Response>) {
+  Deno.serve(async (req) => {
+    if (req.method === 'OPTIONS') return new Response('ok', { headers: corsFor(req) });
+    let res: Response;
+    try { res = await handle(req); } catch (e) { res = fail((e as Error).message || 'Unexpected error', 500); }
+    const h = new Headers(res.headers);
+    for (const [k, v] of Object.entries(corsFor(req))) h.set(k, v);
+    return new Response(res.body, { status: res.status, headers: h });
+  });
+}
 
 function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 const fail = (message: string, status = 400) => json({ error: message }, status);
 
@@ -35,8 +54,7 @@ type Role = typeof ROLES[number];
 
 const NEVER = '876000h'; // about 100 years: a disabled account cannot sign in or refresh
 
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+serveWithCors(async (req) => {
   if (req.method !== 'POST') return fail('Method not allowed', 405);
   const db = adminClient();
   const jwt = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');

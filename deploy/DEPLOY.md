@@ -36,7 +36,11 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    - Name **`setup`**: replace the sample code with the content of `supabase/functions/setup/index.ts`, then **Deploy**.
    - Name **`admin-users`**: the same with `supabase/functions/admin-users/index.ts`.
    - For **each** function, open its **Details** (or Settings) and turn **Verify JWT** (sometimes "Enforce JWT verification") **off**, then save. `setup` must work before anyone has a login, and `admin-users` checks the Admin's login itself.
-3. Continue with **Auth settings** below.
+3. **Check both functions.** Open `https://YOUR-REF.supabase.co/functions/v1/setup` in the browser, then the same with `admin-users` at the end. Each must show `{"error":"Method not allowed"}`. That means it is deployed and reachable. If you see:
+   - `Missing authorization header` or `Invalid JWT`: **Verify JWT** is still on for that function. Turn it off and save.
+   - `Requested function was not found`: the name is not exactly `setup` / `admin-users`. Deploy it again with the right name.
+   - `BOOT_ERROR`: the code was not pasted completely. Paste the whole file again and deploy.
+4. Continue with **Auth settings** below.
 
 ### Option B: with the Supabase CLI on your computer
 
@@ -54,7 +58,7 @@ supabase functions deploy admin-users --no-verify-jwt
 2. **Authentication → Sign In / Providers**: turn **Allow new users to sign up off**. Only the Admin creates logins, through SIM.
 3. **Authentication → Sign In / Providers → Email → Password requirements**: minimum length **10**, require **letters and digits**.
 4. **Authentication → URL Configuration → Site URL**: `https://your-domain` (from step 3; you can set it later).
-5. Optional, once the domain is live: in **Edge Functions → Secrets** add `SIM_ALLOWED_ORIGIN` = `https://your-domain`, so the functions only answer your site.
+5. Optional, once the site is live: in **Edge Functions → Secrets** add `SIM_ALLOWED_ORIGIN` = `https://your-site-address`, so the functions only answer your site. Several addresses can be separated by commas; a trailing `/` does not matter.
 6. **Billing**: the Pro plan includes daily database backups. Recommended for real business data.
 
 ### Keys for the web app
@@ -84,6 +88,8 @@ The app is static files, so Vercel's free plan works well until you have a VPS. 
    - **Environment Variables**: add `VITE_SUPABASE_URL` = `https://YOUR-REF.supabase.co` and `VITE_SUPABASE_ANON_KEY` = your publishable (or anon) key.
 4. Click **Deploy**. After a minute or two you get a link like `https://cosmetic-xxxx.vercel.app`.
 5. In Supabase, set **Authentication → URL Configuration → Site URL** to that link. Optionally add the Edge Function secret `SIM_ALLOWED_ORIGIN` with the same link.
+
+If the setup screen says a server function **could not be reached** (or "Failed to send a request to the Edge Function"), do the function check in section 1, Option A, step 3. Also make sure any `SIM_ALLOWED_ORIGIN` secret is this site's address.
 
 Every push to `main` deploys again automatically. If you change an environment variable later, redeploy (Deployments → ⋯ → Redeploy) because the values are built into the app.
 
