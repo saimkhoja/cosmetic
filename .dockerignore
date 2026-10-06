@@ -1,0 +1,10 @@
+**/node_modules
+app/dist
+app/test-results
+app/playwright-report
+**/.env
+**/.env.local
+**/.env.*.local
+supabase/local/.env.local
+.git
+*.zip

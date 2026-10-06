@@ -1,64 +1,64 @@
 # SIM — Smart Invoice Management
 
-A warehouse-to-till retail system for a cosmetics general dealer in Kinshasa, DR Congo.
-This repository holds the client demo: a single self-contained HTML file with no build step,
-no server and no dependencies beyond a web font.
+Warehouse-to-till retail system for a cosmetics general dealer in Kinshasa, DR Congo:
+one central store, several shops, real logins, a database in the cloud, and tills that keep selling without internet.
 
-Open `index.html` in any modern browser, or serve the folder and visit it.
+- **Web app**: React + TypeScript (`app/`), installable on the till PCs, served from a VPS.
+- **Backend**: Supabase Cloud (PostgreSQL + Auth) with access rules and business logic in the database (`supabase/`).
+- **Deploying**: see **[deploy/DEPLOY.md](deploy/DEPLOY.md)** (Supabase project setup, VPS with automatic HTTPS, first run, tills).
+- The approved click-through demo is kept in [`demo/index.html`](demo/index.html) for presentations.
 
-## Demo logins
+## Roles
 
-Password for every account: `Demo@2026`
+There are no demo accounts. The first visit to a new installation shows a **setup screen** that creates the Admin; the Admin then creates every other login.
 
-| Username | Role | Can do |
-|---|---|---|
-| `admin` | Admin | Everything: carton cost, pc/dozen/carton prices, set and piece prices, Excel import, deliveries, upkeep, users, settings, reports |
-| `operator` | Warehouse Operator | Item names, units and quantities, receive stock, see every shop's stock, send and correct deliveries. No cost prices, no price changes |
-| `admin.gombe` | Shop Admin | Till, invoice discount, edit a confirmed invoice, duplicates, deliveries received, reports |
-| `till.gombe` | Till Operator | Sell and print at the moment of the sale only, in Francs. No invoice list, no reports |
-| `admin.limete`, `till.limete` | Second shop | Same as above for Shop Limete |
+| Role | Can do |
+|---|---|
+| Admin | Everything: carton cost, pc/dozen/carton and set/piece prices, Excel import, deliveries, upkeep, users, settings, reports, activity log |
+| Warehouse Operator | Item names, units and quantities, receive stock, see every shop's stock, send and correct deliveries. No cost prices, no price changes |
+| Shop Admin | Till, invoice discount (max 30%), edit a confirmed invoice with a reason, duplicates, shop stock, deliveries received, reports and the day end slip |
+| Till Operator | Sell and print at the moment of the sale only, in Francs. No invoice list, no reports |
 
-## What the demo covers
+## What it does
 
-- **Two shops, one central store.** The store sends stock straight to one or more outlets with a delivery note; shops do not place orders. The store sees every shop's current stock, and a delivery can be corrected later (quantities or outlet) with a reason, the stock is adjusted on both sides and the change is logged.
-- **Prices locked.** Only the Admin sets cost and selling prices. Shops sell exactly what was set.
-- **Carton pricing.** A new item is entered with the cost of one carton, the pcs in a carton, and a separate selling price per pc, per dozen (optional) and per carton. Stock is counted in pcs and shown as cartons + pcs.
-- **Units at invoicing.** The till operator picks pc, dozen or carton and the price set for that unit is used.
-- **Bulk import from Excel.** Inventory → Import from Excel creates new items from an .xlsx or .csv file (template download included). Rows are checked before import; existing names or codes are skipped. The reader is built in, so no library or internet is needed.
-- **Mixed sets with a last price.** Assorted sets (brushes, clips, gift hampers) sell whole or one piece at a last price set by the Admin. Pieces are tracked against an open set.
-- **Cash only, one tap.** "Take cash and print" records the sale for the exact total and prints the customer and shop copies straight away, with no cash window.
-- **Selling on order.** Stock can go negative when an item is ordered in for a customer.
-- **One print per sale**, customer copy and shop copy together. Duplicates are restricted to the Shop Admin.
-- **Editable invoices.** The Shop Admin can correct a confirmed invoice with a reason; stock is adjusted and the change is logged.
-- **Invoice discounts**, per invoice only, Shop Admin only, capped at 30%.
-- **Sales reports** over any date range, printable or saveable as PDF.
-- **Day end report.** Printing a single day (for example Today) gives one slip per cashier in the shop's shift end format: total invoices, invoice value in USD and FC, collected, returned and balance. It has no invoice or item lines. Only the Admin and the Shop Admin can print it. The till takes Francs only, so the USD collected and returned lines are 0, and Return FC is money given back when an invoice was corrected.
-- **Dual currency.** The warehouse side works in USD and Congolese Francs; customer invoices show Francs only.
-- **Works offline.** Everything is saved on the device and syncs when the connection returns. Tap the connection pill to simulate losing Wi-Fi.
-- **Security.** PBKDF2 password hashing with per-user salts, account lockout after five wrong attempts, 15-minute idle sign-out, role checks on every action, and a full activity log.
-
-## Data and storage
-
-The demo stores its data in `localStorage` on the device that opens it, so each browser has its
-own copy. Two tabs of the same browser stay in sync in real time, which is a convenient way to
-show the store and the till side by side. Admin → Settings → Reset demo data restores the
-original sample data before a presentation.
-
-## Production notes
-
-This is a presentation build. For deployment the queue in `flush()` is the single place where
-queued changes would be posted to a server API, and the same role rules would be enforced
-server-side. Browsers always show a print dialog; for true one-tap printing at the till, start Chrome with `--kiosk-printing` and set the receipt printer as the default printer. Company details, RCCM, ID NAT, NIF, VAT rate and the exchange rate are all editable
-in Settings.
+- **Carton pricing.** An item is entered with the cost of one carton, the pcs in a carton and a selling price per pc, per dozen (optional) and per carton. Stock is counted in pcs and shown as cartons + pcs. Mixed sets sell whole or one piece at a last price.
+- **Bulk import from Excel** (.xlsx or .csv, template included). Rows are checked first; existing names or codes are skipped; one bad row stops the import so nothing half-imports.
+- **The store sends stock straight to the shops**, to one or more outlets at once (same quantities, one delivery note each). Deliveries can be corrected later with a reason; stock is put right on both sides.
+- **One-tap cash sale.** "Take cash and print" records the exact total in Francs and prints the customer and shop copies at once.
+- **Offline till.** Items, prices and shop stock are kept on the till. Without internet it keeps selling and printing; each till numbers its own invoices (`GOM-T1-000123`) so tills never clash, and sales are sent automatically when the connection returns. A sale sent twice is saved once.
+- **Prices locked.** Only the Admin sets prices; shops sell exactly what was set. Invoices keep the prices and rate of the moment of sale.
+- **Editable invoices** by the Shop Admin, with a reason; stock is adjusted and the change is logged.
+- **Reports** over any dates, printable or as PDF. A single day prints the **day end report** per shop in the shift end slip format: total invoices, invoice value in USD and FC, collected, returned and balance.
+- **Security.** Real passwords (hashed by Supabase Auth; 10+ characters with letters and numbers), each person chooses their own at first sign-in, disabled accounts are shut out at once, the screen locks after 15 minutes, access rules on every table, every change goes through checked database functions, and a full activity log.
 
 ## Currency
 
-All cost and selling prices are stored in USD. The shop price in Francs is USD × the rate in Settings, rounded to the nearest 10 FC, and is worked out live, so changing the rate reprices every shop at once. Each invoice freezes its FC prices and the rate of the moment, so past invoices never change. Customer invoices show Francs only; admin screens show USD and FC. Reports convert FC back to USD with each invoice's own rate.
+All cost and selling prices are stored in USD. The shop price in Francs is USD × the rate in Settings, rounded to the nearest 10 FC, so changing the rate reprices every shop at once. Each invoice keeps its Franc prices and the rate of its sale, so past invoices never change. Payments at the till are in Francs only. Reports convert Francs back to USD with each invoice's own rate.
 
-## Status
+## Repository
 
-Demo v3: carton cost with pc, dozen and carton prices, one-tap cash sale with direct printing, warehouse-pushed and editable deliveries to any outlets, shop stock visible to the store, and Excel bulk import. Opening v3 replaces demo data saved by v2 on the device.
+```
+app/                  React app (Vite, TypeScript, PWA)
+  src/pages/          screens, one file per area
+  src/lib/            money, units, validation, Excel, print layouts (+ unit tests)
+  src/offline/        till storage, outbox and sync
+  e2e/                Playwright end-to-end test
+supabase/
+  migrations/         schema, access rules (RLS), business functions
+  functions/          Edge Functions: setup, admin-users
+  tests/              SQL tests for every role and rule (run.sh)
+  local/              local Supabase-compatible stack for development and tests
+deploy/               Dockerfile, Caddyfile, docker-compose.yml, DEPLOY.md
+demo/                 the approved single-file demo
+```
 
-Demo v2 was updated after the first client review: cosmetics catalogue, Admin and Warehouse Operator
-roles, units at invoicing, mixed sets with piece prices, cash-only payment, no barcode scanner,
-editable invoices, controlled printing and date-range reports.
+## Development
+
+```bash
+supabase/local/start.sh            # local database, Auth, REST and functions on http://127.0.0.1:54321 (needs Docker, Deno, psql)
+cd app && npm install
+cp .env.example .env.local         # URL http://127.0.0.1:54321 and the ANON_KEY printed by start.sh
+npm run dev                        # http://localhost:5173
+```
+
+Checks: `supabase/tests/run.sh` (database), `npm test` and `npx tsc -b` (app), `npx playwright test` (end to end, against a fresh local stack and `vite preview` on port 4173).
