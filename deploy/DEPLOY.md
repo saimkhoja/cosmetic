@@ -72,6 +72,21 @@ npm run dev                      # open http://localhost:5173
 
 The first visit shows the **Set up SIM** screen; see step 4. Anything you create here goes into the real project, so you can also do the setup from the VPS later instead.
 
+## 3a. Or host the web app free on Vercel (no server needed)
+
+The app is static files, so Vercel's free plan works well until you have a VPS. The settings are in `app/vercel.json`.
+
+1. Sign in at **vercel.com** with your GitHub account (Hobby plan, free).
+2. **Add New → Project**, then **Import** the `saimkhoja/cosmetic` repository. If it isn't listed, click **Adjust GitHub App Permissions** and allow this repository.
+3. On the configure screen:
+   - **Root Directory**: click **Edit** and choose **`app`**. This one matters.
+   - **Framework Preset**: Vite. Build and output settings come from `vercel.json`; leave them as they are.
+   - **Environment Variables**: add `VITE_SUPABASE_URL` = `https://YOUR-REF.supabase.co` and `VITE_SUPABASE_ANON_KEY` = your publishable (or anon) key.
+4. Click **Deploy**. After a minute or two you get a link like `https://cosmetic-xxxx.vercel.app`.
+5. In Supabase, set **Authentication → URL Configuration → Site URL** to that link. Optionally add the Edge Function secret `SIM_ALLOWED_ORIGIN` with the same link.
+
+Every push to `main` deploys again automatically. If you change an environment variable later, redeploy (Deployments → ⋯ → Redeploy) because the values are built into the app.
+
 ## 3. Put the web app on the VPS
 
 A small VPS is enough (1 vCPU, 1–2 GB RAM, Ubuntu 24.04): it only serves files.
