@@ -18,5 +18,7 @@ enable_confirmations = false
 [functions.setup]
 verify_jwt = false
 
+# admin-users checks the caller's login itself (Admin only), so the gateway check is off;
+# this also works with Supabase's newer API keys.
 [functions.admin-users]
-verify_jwt = true
+verify_jwt = false

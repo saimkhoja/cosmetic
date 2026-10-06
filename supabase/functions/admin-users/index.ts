@@ -1,6 +1,37 @@
 // User management for the Admin: create logins, reset passwords, change role or shop,
 // and enable or disable accounts. Every call checks that the caller is an active Admin.
-import { adminClient, cors, emailFor, fail, json, passwordProblem, ROLES, type Role, usernameOk } from '../_shared/common.ts';
+// Single file so it can be pasted into the Supabase dashboard editor as is.
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
+
+const cors = {
+  'Access-Control-Allow-Origin': Deno.env.get('SIM_ALLOWED_ORIGIN') ?? '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+}
+const fail = (message: string, status = 400) => json({ error: message }, status);
+
+function adminClient(): SupabaseClient {
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SECRET_KEY');
+  return createClient(Deno.env.get('SUPABASE_URL')!, key!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+/** Usernames are what people type; Supabase Auth needs an email, so each gets a private address that is never mailed. */
+const LOGIN_DOMAIN = 'users.sim.local';
+const emailFor = (username: string) => `${username}@${LOGIN_DOMAIN}`;
+const usernameOk = (u: string) => /^[a-z0-9._-]{3,30}$/.test(u);
+const passwordProblem = (p: string): string | null =>
+  typeof p !== 'string' || p.length < 10 ? 'Password needs at least 10 characters'
+  : !/[A-Za-z]/.test(p) || !/\d/.test(p) ? 'Password needs letters and numbers'
+  : p.length > 72 ? 'Password is too long (72 characters at most)' : null;
+const ROLES = ['admin', 'whop', 'shopadmin', 'till'] as const;
+type Role = typeof ROLES[number];
+
 
 const NEVER = '876000h'; // about 100 years: a disabled account cannot sign in or refresh
 
