@@ -11,3 +11,4 @@ supabase/.branches/
 test-results/
 playwright-report/
 supabase/local/.env.local
+*.tsbuildinfo

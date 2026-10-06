@@ -34,6 +34,19 @@ export async function refreshSnapshot(shopId: string): Promise<Snapshot> {
   return snap;
 }
 
+// one registration at a time per shop, so a double start never makes two tills
+const inflight = new Map<string, Promise<Device>>();
+function registerOnce(shopId: string, known: string | null): Promise<Device> {
+  if (!inflight.has(shopId)) inflight.set(shopId, (async () => {
+    try {
+      const r = await rpc<{ id: string; code: string; last_seq: number; shop_code: string }>('register_device', { p_device: known });
+      const d = { id: r.id, code: r.code, last_seq: r.last_seq, shop_code: r.shop_code, shop_id: shopId };
+      await setDevice(d); return d;
+    } finally { inflight.delete(shopId); }
+  })());
+  return inflight.get(shopId)!;
+}
+
 export default function Till() {
   const { profile } = useAuth();
   const toast = useToast();
@@ -46,19 +59,23 @@ export default function Till() {
 
   const loadFailed = useCallback(() => { void outboxAll().then((l) => setFailed(l.filter((e) => e.error && e.shop_id === shopId))); }, [shopId]);
   const load = useCallback(async () => {
-    const local = await getSnapshot(shopId);
+    // what is on the device comes first, so the till sells at once even when the network hangs
+    const local = await getSnapshot(shopId), known = await getDevice(shopId);
     if (local) setSnap(local);
+    if (known) setDev(known);
+    if (!navigator.onLine) {
+      if (!local) setProblem('This till has not been connected yet. Connect to the internet once to load the items and register the till.');
+      else if (!known) setProblem('Connect to the internet once to register this till.');
+      return;
+    }
     try {
       const fresh = await refreshSnapshot(shopId); setSnap(fresh);
-      const known = await getDevice(shopId);
-      const r = await rpc<{ id: string; code: string; last_seq: number; shop_code: string }>('register_device', { p_device: known?.id ?? null });
-      const d = { id: r.id, code: r.code, last_seq: r.last_seq, shop_code: r.shop_code, shop_id: shopId };
-      await setDevice(d); setDev(d); setProblem('');
+      const d = await registerOnce(shopId, known?.id ?? null);
+      setDev(d); setProblem('');
     } catch (e) {
-      const d = await getDevice(shopId); if (d) setDev(d);
       if (!isNetworkError(e)) setProblem((e as Error).message);
       else if (!local) setProblem('This till has not been connected yet. Connect to the internet once to load the items and register the till.');
-      else if (!d) setProblem('Connect to the internet once to register this till.');
+      else if (!known) setProblem('Connect to the internet once to register this till.');
     }
   }, [shopId]);
   useEffect(() => {

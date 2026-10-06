@@ -34,6 +34,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   if (!profile) return null;
   const shop = profile.shop_id ? shops.data?.find((s) => s.id === profile.shop_id) : null;
+  if (shop) localStorage.setItem('sim.shopname', shop.name);
+  const shopName = shop?.name ?? (profile.shop_id ? localStorage.getItem('sim.shopname') : null);
   const pos = loc.pathname === '/till';
   const pill = offline || !navigator.onLine
     ? <button className="pill off"><Icon n="wifioff" /><span>Offline{waiting ? `, ${waiting} sale${waiting > 1 ? 's' : ''} saved on device` : ''}</span></button>
@@ -45,7 +47,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <>
       <header className="top">
-        <div className="brand"><div className="logo">SIM</div><div style={{ minWidth: 0 }}><div className="bt">Smart Invoice Management</div><div className="bs">{shop ? shop.name : 'Central store'}</div></div></div>
+        <div className="brand"><div className="logo">SIM</div><div style={{ minWidth: 0 }}><div className="bt">Smart Invoice Management</div><div className="bs">{shopName ?? 'Central store'}</div></div></div>
         <div className="sp" />
         {pill}
         <div className="who"><span className="av"><Icon n={ROLEICON[profile.role]} /></span><div><b>{profile.name}</b><small>{R[profile.role]}</small></div></div>

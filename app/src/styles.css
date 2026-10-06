@@ -56,6 +56,7 @@ main.posmain{padding:14px;max-width:none}
   .nav button,.nav a{min-width:76px;padding:8px 4px}
   main,main.posmain{padding:14px 12px 104px}
   .who div,.bs{display:none}.bt{font-size:14px}
+  .pill span{display:none}.pill{padding:8px 10px}
 }
 
 /* page building blocks */

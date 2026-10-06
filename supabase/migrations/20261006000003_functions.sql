@@ -543,7 +543,7 @@ begin
     'items', (select coalesce(sum(q),0) from inv),
     'edited', (select count(*) from inv where edited),
     'profit_usd', case when u.role = 'admin' then (select coalesce(sum(ht / rate - cogs),0) from inv) end,
-    'by_day', (select coalesce(jsonb_agg(d order by d.day), '[]') from (select day, count(*) n, sum(q) q, sum(disc) d, sum(total) v from inv group by day) d),
+    'by_day', (select coalesce(jsonb_agg(bd order by bd.day), '[]') from (select day, count(*) n, sum(q) q, sum(disc) d, sum(total) v from inv group by day) bd),
     'top', (select coalesce(jsonb_agg(x order by x.val desc), '[]') from (
         select ii.name, sum(ii.qty) qty, sum(ii.line) val from invoice_items ii join inv on inv.id = ii.invoice_id group by ii.product_id, ii.name order by 3 desc limit 15) x),
     'by_cashier', (select coalesce(jsonb_agg(c order by c.v desc), '[]') from (select cashier_name as name, sum(total) v from inv group by cashier_name) c),

@@ -158,6 +158,8 @@ select t.ok((t.get('rep')::jsonb->>'n')::int = 2, 'report counts the shop''s 2 i
 select t.ok((t.get('rep')::jsonb->'slips'->0->>'returned')::bigint = (3 * 4560 + 13 * 5130) - (2 * 4560 + 5130), 'day end Return FC = money given back by the edit');
 select t.ok((t.get('rep')::jsonb->'slips'->0->>'collected')::bigint - (t.get('rep')::jsonb->'slips'->0->>'returned')::bigint = (t.get('rep')::jsonb->>'total')::bigint, 'Balance FC = invoice value');
 select t.ok(jsonb_array_length(t.get('rep')::jsonb->'slips') = 1, 'shop admin report covers only their shop');
+select t.ok((t.get('rep')::jsonb->'by_day'->0->>'day') = current_date::text and (t.get('rep')::jsonb->'by_day'->0->>'n')::int = 2, 'sales by day: one row per day with its count');
+select t.ok((t.get('rep')::jsonb->'top'->0->>'name') is not null, 'best sellers list items by name');
 select t.ok((t.get('rep')::jsonb->'profit_usd') = 'null'::jsonb, 'shop admin does not get profit (cost) figures');
 select public.record_reprint(t.get('inv1')::uuid);
 reset role;
