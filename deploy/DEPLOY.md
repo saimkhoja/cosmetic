@@ -15,27 +15,51 @@ You need a computer with **Git**, **Node.js 22** and the **Supabase CLI** (`npm 
 
 ## 1. Set up the Supabase project (once)
 
-From the repository folder on your computer:
+Use an **empty** project (no tables of your own yet). There are two ways; pick one.
+
+### Option A: from the Supabase dashboard, nothing to install
+
+1. **Database.** Dashboard → **SQL Editor** → **New query**. Paste the whole content of each file below and press **Run**, one file at a time, in this order. Each should end with "Success. No rows returned".
+   1. `supabase/migrations/20261006000001_schema.sql`
+   2. `supabase/migrations/20261006000002_rls.sql`
+   3. `supabase/migrations/20261006000003_functions.sql`
+
+   To check, run this in a new query. It should return `16 tables, 16 functions`:
+   ```sql
+   select (select count(*) from information_schema.tables where table_schema = 'public') || ' tables, ' ||
+          (select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname in
+            ('setup_needed','app_setup','save_settings','save_shop','mark_password_changed','save_product','receive_stock',
+             'import_products','create_deliveries','edit_delivery','register_device','submit_invoice','edit_invoice',
+             'record_reprint','add_upkeep','sales_report')) || ' functions' as result;
+   ```
+2. **Edge Functions.** Dashboard → **Edge Functions** → **Deploy a new function** → **Via Editor**, twice:
+   - Name **`setup`**: replace the sample code with the content of `supabase/functions/setup/index.ts`, then **Deploy**.
+   - Name **`admin-users`**: the same with `supabase/functions/admin-users/index.ts`.
+   - For **each** function, open its **Details** (or Settings) and turn **Verify JWT** (sometimes "Enforce JWT verification") **off**, then save. `setup` must work before anyone has a login, and `admin-users` checks the Admin's login itself.
+3. Continue with **Auth settings** below.
+
+### Option B: with the Supabase CLI on your computer
 
 ```bash
 supabase login                                   # opens the browser
 supabase link --project-ref YOUR-PROJECT-REF     # the ref is in the project URL: https://YOUR-PROJECT-REF.supabase.co
 supabase db push                                 # creates the tables, access rules and functions
-supabase functions deploy setup --no-verify-jwt  # first-run setup screen
-supabase functions deploy admin-users            # Admin user management
+supabase functions deploy setup --no-verify-jwt
+supabase functions deploy admin-users --no-verify-jwt
 ```
 
-`db push` applies the three files in `supabase/migrations/` in order. If you prefer, you can paste them one by one into the Supabase **SQL editor** instead, in file-name order.
-
-Then in the Supabase dashboard:
+### Auth settings (both options)
 
 1. **Authentication → Sign In / Providers → Email**: keep Email enabled, turn **Confirm email off**.
 2. **Authentication → Sign In / Providers**: turn **Allow new users to sign up off**. Only the Admin creates logins, through SIM.
 3. **Authentication → Sign In / Providers → Email → Password requirements**: minimum length **10**, require **letters and digits**.
-4. **Authentication → URL Configuration → Site URL**: `https://your-domain` (from step 3).
-5. Optional, recommended once the domain is live: limit the server functions to your domain:
-   `supabase secrets set SIM_ALLOWED_ORIGIN=https://your-domain`
-6. **Billing**: the Pro plan includes daily backups of the database. Recommended for real business data.
+4. **Authentication → URL Configuration → Site URL**: `https://your-domain` (from step 3; you can set it later).
+5. Optional, once the domain is live: in **Edge Functions → Secrets** add `SIM_ALLOWED_ORIGIN` = `https://your-domain`, so the functions only answer your site.
+6. **Billing**: the Pro plan includes daily database backups. Recommended for real business data.
+
+### Keys for the web app
+
+**Project Settings → API Keys**. You need the **Project URL** (`https://YOUR-PROJECT-REF.supabase.co`) and the **publishable** key (`sb_publishable_…`), or on older projects the **anon** key. Both are public by design. Do **not** use the **secret** / **service_role** key anywhere in SIM.
 
 ## 2. Try it on your computer (optional)
 
@@ -47,6 +71,21 @@ npm run dev                      # open http://localhost:5173
 ```
 
 The first visit shows the **Set up SIM** screen; see step 4. Anything you create here goes into the real project, so you can also do the setup from the VPS later instead.
+
+## 3a. Or host the web app free on Vercel (no server needed)
+
+The app is static files, so Vercel's free plan works well until you have a VPS. The settings are in `app/vercel.json`.
+
+1. Sign in at **vercel.com** with your GitHub account (Hobby plan, free).
+2. **Add New → Project**, then **Import** the `saimkhoja/cosmetic` repository. If it isn't listed, click **Adjust GitHub App Permissions** and allow this repository.
+3. On the configure screen:
+   - **Root Directory**: click **Edit** and choose **`app`**. This one matters.
+   - **Framework Preset**: Vite. Build and output settings come from `vercel.json`; leave them as they are.
+   - **Environment Variables**: add `VITE_SUPABASE_URL` = `https://YOUR-REF.supabase.co` and `VITE_SUPABASE_ANON_KEY` = your publishable (or anon) key.
+4. Click **Deploy**. After a minute or two you get a link like `https://cosmetic-xxxx.vercel.app`.
+5. In Supabase, set **Authentication → URL Configuration → Site URL** to that link. Optionally add the Edge Function secret `SIM_ALLOWED_ORIGIN` with the same link.
+
+Every push to `main` deploys again automatically. If you change an environment variable later, redeploy (Deployments → ⋯ → Redeploy) because the values are built into the app.
 
 ## 3. Put the web app on the VPS
 
