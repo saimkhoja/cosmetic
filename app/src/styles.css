@@ -287,3 +287,16 @@ button.uchip svg{font-size:11px}
 .pagebreak{height:0}
 @media print{.pagebreak{break-after:page;page-break-after:always}#print-area .receipt{margin:0 auto 10mm}}
 @media (max-width:560px){.ugrid{grid-template-columns:1fr}.demo.four{grid-template-columns:1fr 1fr}}
+.tillwrap{display:grid;grid-template-columns:minmax(0,3fr) minmax(250px,1fr);gap:14px}
+.tillwrap .pos{grid-template-columns:minmax(0,1fr) 360px}
+.review{background:var(--card);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;height:calc(100vh - 92px);min-height:0;box-shadow:var(--shadow)}
+.review .rl{flex:1;overflow-y:auto;padding:10px}
+.rcard{display:block;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;background:var(--card);color:var(--text);font:inherit}
+.rcard.on{border-color:var(--blue);background:var(--blue-l)}
+.custbar{display:flex;align-items:center;gap:10px;background:var(--card);border:2.5px solid var(--ok);border-radius:var(--r);padding:6px 6px 6px 16px;color:var(--ok);font-size:16px}
+.custbar>svg{font-size:24px}
+.custbar input{flex:1;border:0;background:transparent;font-size:19px;padding:12px 0;outline:none;min-width:0;font-weight:700}
+.custbar.on{padding:10px 8px 10px 16px;color:var(--text);background:var(--ok-l)}
+.myorders{max-height:150px;overflow-y:auto}
+.morow{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:3px 0;font-size:13.5px}
+@media(max-width:1020px){.tillwrap{grid-template-columns:1fr}.tillwrap .pos{grid-template-columns:1fr}.review{height:auto;max-height:60vh}}

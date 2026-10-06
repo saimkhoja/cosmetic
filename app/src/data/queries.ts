@@ -1,7 +1,7 @@
 // Server reads, cached with TanStack Query. Rows are already filtered by role on the server (RLS).
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase, rows, rpc } from '../lib/supabase';
-import type { Cost, Delivery, Invoice, Product, Profile, Settings, Shop, StockRow } from '../lib/types';
+import type { Cost, Delivery, Invoice, Product, Profile, SaleOrder, Settings, Shop, StockRow } from '../lib/types';
 import type { Report } from '../lib/print';
 
 /** Reads every row of a query, 1000 at a time (Supabase returns at most 1000 per request). */
@@ -21,9 +21,9 @@ export const useStock = (shopId?: string | null) => useQuery({
   queryKey: ['stock', shopId ?? 'all'],
   queryFn: () => all<StockRow>((a, b) => { let q = supabase.from('shop_stock').select('*'); if (shopId) q = q.eq('shop_id', shopId); return q.range(a, b); }),
 });
-export const useDeliveries = (shopId?: string | null) => useQuery({
-  queryKey: ['deliveries', shopId ?? 'all'],
-  queryFn: async () => { let q = supabase.from('deliveries').select('*, delivery_items(product_id,qty,price_usd), delivery_edits(at,by_name,reason)').order('created_at', { ascending: false }).limit(400); if (shopId) q = q.eq('shop_id', shopId); return rows<Delivery>(await q); },
+export const useDeliveries = (shopId?: string | null, enabled = true) => useQuery({
+  queryKey: ['deliveries', shopId ?? 'all'], enabled, refetchInterval: 30000,
+  queryFn: async () => { let q = supabase.from('deliveries').select('*, delivery_items(product_id,qty,price_usd,received_qty), delivery_edits(at,by_name,reason)').order('created_at', { ascending: false }).limit(400); if (shopId) q = q.eq('shop_id', shopId); return rows<Delivery>(await q); },
 });
 export const useInvoices = (shopId: string, sinceISO: string | null) => useQuery({
   queryKey: ['invoices', shopId, sinceISO],
@@ -41,8 +41,13 @@ export const useUpkeep = () => useQuery({ queryKey: ['upkeep'], queryFn: async (
 export const useReport = (from: string, to: string, shop: string | null, enabled = true) => useQuery({
   queryKey: ['report', from, to, shop], enabled, queryFn: () => rpc<Report>('sales_report', { p_from: from, p_to: to, p_shop: shop }),
 });
+/** Orders sent by till operators: the shop admin sees the shop's, a till operator only their own (RLS). */
+export const useOrders = (status: 'pending' | 'all', sinceISO?: string) => useQuery({
+  queryKey: ['orders', status, sinceISO ?? ''], refetchInterval: 15000,
+  queryFn: async () => { let q = supabase.from('sale_orders').select('*').order('created_at', { ascending: status === 'pending' }).limit(200); if (status === 'pending') q = q.eq('status', 'pending'); if (sinceISO) q = q.gte('created_at', sinceISO); return rows<SaleOrder>(await q); },
+});
 /** After a change, refresh everything that may show it. */
 export function useRefresh() {
   const qc = useQueryClient();
-  return (...keys: string[]) => Promise.all((keys.length ? keys : ['products', 'costs', 'stock', 'deliveries', 'invoices', 'report', 'audit']).map((k) => qc.invalidateQueries({ queryKey: [k] })));
+  return (...keys: string[]) => Promise.all((keys.length ? keys : ['products', 'costs', 'stock', 'deliveries', 'invoices', 'report', 'audit', 'orders']).map((k) => qc.invalidateQueries({ queryKey: [k] })));
 }

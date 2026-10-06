@@ -23,14 +23,17 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    1. `supabase/migrations/20261006000001_schema.sql`
    2. `supabase/migrations/20261006000002_rls.sql`
    3. `supabase/migrations/20261006000003_functions.sql`
+   4. `supabase/migrations/20261007000001_review_flows.sql` (orders approved by the shop admin, customer names, deliveries received by the shop)
 
-   To check, run this in a new query. It should return `16 tables, 16 functions`:
+   **Already set up with the first three?** Run only file 4. It keeps your data. After it, deliveries that were already sent count as received, and new ones wait for the shop admin.
+
+   To check, run this in a new query. It should return `17 tables, 20 functions`:
    ```sql
    select (select count(*) from information_schema.tables where table_schema = 'public') || ' tables, ' ||
           (select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname in
             ('setup_needed','app_setup','save_settings','save_shop','mark_password_changed','save_product','receive_stock',
              'import_products','create_deliveries','edit_delivery','register_device','submit_invoice','edit_invoice',
-             'record_reprint','add_upkeep','sales_report')) || ' functions' as result;
+             'record_reprint','add_upkeep','sales_report','submit_order','reject_order','receive_delivery','cancel_delivery')) || ' functions' as result;
    ```
 2. **Edge Functions.** Dashboard → **Edge Functions** → **Deploy a new function** → **Via Editor**, twice:
    - Name **`setup`**: replace the sample code with the content of `supabase/functions/setup/index.ts`, then **Deploy**.

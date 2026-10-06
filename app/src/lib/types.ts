@@ -16,7 +16,17 @@ export interface Invoice {
   id: string; no: string; shop_id: string; cashier_id?: string; cashier_name: string; t: string; rate: number; vat_rate: number;
   gross: number; disc_pct: number; disc: number; total: number; vat: number; ht: number; tendered: number; change: number;
   printed: number; items: InvoiceItem[]; edits?: InvoiceEdit[]; synced?: boolean;
+  customer?: string; prepared_by_name?: string | null; order_id?: string | null;
 }
-export interface DeliveryItem { product_id: string; qty: number; price_usd: number }
+export interface DeliveryItem { product_id: string; qty: number; price_usd: number; received_qty?: number | null }
 export interface DeliveryEdit { at: string; by_name: string; reason: string }
-export interface Delivery { id: string; no: string; shop_id: string; rate: number; created_by_name: string; created_at: string; edited_at: string | null; delivery_items: DeliveryItem[]; delivery_edits: DeliveryEdit[] }
+export interface Delivery {
+  id: string; no: string; shop_id: string; rate: number; created_by_name: string; created_at: string; edited_at: string | null;
+  status: 'pending' | 'received' | 'cancelled'; received_at: string | null; received_by_name: string | null; received_note: string | null;
+  delivery_items: DeliveryItem[]; delivery_edits: DeliveryEdit[];
+}
+export interface OrderItem { product_id: string; mult: number; piece: boolean; qty: number }
+export interface SaleOrder {
+  id: string; shop_id: string; customer: string; items: OrderItem[]; status: 'pending' | 'approved' | 'rejected';
+  created_by: string; created_by_name: string; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null; reason: string | null; invoice_id: string | null;
+}

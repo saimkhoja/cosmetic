@@ -7,9 +7,14 @@ export interface Snapshot { shop: Shop; settings: Settings; products: Product[];
 export interface Device { id: string; code: string; shop_id: string; shop_code: string; last_seq: number }
 export interface SalePayload {
   id: string; no: string; device_id: string; cashier_id: string; t: string; rate: number; vat_rate: number; disc_pct: number; tendered: number;
+  customer: string; order_id: string | null;
   items: { product_id: string; mult: number; piece: boolean; qty: number; price: number }[];
 }
-export interface OutboxEntry { id: string; t: string; shop_id: string; payload: SalePayload; invoice: Invoice; error?: string; tries: number }
+export interface OrderPayload { id: string; customer: string; t: string; items: { product_id: string; mult: number; piece: boolean; qty: number }[] }
+/** A completed sale (shop admin) or an order waiting to reach the shop admin (till operator). */
+export type OutboxEntry =
+  | { kind?: 'sale'; id: string; t: string; shop_id: string; payload: SalePayload; invoice: Invoice; error?: string; tries: number }
+  | { kind: 'order'; id: string; t: string; shop_id: string; payload: OrderPayload; total: number; created_by: string; error?: string; tries: number };
 
 let dbp: Promise<IDBPDatabase> | null = null;
 export function db() {

@@ -38,10 +38,10 @@ export default function Layout({ children }: { children: ReactNode }) {
   const shopName = shop?.name ?? (profile.shop_id ? localStorage.getItem('sim.shopname') : null);
   const pos = loc.pathname === '/till';
   const pill = offline || !navigator.onLine
-    ? <button className="pill off"><Icon n="wifioff" /><span>Offline{waiting ? `, ${waiting} sale${waiting > 1 ? 's' : ''} saved on device` : ''}</span></button>
-    : <button className={`pill ${busy ? 'spin' : ''}`} title="Send waiting sales now" onClick={async () => { setBusy(true); await syncOutbox(); setBusy(false); }}><Icon n={busy ? 'refresh' : 'wifi'} /><span>{waiting ? `${waiting} sale${waiting > 1 ? 's' : ''} waiting to send` : 'Online, all synced'}</span></button>;
+    ? <button className="pill off"><Icon n="wifioff" /><span>Offline{waiting ? `, ${waiting} saved on device` : ''}</span></button>
+    : <button className={`pill ${busy ? 'spin' : ''}`} title="Send waiting sales now" onClick={async () => { setBusy(true); await syncOutbox(); setBusy(false); }}><Icon n={busy ? 'refresh' : 'wifi'} /><span>{waiting ? `${waiting} waiting to send` : 'Online, all synced'}</span></button>;
   const doSignOut = async () => {
-    if (waiting && !confirm(`${waiting} sale${waiting > 1 ? 's are' : ' is'} not sent yet. They stay on this device and are sent when the next person signs in here online. Sign out?`)) return;
+    if (waiting && !confirm(`${waiting} sale${waiting > 1 ? 's or orders are' : ' or order is'} not sent yet. They stay on this device and are sent when the next person signs in here online. Sign out?`)) return;
     await signOut();
   };
   return (
@@ -53,7 +53,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="who"><span className="av"><Icon n={ROLEICON[profile.role]} /></span><div><b>{profile.name}</b><small>{R[profile.role]}</small></div></div>
         <button className="iconbtn" onClick={doSignOut} title="Sign out" aria-label="Sign out"><Icon n="logout" /></button>
       </header>
-      {offline || !navigator.onLine ? <div className="offline-bar">No internet. {profile.role === 'till' || profile.role === 'shopadmin' ? 'The till keeps selling; sales are sent when the connection returns.' : 'Changes need the connection.'}</div> : null}
+      {offline || !navigator.onLine ? <div className="offline-bar">No internet. {profile.role === 'till' || profile.role === 'shopadmin' ? 'The till keeps working; sales and orders are sent when the connection returns.' : 'Changes need the connection.'}</div> : null}
       <div className="layout">
         <nav className="nav">{NAV[profile.role].map(([to, l, i]) => <NavLink key={to} to={to} end className={({ isActive }) => (isActive ? 'on' : '')}><Icon n={i} /><span>{l}</span></NavLink>)}</nav>
         <main className={pos ? 'posmain' : ''}>{children}</main>
