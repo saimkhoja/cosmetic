@@ -82,7 +82,7 @@ select t.ok(not exists (select 1 from products where name = 'Fine'), 'nothing fr
 select t.fails($$update public.products set price_usd = 1$$, 'permission denied', 'admin cannot write tables directly either');
 reset role;
 
--- ===== warehouse operator: no cost, deliveries =====
+-- ===== warehouse operator: no cost; deliveries wait for the shop =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000b');
 select t.ok((select count(*) from product_costs) = 0, 'operator cannot see cost prices');
@@ -92,63 +92,98 @@ select public.receive_stock(t.get('lotion')::uuid, 0, 1, 'Supplier A');
 select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = 52, 'receive stock adds to the store');
 select t.put('dels', public.create_deliveries(array[t.get('gom')::uuid, t.get('lim')::uuid],
   jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 24), jsonb_build_object('product_id', t.get('brush'), 'qty', 2)))::text);
-select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = 4, 'two outlets x 24 pcs taken from the store');
-select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 24, 'Gombe received 24');
-select t.ok((select string_agg(no, ',' order by no) from deliveries) = 'DEL-0001,DEL-0002', 'one delivery note number per outlet');
-select t.fails(format($$select public.create_deliveries(array['%s'::uuid], '[{"product_id":"%s","qty":999}]')$$, t.get('gom'), t.get('lotion')), 'Not enough in the store', 'shortage is refused');
+select t.ok((select string_agg(no || ':' || status, ',' order by no) from deliveries) = 'DEL-0001:pending,DEL-0002:pending', 'one pending delivery per outlet');
+select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = 52, 'sending does not move store stock yet');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 0, 'shop stock unchanged until received');
+select t.fails(format($$select public.create_deliveries(array['%s'::uuid], '[{"product_id":"%s","qty":5}]')$$, t.get('gom'), t.get('lotion')), 'not yet received', 'stock promised to waiting deliveries cannot be sent again (52 - 48 = 4 left)');
 select t.fails(format($$select public.create_deliveries(array['%s'::uuid], '[{"product_id":"%s","qty":1.5}]')$$, t.get('gom'), t.get('lotion')), 'whole numbers', 'fractional quantity refused');
--- move DEL-0002 (Limete) to Gombe and change 24 -> 26
+-- move DEL-0002 (Limete) to Gombe and change 24 -> 26, still waiting
 select t.fails(format($$select public.edit_delivery('%s', '%s', '[{"product_id":"%s","qty":26}]', 'x')$$, (select id from deliveries where no='DEL-0002'), t.get('gom'), t.get('lotion')), 'reason', 'edit needs a reason');
 select public.edit_delivery((select id from deliveries where no='DEL-0002'), t.get('gom')::uuid, jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 26)), 'Wrong shop at loading');
-select t.ok((select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('lotion')::uuid) = 0, 'old outlet stock reversed');
-select t.ok((select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('brush')::uuid) = 0, 'removed line reversed');
-select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 50, 'new outlet got 26 more');
-select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = 2 and (select wh_qty from products where id = t.get('brush')::uuid) = 8, 'store stock re-applied');
+select t.ok((select shop_id from deliveries where no='DEL-0002') = t.get('gom')::uuid and (select status from deliveries where no='DEL-0002') = 'pending', 'edited delivery moved and still waiting');
 select t.ok((select price_usd from delivery_items i join deliveries d on d.id = i.delivery_id where d.no='DEL-0002') = 1.6, 'price frozen from first dispatch');
+select t.fails(format($$select public.receive_delivery('%s', '[]', '')$$, (select id from deliveries where no='DEL-0001')), 'permission', 'the operator cannot receive for a shop');
+-- a third delivery is cancelled before it arrives
+select public.create_deliveries(array[t.get('lim')::uuid], jsonb_build_array(jsonb_build_object('product_id', t.get('brush'), 'qty', 1)));
+select public.cancel_delivery((select id from deliveries where no='DEL-0003'), 'Truck broke down');
+select t.ok((select status from deliveries where no='DEL-0003') = 'cancelled', 'a waiting delivery can be cancelled');
 reset role;
 
--- ===== till operator: sell, never read invoices =====
+-- ===== shop admin receives the deliveries =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((select count(*) from deliveries where status = 'pending') = 2, 'shop admin sees the two deliveries waiting for Gombe');
+select t.fails(format($$select public.receive_delivery('%s', '[{"product_id":"%s","qty":30}]', '')$$, (select id from deliveries where no='DEL-0001'), t.get('lotion')), 'more than was sent', 'cannot receive more than was sent');
+select t.fails(format($$select public.receive_delivery('%s', '[{"product_id":"%s","qty":20}]', '')$$, (select id from deliveries where no='DEL-0001'), t.get('lotion')), 'arrived short', 'a short delivery needs a note');
+select public.receive_delivery((select id from deliveries where no='DEL-0001'), jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 24), jsonb_build_object('product_id', t.get('brush'), 'qty', 2)), '');
+select public.receive_delivery((select id from deliveries where no='DEL-0002'), jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 26)), '');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 50, 'Gombe stock goes up only when received (24 + 26)');
+select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = 2 and (select wh_qty from products where id = t.get('brush')::uuid) = 8, 'store stock goes down when received');
+select t.fails(format($$select public.receive_delivery('%s', '[]', '')$$, (select id from deliveries where no='DEL-0001')), 'already received', 'a delivery is received once');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000b');
+select t.fails(format($$select public.edit_delivery('%s', '%s', '[{"product_id":"%s","qty":1}]', 'too late')$$, (select id from deliveries where no='DEL-0001'), t.get('gom'), t.get('lotion')), 'no longer be changed', 'a received delivery can no longer be edited');
+reset role;
+
+-- ===== till operator: prepares orders for the shop admin; never sells or reads invoices =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
 select t.put('dev1', (public.register_device()->>'id'));
 select t.ok((select code from devices where id = t.get('dev1')::uuid) = 'T1', 'first till of the shop is T1');
 select t.ok((public.register_device(t.get('dev1')::uuid)->>'code') = 'T1', 'same browser keeps its till code');
 select t.ok((select count(*) from shop_stock where shop_id = t.get('lim')::uuid) = 0, 'till cannot see another shop''s stock');
-select t.put('inv1', gen_random_uuid()::text);
-select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv1'), 'no', 'GOM-T1-000001', 'device_id', t.get('dev1'), 't', now(), 'rate', 2850, 'vat_rate', 16,
-  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 3, 'price', 4560),
-                             jsonb_build_object('product_id', t.get('brush'), 'piece', true, 'qty', 13, 'price', 5130))))->>'status') = 'ok', 'till submits a sale');
-select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv1'), 'no', 'GOM-T1-000001', 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16,
-  'items', '[]'::jsonb))->>'status') = 'duplicate', 'a sale sent twice is saved once');
-select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 47, 'shop stock lowered by 3 pcs');
-select t.ok((select qty || '/' || open_pieces from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('brush')::uuid) = '1/1', '13 pieces open 2 sets: 1 set left, 1 piece sold from the open one');
+select t.fails(format($$select public.submit_order('{"id":"%s","customer":" ","items":[{"product_id":"%s","mult":1,"qty":1}]}')$$, gen_random_uuid(), t.get('lotion')), 'customer name', 'an order needs the customer name');
+select t.put('ord1', gen_random_uuid()::text);
+select t.ok((public.submit_order(jsonb_build_object('id', t.get('ord1'), 'customer', 'Mama Nzuzi',
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 3),
+                             jsonb_build_object('product_id', t.get('brush'), 'piece', true, 'qty', 13))))->>'status') = 'ok', 'till sends an order for approval');
+select t.ok((public.submit_order(jsonb_build_object('id', t.get('ord1'), 'customer', 'Mama Nzuzi', 'items', '[]'::jsonb))->>'status') = 'duplicate', 'an order sent twice is saved once');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 50, 'an order does not take stock');
+select t.ok((select count(*) from sale_orders) = 1, 'till sees its own order');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000001","device_id":"%s","customer":"X","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion')),
+  'permission', 'till cannot complete a sale');
+select t.fails(format($$select public.submit_order('{"id":"%s","customer":"Y","items":[{"product_id":"%s","mult":7,"qty":1}]}')$$, gen_random_uuid(), t.get('lotion')), 'Unit not valid', 'unknown unit refused');
 select t.ok((select count(*) from invoices) = 0, 'till cannot read invoices');
-select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000002","device_id":"%s","rate":2850,"vat_rate":16,"disc_pct":10,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion')),
-  'Only the shop admin', 'till cannot give a discount');
-select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"LIM-T1-000002","device_id":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion')),
-  'does not match', 'invoice number must belong to this till');
-select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000003","device_id":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":7,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion')),
-  'Unit not valid', 'unknown unit refused');
-select t.fails(format($$select public.edit_invoice('%s', '[]', 0, 'test test')$$, t.get('inv1')), 'permission', 'till cannot edit invoices');
+select t.put('ord2', gen_random_uuid()::text);
+select public.submit_order(jsonb_build_object('id', t.get('ord2'), 'customer', 'Papa Lokwa', 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1))));
 reset role;
 
--- ===== shop admin: discount, offline price, edit, report =====
+-- ===== shop admin: approves orders, discount, offline price, edit, report =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
 select t.put('dev2', (public.register_device()->>'id'));
 select t.ok((select code from devices where id = t.get('dev2')::uuid) = 'T2', 'second till is T2');
+select t.ok((select count(*) from sale_orders where status = 'pending') = 2, 'shop admin sees the orders waiting for review');
+select t.put('inv1', gen_random_uuid()::text);
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000001","device_id":"%s","customer":"","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion')),
+  'customer name', 'an invoice needs the customer name');
+-- approve the till's order, as reviewed (same lines)
+select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv1'), 'no', 'GOM-T2-000001', 'device_id', t.get('dev2'), 't', now(), 'rate', 2850, 'vat_rate', 16,
+  'customer', 'Mama Nzuzi', 'order_id', t.get('ord1'),
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 3, 'price', 4560),
+                             jsonb_build_object('product_id', t.get('brush'), 'piece', true, 'qty', 13, 'price', 5130))))->>'status') = 'ok', 'shop admin approves the order into an invoice');
+select t.ok((select status || '/' || (invoice_id = t.get('inv1')::uuid)::text from sale_orders where id = t.get('ord1')::uuid) = 'approved/true', 'order marked approved and linked to the invoice');
+select t.ok((select customer || '/' || prepared_by_name from invoices where id = t.get('inv1')::uuid) = 'Mama Nzuzi/Grace Mbuyi', 'invoice keeps the customer and who prepared it');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000009","device_id":"%s","customer":"Again","order_id":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('ord1'), t.get('lotion')),
+  'already approved', 'an order is approved once');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 47, 'stock lowered by 3 pcs on approval');
+select t.ok((select qty || '/' || open_pieces from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('brush')::uuid) = '1/1', '13 pieces open 2 sets: 1 set left, 1 piece sold from the open one');
+select t.fails(format($$select public.reject_order('%s', '')$$, t.get('ord2')), 'reason', 'rejecting needs a reason');
+select public.reject_order(t.get('ord2')::uuid, 'Customer left');
+select t.ok((select status from sale_orders where id = t.get('ord2')::uuid) = 'rejected', 'order rejected');
 select t.put('inv2', gen_random_uuid()::text);
 -- sold offline at an old price (4000 FC): accepted as printed, flagged
-select public.submit_invoice(jsonb_build_object('id', t.get('inv2'), 'no', 'GOM-T2-000001', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'disc_pct', 10,
-  'cashier_id', '00000000-0000-0000-0000-00000000000c',
+select public.submit_invoice(jsonb_build_object('id', t.get('inv2'), 'no', 'GOM-T2-000002', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'disc_pct', 10,
+  'cashier_id', '00000000-0000-0000-0000-00000000000c', 'customer', 'Walk-in',
   'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 24, 'qty', 1, 'price', 85500),
                              jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 4000))));
 select t.ok((select total from invoices where id = t.get('inv2')::uuid) = 80550, 'discount 10% on 89 500 = 80 550 (rounded to 10 FC)');
 select t.ok((select vat from invoices where id = t.get('inv2')::uuid) = 11110, 'VAT included = total x 16/116, rounded');
 select t.ok((select price_flag from invoices where id = t.get('inv2')::uuid), 'an old price is accepted and flagged');
 select t.ok((select count(*) from invoices) = 2, 'shop admin sees the shop''s invoices');
-select t.ok((select last_seq from devices where id = t.get('dev2')::uuid) = 1, 'till sequence remembered on the server');
--- edit the till's sale: lotion 3 -> 2, brush pieces 13 -> 1
+select t.ok((select last_seq from devices where id = t.get('dev2')::uuid) = 2, 'till sequence remembered on the server');
+-- edit the approved sale: lotion 3 -> 2, brush pieces 13 -> 1
 select public.edit_invoice(t.get('inv1')::uuid, '[{"line_no":1,"qty":2},{"line_no":2,"qty":1}]', 0, 'Customer returned items');
 select t.ok((select total from invoices where id = t.get('inv1')::uuid) = 2 * 4560 + 5130, 'edited total');
 select t.ok((select qty || '/' || open_pieces from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('brush')::uuid) = '2/1', 'brush stock put back: 2 sets, 1 piece sold from the open one');
@@ -160,6 +195,7 @@ select t.ok((t.get('rep')::jsonb->'slips'->0->>'collected')::bigint - (t.get('re
 select t.ok(jsonb_array_length(t.get('rep')::jsonb->'slips') = 1, 'shop admin report covers only their shop');
 select t.ok((t.get('rep')::jsonb->'by_day'->0->>'day') = current_date::text and (t.get('rep')::jsonb->'by_day'->0->>'n')::int = 2, 'sales by day: one row per day with its count');
 select t.ok((t.get('rep')::jsonb->'top'->0->>'name') is not null, 'best sellers list items by name');
+select t.ok((t.get('rep')::jsonb->'invoices'->0->>'customer') in ('Walk-in', 'Mama Nzuzi'), 'report lists the customer');
 select t.ok((t.get('rep')::jsonb->'profit_usd') = 'null'::jsonb, 'shop admin does not get profit (cost) figures');
 select public.record_reprint(t.get('inv1')::uuid);
 reset role;
@@ -169,7 +205,8 @@ set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000e');
 select t.ok((select count(*) from invoices) = 0, 'Limete admin cannot see Gombe invoices');
 select t.fails(format($$select public.edit_invoice('%s', '[{"line_no":1,"qty":1}]', 0, 'not mine')$$, t.get('inv1')), 'not found', 'cannot edit another shop''s invoice');
-select t.ok((select count(*) from deliveries) = 0, 'Limete sees no deliveries now that DEL-0002 moved to Gombe');
+select t.ok((select string_agg(no, ',') from deliveries) = 'DEL-0003', 'Limete sees only its own (cancelled) delivery now that DEL-0002 moved to Gombe');
+select t.ok((select count(*) from sale_orders) = 0, 'Limete admin cannot see Gombe orders');
 reset role;
 
 -- ===== admin sees everything; disabled users are shut out =====

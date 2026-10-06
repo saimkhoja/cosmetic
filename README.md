@@ -16,16 +16,16 @@ There are no demo accounts. The first visit to a new installation shows a **setu
 |---|---|
 | Admin | Everything: carton cost, pc/dozen/carton and set/piece prices, Excel import, deliveries, upkeep, users, settings, reports, activity log |
 | Warehouse Operator | Item names, units and quantities, receive stock, see every shop's stock, send and correct deliveries. No cost prices, no price changes |
-| Shop Admin | Till, invoice discount (max 30%), edit a confirmed invoice with a reason, duplicates, shop stock, deliveries received, reports and the day end slip |
-| Till Operator | Sell and print at the moment of the sale only, in Francs. No invoice list, no reports |
+| Shop Admin | Reviews the till operators' orders (add or remove items) and approves them: takes the cash and prints. Also sells directly, invoice discount (max 30%), edits a confirmed invoice with a reason, duplicates, receives deliveries from the store, shop stock, reports and the day end slip |
+| Till Operator | Types the customer name, picks the items and sends the order to the Shop Admin for approval. No cash, no printing, no invoice list, no reports |
 
 ## What it does
 
 - **Carton pricing.** An item is entered with the cost of one carton, the pcs in a carton and a selling price per pc, per dozen (optional) and per carton. Stock is counted in pcs and shown as cartons + pcs. Mixed sets sell whole or one piece at a last price.
 - **Bulk import from Excel** (.xlsx or .csv, template included). Rows are checked first; existing names or codes are skipped; one bad row stops the import so nothing half-imports.
-- **The store sends stock straight to the shops**, to one or more outlets at once (same quantities, one delivery note each). Deliveries can be corrected later with a reason; stock is put right on both sides.
-- **One-tap cash sale.** "Take cash and print" records the exact total in Francs and prints the customer and shop copies at once.
-- **Offline till.** Items, prices and shop stock are kept on the till. Without internet it keeps selling and printing; each till numbers its own invoices (`GOM-T1-000123`) so tills never clash, and sales are sent automatically when the connection returns. A sale sent twice is saved once.
+- **The store sends stock to the shops**, to one or more outlets at once (same quantities, one delivery note each). The Shop Admin checks what arrived and approves it, lowering a line if goods are short (with a note); only then does the stock leave the store and enter the shop. Goods already sent count as promised, so the same stock can't be sent twice. A delivery can be corrected or cancelled until it is received.
+- **Orders approved by the Shop Admin.** The till operator starts each sale with the customer name, picks the items and sends the order. On the Shop Admin's till, 75% of the screen is the sale he is making and 25% lists the orders waiting for review; he opens one, adds or removes items, then "Approve, take cash and print" records the exact total in Francs and prints the customer and shop copies (customer name and who prepared it on the invoice). He can also reject an order with a reason, which the till operator sees.
+- **Offline till.** Items, prices and shop stock are kept on the till. Without internet the Shop Admin keeps selling and printing and the till operator keeps preparing orders (they reach the Shop Admin when the connection returns); each till numbers its own invoices (`GOM-T1-000123`) so tills never clash, and sales are sent automatically when the connection returns. A sale sent twice is saved once.
 - **Prices locked.** Only the Admin sets prices; shops sell exactly what was set. Invoices keep the prices and rate of the moment of sale.
 - **Editable invoices** by the Shop Admin, with a reason; stock is adjusted and the change is logged.
 - **Reports** over any dates, printable or as PDF. A single day prints the **day end report** per shop in the shift end slip format: total invoices, invoice value in USD and FC, collected, returned and balance.

@@ -14,7 +14,7 @@ export async function syncOutbox(): Promise<{ sent: number; failed: number; wait
     for (const e of await outboxAll()) {
       if (!navigator.onLine) break;
       try {
-        await rpc('submit_invoice', { p: e.payload });
+        await rpc(e.kind === 'order' ? 'submit_order' : 'submit_invoice', { p: e.payload });
         await outboxDel(e.id); sent++;
       } catch (err) {
         if (isNetworkError(err)) break;

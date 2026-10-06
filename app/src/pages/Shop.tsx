@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useDeliveries, useInvoices, useProducts, useRefresh, useReport, useSettings, useShops, useStock } from '../data/queries';
+import { useDeliveries, useInvoices, useOrders, useProducts, useRefresh, useReport, useSettings, useShops, useStock } from '../data/queries';
 import { rpc } from '../lib/supabase';
 import { ctnTxt, totals, unitLabel, unitsOf } from '../lib/units';
 import { dt, fCDF, ld, sum, tm, toCDF, today } from '../lib/format';
@@ -18,7 +18,8 @@ export function ShopHome() {
   const shop = shops.data?.find((s) => s.id === sid), r = rep.data;
   const byId = new Map((products.data ?? []).map((p) => [p.id, p]));
   const low = (stock.data ?? []).filter((x) => x.qty <= 5 && byId.has(x.product_id)).sort((a, b) => a.qty - b.qty);
-  const lastDel = dels.data?.[0];
+  const lastDel = dels.data?.find((d) => d.status === 'received');
+  const toReceive = (dels.data ?? []).filter((d) => d.status === 'pending').length, toReview = (useOrders('pending').data ?? []).length;
   return (
     <>
       <Head t={`Good ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, ${profile!.name.split(' ')[0]}`} s={`${shop?.name ?? ''}, ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}`} />
@@ -28,10 +29,10 @@ export function ShopHome() {
         <Kpi i="edit" l="Invoices edited today" tone={r?.edited ? 'warn' : ''}><Dual2 b={r?.edited ?? 0} s="by the shop admin" /></Kpi>
         <Kpi i="alert" l="Items running low" tone={low.length ? 'bad' : ''}><Dual2 b={low.length} s="5 or fewer left" /></Kpi>
       </div>
-      <div className="tiles"><Tile i="cart" l="Open till" onClick={() => nav('/till')} /><Tile i="receipt" l="Invoices" onClick={() => nav('/invoices')} /><Tile i="truck" l="Deliveries received" onClick={() => nav('/received')} /><Tile i="chart" l="Sales report" onClick={() => nav('/reports')} /></div>
+      <div className="tiles"><Tile i="cart" l={<>Open till{toReview ? <em>{toReview} to review</em> : null}</>} onClick={() => nav('/till')} /><Tile i="receipt" l="Invoices" onClick={() => nav('/invoices')} /><Tile i="truck" l={<>Deliveries{toReceive ? <em>{toReceive} to receive</em> : null}</>} onClick={() => nav('/received')} /><Tile i="chart" l="Sales report" onClick={() => nav('/reports')} /></div>
       <div className="card p0"><div style={{ padding: '16px 16px 0' }}><h3><Icon n="alert" /> Running low or sold on order</h3></div>
         {low.length ? <><div className="tw"><table className="t"><tbody>{low.slice(0, 30).map((x) => <tr key={x.product_id}><td><b>{byId.get(x.product_id)!.name}</b></td><td className="r"><span className={`chip ${x.qty > 0 ? 'warn' : 'bad'}`}>{x.qty > 0 ? x.qty + ' left' : x.qty < 0 ? Math.abs(x.qty) + ' sold on order' : 'None left'}</span></td></tr>)}</tbody></table></div>
-          <Note i="truck" style={{ margin: '12px 16px' }}>The central store sees this list and sends stock directly.{lastDel ? <> Last delivery: <b>{lastDel.no}</b> on {dt(lastDel.created_at)}.</> : null}</Note></> : <Empty i="check" t="Stock levels look good" />}</div>
+          <Note i="truck" style={{ margin: '12px 16px' }}>The central store sees this list and sends stock directly.{lastDel ? <> Last delivery received: <b>{lastDel.no}</b> on {dt(lastDel.received_at ?? lastDel.created_at)}.</> : null}</Note></> : <Empty i="check" t="Stock levels look good" />}</div>
     </>
   );
 }
@@ -61,7 +62,7 @@ export function Invoices() {
   const since = f === 'all' ? null : new Date(f === 'today' ? new Date(today() + 'T00:00:00').getTime() : Date.now() - 7 * 864e5).toISOString();
   const inv = useInvoices(sid, since), shops = useShops(), settings = useSettings(), refresh = useRefresh(), toast = useToast();
   const [waiting, setWaiting] = useState<Invoice[]>([]);
-  useEffect(() => { const upd = () => void outboxAll().then((l) => setWaiting(l.filter((e) => e.shop_id === sid).map((e) => e.invoice))); upd(); addEventListener('sim-outbox', upd); return () => removeEventListener('sim-outbox', upd); }, [sid]);
+  useEffect(() => { const upd = () => void outboxAll().then((l) => setWaiting(l.flatMap((e) => (e.shop_id === sid && e.kind !== 'order' ? [e.invoice] : [])))); upd(); addEventListener('sim-outbox', upd); return () => removeEventListener('sim-outbox', upd); }, [sid]);
   const shop = shops.data?.find((x) => x.id === sid);
   const q = s.trim().toLowerCase();
   const list = useMemo(() => {
@@ -78,15 +79,15 @@ export function Invoices() {
     <>
       <Head t="Invoices" s="Find any sale, edit it if something was wrong, or print a duplicate." />
       <div className="toolbar"><div className="seg">{([['today', 'Today'], ['week', '7 days'], ['all', 'All']] as const).map(([k, l]) => <button key={k} className={f === k ? 'on' : ''} onClick={() => setF(k)}>{l}</button>)}</div>
-        <div className="search"><Icon n="search" /><input placeholder={`Invoice number, e.g. ${shop?.code ?? 'GOM'}-T1-000005`} value={s} onChange={(e) => setS(e.target.value)} /></div></div>
+        <div className="search"><Icon n="search" /><input placeholder={`Invoice number or customer, e.g. ${shop?.code ?? 'GOM'}-T1-000005`} value={s} onChange={(e) => setS(e.target.value)} /></div></div>
       <div className="kpis">
         <Kpi i="receipt" l="Total"><Dual2 b={fCDF(sum(list, (i) => i.total))} s={`${list.length} invoices`} /></Kpi>
         <Kpi i="cash" l="Cash taken" tone="ok"><Dual2 b={fCDF(sum(list, (i) => i.total))} s="cash only" /></Kpi>
         <Kpi i="edit" l="Edited" tone={edited ? 'warn' : ''}><Dual2 b={edited} s="you can edit and reprint" /></Kpi>
         <Kpi i={pending ? 'clock' : 'cloud'} l="Sent to server" tone={pending ? 'warn' : 'ok'}><Dual2 b={pending ? pending + ' waiting' : 'All sent'} s={pending ? 'Will send when online' : 'Up to date'} /></Kpi>
       </div>
-      <div className="card p0">{list.length ? <div className="tw"><table className="t"><thead><tr><th>Invoice</th><th>Time</th><th>Cashier</th><th className="r">Items</th><th className="r">Discount</th><th className="r">Total</th><th>Printing</th><th>Server</th><th /></tr></thead><tbody>
-        {list.slice(0, 300).map((i) => <tr key={i.id}><td><b>{i.no}</b>{i.edits?.length ? <> <span className="chip warn">Edited</span></> : null}</td><td style={{ whiteSpace: 'nowrap' }}>{f === 'today' ? tm(i.t) : dt(i.t)}</td><td>{i.cashier_name}</td><td className="r">{sum(i.items, (x) => x.qty)}</td>
+      <div className="card p0">{list.length ? <div className="tw"><table className="t"><thead><tr><th>Invoice</th><th>Time</th><th>Customer</th><th>Cashier</th><th className="r">Items</th><th className="r">Discount</th><th className="r">Total</th><th>Printing</th><th>Server</th><th /></tr></thead><tbody>
+        {list.slice(0, 300).map((i) => <tr key={i.id}><td><b>{i.no}</b>{i.edits?.length ? <> <span className="chip warn">Edited</span></> : null}</td><td style={{ whiteSpace: 'nowrap' }}>{f === 'today' ? tm(i.t) : dt(i.t)}</td><td>{i.customer || '-'}</td><td>{i.cashier_name}{i.prepared_by_name ? <div className="code">prepared by {i.prepared_by_name}</div> : null}</td><td className="r">{sum(i.items, (x) => x.qty)}</td>
           <td className="r">{i.disc ? fCDF(i.disc) : '-'}</td><td className="r"><b>{fCDF(i.total)}</b></td>
           <td>{i.printed > 2 ? <span className="chip warn">{i.printed - 2} duplicate{i.printed - 2 > 1 ? 's' : ''}</span> : <span className="chip"><Icon n="lock" /> 2 copies</span>}</td>
           <td>{i.synced ? <span className="chip ok"><Icon n="cloud" /> Sent</span> : <span className="chip warn"><Icon n="clock" /> Waiting</span>}</td>

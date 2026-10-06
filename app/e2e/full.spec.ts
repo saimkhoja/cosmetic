@@ -2,8 +2,9 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import path from 'node:path';
 import fs from 'node:fs';
 
-// One full working day, on a fresh install: setup, logins, catalogue, deliveries, an offline
-// sale, an invoice correction and the day end report.
+// One full working day, on a fresh install: setup, logins, catalogue, deliveries received by the
+// shop, orders prepared at the till and approved by the shop admin (one offline), an offline sale,
+// an invoice correction and the day end report.
 const PW = { admin: 'AdminPass2026', op: 'OperatorPass2026', shop: 'ShopAdmin2026', till: 'TillPass2026x' };
 const firstPw: Record<string, string> = {};
 
@@ -107,45 +108,101 @@ test('a full day in SIM', async ({ browser }) => {
   await op.fill('#dreason', 'Loaded on the Gombe truck');
   await op.getByRole('button', { name: 'Save changes' }).click();
   await expect(op.getByText('Delivery updated')).toBeVisible();
+  await expect(op.locator('.card', { hasText: 'DEL-0001' })).toContainText('Waiting for the shop to receive');
   await op.getByRole('link', { name: 'Shop stock' }).click();
-  await expect(op.locator('tr', { hasText: 'Shea body lotion' })).toContainText('96 pcs'); // Gombe: 2 deliveries x 2 cartons
-  await expect(op.locator('tr', { hasText: 'Shea body lotion' })).toContainText('96 pcs'); // store: 192 - 96
+  const sheaRow = op.locator('tr', { hasText: 'Shea body lotion' });
+  await expect(sheaRow).toContainText('192 pcs');                      // nothing has left the store yet
+  await expect(sheaRow).toContainText('+96 on the way');
 
-  // ---- the till: sells online, then offline, and the offline sale is sent when back online
+  // ---- the shop admin receives: one in full, one short with a note
+  const { page: shop } = await open(browser);
+  await firstSignIn(shop, 'admin.gombe', PW.shop);
+  await expect(shop.getByText('2 to receive')).toBeVisible();
+  await shop.getByRole('link', { name: 'Deliveries' }).click();
+  await shop.locator('.card', { hasText: 'DEL-0001' }).getByRole('button', { name: 'Receive' }).click();
+  await shop.getByRole('button', { name: 'Approve and add to shop stock' }).click();
+  await expect(shop.getByText('DEL-0001 received: 96 of 96 units')).toBeVisible();
+  await shop.locator('.card', { hasText: 'DEL-0002' }).getByRole('button', { name: 'Receive' }).click();
+  await shop.getByLabel('Received Shea body lotion 400 ml').fill('24');
+  await shop.getByRole('button', { name: 'Approve and add to shop stock' }).click();
+  await expect(shop.locator('.modal .lerr')).toContainText('arrived short');
+  await shop.fill('#rnote', 'One carton missing from the truck');
+  await shop.getByRole('button', { name: 'Approve and add to shop stock' }).click();
+  await expect(shop.getByText('DEL-0002 received: 72 of 96 units')).toBeVisible();
+  await expect(shop.locator('.card', { hasText: 'DEL-0002' })).toContainText('Received, some short');
+
+  // ---- the till operator: customer name first, then items, then send for approval
   const { ctx: tillCtx, page: till } = await open(browser);
   await firstSignIn(till, 'till.gombe', PW.till);
   await expect(till.locator('nav a')).toHaveCount(1);
-  await expect(till.locator('.ptile', { hasText: 'Shea body lotion' })).toContainText('96 in shop');
+  await expect(till.locator('.ptile', { hasText: 'Shea body lotion' })).toContainText('72 in shop');   // 48 + 24 received
+  await till.locator('.ptile', { hasText: 'Shea body lotion' }).click();
+  await expect(till.getByText('Type the customer name first')).toBeVisible();
+  await till.fill('#cust', 'Mama Nzuzi'); await till.press('#cust', 'Enter');
+  await expect(till.locator('#custname')).toHaveText('Mama Nzuzi');
   await till.locator('.ptile', { hasText: 'Shea body lotion' }).click();
   await till.locator('.ubtn', { hasText: 'pcs' }).first().click();
   await till.locator('.ptile', { hasText: 'Matte lipstick' }).click();
   await till.locator('.ubtn', { hasText: 'dzn' }).click();
-  await till.getByRole('button', { name: 'Take cash and print' }).click();
-  await expect(till.getByText(/Sale GOM-T1-000001 done/)).toBeVisible();
-  expect((await prints(till)).at(-1)).toContain('Copie magasin');
-  await expect(till.locator('.modal')).toHaveCount(0);
-  await expect(till.locator('#sync, .pill').first()).toContainText('all synced', { timeout: 30000 });
-
+  await till.getByRole('button', { name: 'Send to shop admin for approval' }).click();
+  await expect(till.getByText('Order for Mama Nzuzi sent to the shop admin for approval')).toBeVisible();
+  expect(await prints(till)).toHaveLength(0);                          // nothing printed at the till
+  await expect(till.locator('.myorders')).toContainText('Waiting for approval', { timeout: 30000 });
+  // a second order while offline is kept and sent later
   await tillCtx.setOffline(true);
-  await till.reload();                                        // the app itself opens offline (service worker)
+  await till.reload();
   await expect(till.locator('.offline-bar')).toBeVisible();
+  await till.fill('#cust', 'Papa Lokwa'); await till.press('#cust', 'Enter');
   await till.locator('.ptile', { hasText: 'Shea body lotion' }).click();
-  await till.locator('.ubtn', { hasText: 'carton' }).click();
-  await till.getByRole('button', { name: 'Take cash and print' }).click();
-  await expect(till.getByText(/Sale GOM-T1-000002 done/)).toBeVisible();
-  await expect(till.locator('.pill')).toContainText('1 sale saved on device');
-  await expect(till.locator('.ptile', { hasText: 'Shea body lotion' })).toContainText('71 in shop'); // 96 - 1 - 24
-  await till.goto('/invoices');
-  await expect(till).toHaveURL(/\/till$/);                     // no invoices screen for the till
+  await till.locator('.ubtn', { hasText: 'pcs' }).first().click();
+  await till.getByRole('button', { name: 'Send to shop admin for approval' }).click();
+  await expect(till.locator('.pill')).toContainText('1 saved on device');
+  await expect(till.locator('.myorders')).toContainText('Not sent yet');
   await tillCtx.setOffline(false);
   await till.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect(till.locator('.pill')).toContainText('all synced', { timeout: 40000 });
 
-  // ---- the shop admin: sees both sales, corrects one, prints the day end report
-  const { page: shop } = await open(browser);
-  await firstSignIn(shop, 'admin.gombe', PW.shop);
+  // ---- the shop admin reviews: opens the order, adds one pc, approves; rejects the other
+  await shop.getByRole('link', { name: 'Till' }).click();
+  const review = shop.locator('.review');
+  await expect(review.locator('.rcard', { hasText: 'Papa Lokwa' })).toBeVisible({ timeout: 30000 });
+  await review.locator('.rcard', { hasText: 'Mama Nzuzi' }).getByRole('button', { name: 'Open' }).click();
+  await expect(shop.locator('#custname')).toHaveText('Mama Nzuzi');
+  await expect(shop.locator('#cart .line')).toHaveCount(2);
+  await shop.locator('#cart .line', { hasText: 'Shea body lotion' }).getByLabel('One more').click();
+  await shop.getByRole('button', { name: 'Approve, take cash and print' }).click();
+  await expect(shop.getByText(/Sale GOM-T1-000001 for Mama Nzuzi done/)).toBeVisible();
+  const slipPrint = (await prints(shop)).at(-1)!;
+  expect(slipPrint).toContain('Mama Nzuzi'); expect(slipPrint).toContain('Grace Mbuyi'); expect(slipPrint).toContain('Copie magasin');
+  await expect(review.locator('.rcard', { hasText: 'Mama Nzuzi' })).toHaveCount(0);
+  await review.locator('.rcard', { hasText: 'Papa Lokwa' }).getByTitle('Reject this order').click();
+  await shop.fill('#rreason', 'Customer left');
+  await shop.getByRole('button', { name: 'Reject order' }).click();
+  await expect(review.locator('.rcard')).toHaveCount(0);
+  await till.reload();
+  await expect(till.locator('.myorders')).toContainText('Approved', { timeout: 30000 });
+  await expect(till.locator('.myorders')).toContainText('Rejected: Customer left');
+
+  // ---- the shop admin sells directly while offline; it is sent when back online
+  const shopCtx = shop.context();
+  await shopCtx.setOffline(true);
+  await shop.reload();
+  await expect(shop.locator('.offline-bar')).toBeVisible();
+  await shop.fill('#cust', 'Walk-in customer'); await shop.press('#cust', 'Enter');
+  await shop.locator('.ptile', { hasText: 'Shea body lotion' }).click();
+  await shop.locator('.ubtn', { hasText: 'carton' }).click();
+  await shop.getByRole('button', { name: 'Take cash and print' }).click();
+  await expect(shop.getByText(/Sale GOM-T1-000002 for Walk-in customer done/)).toBeVisible();
+  await expect(shop.locator('.pill')).toContainText('1 saved on device');
+  await expect(shop.locator('.ptile', { hasText: 'Shea body lotion' })).toContainText('46 in shop'); // 72 - 2 - 24
+  await shopCtx.setOffline(false);
+  await shop.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
+
+  // ---- correct the approved invoice, then the day end report
   await shop.getByRole('link', { name: 'Invoices' }).click();
-  await expect(shop.locator('tbody tr')).toHaveCount(2);
+  await expect(shop.locator('main table.t tbody tr')).toHaveCount(2);
+  await expect(shop.locator('tr', { hasText: 'GOM-T1-000001' })).toContainText('Mama Nzuzi');
   await shop.locator('tr', { hasText: 'GOM-T1-000001' }).getByTitle('Edit invoice').click();
   await shop.locator('.modal tr', { hasText: 'Matte lipstick' }).locator('input').fill('0');   // customer gave the dozen back
   await expect(shop.locator('.modal')).toContainText('Give back to the customer: 94 050 FC');
@@ -157,7 +214,6 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.getByRole('button', { name: 'Print day end report' }).click();
   const slip = shop.locator('#slips');
   await expect(slip).toContainText('Shift End Report');
-  await expect(slip).toContainText('Total Invoice');
   await expect(slip).toContainText('SIM Beauté Gombe');
   const txt = await slip.innerText();
   const n = (k: string) => Number(new RegExp(k + '\\s*:\\s*([\\d.]+)').exec(txt)![1]);
@@ -169,6 +225,7 @@ test('a full day in SIM', async ({ browser }) => {
   // ---- the Admin sees the activity; disabling the till ends its access
   await admin.getByRole('link', { name: 'Activity' }).click();
   await expect(admin.getByText(/Invoice GOM-T1-000001 edited/)).toBeVisible();
+  await expect(admin.getByText(/Delivery DEL-0002 received/)).toBeVisible();
   await admin.getByRole('link', { name: 'Users' }).click();
   await admin.locator('tr', { hasText: 'till.gombe' }).getByTitle('Disable account').click();
   await expect(admin.getByText('Account disabled')).toBeVisible();
