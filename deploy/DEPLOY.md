@@ -24,16 +24,24 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    2. `supabase/migrations/20261006000002_rls.sql`
    3. `supabase/migrations/20261006000003_functions.sql`
    4. `supabase/migrations/20261007000001_review_flows.sql` (orders approved by the shop admin, customer names, deliveries received by the shop)
+   5. `supabase/migrations/20261011000001_catalogue.sql` (categories made by the Admin, half dozen and optional carton prices, deleting and archiving items, hot items first, the till printing approved orders)
+   6. `supabase/migrations/20261011000002_accounts.sql` (book keeping: suppliers, goods in and bills, payments, returns from shops, ledgers, statements and reports)
 
-   **Already set up with the first three?** Run only file 4. It keeps your data. After it, deliveries that were already sent count as received, and new ones wait for the shop admin.
+   **Already running SIM?** Run only the files you have not run yet, in order (for example 5 and 6). They keep your data:
+   - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
+   - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
+   - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
 
-   To check, run this in a new query. It should return `17 tables, 20 functions`:
+   To check, run this in a new query. It should return `30 tables, 43 functions`:
    ```sql
    select (select count(*) from information_schema.tables where table_schema = 'public') || ' tables, ' ||
           (select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname in
-            ('setup_needed','app_setup','save_settings','save_shop','mark_password_changed','save_product','receive_stock',
-             'import_products','create_deliveries','edit_delivery','register_device','submit_invoice','edit_invoice',
-             'record_reprint','add_upkeep','sales_report','submit_order','reject_order','receive_delivery','cancel_delivery')) || ' functions' as result;
+            ('setup_needed','app_setup','save_settings','save_shop','mark_password_changed','save_product','import_products',
+             'create_deliveries','edit_delivery','register_device','submit_invoice','edit_invoice','record_reprint','add_upkeep',
+             'sales_report','submit_order','reject_order','receive_delivery','cancel_delivery','save_category','delete_category',
+             'delete_product','restore_product','item_ranks','record_till_print','save_supplier','receive_goods','enter_bill',
+             'post_voucher','cancel_voucher','save_account','delete_account','adjust_stock','create_return','cancel_return',
+             'receive_return','account_statement','ledger_list','trial_balance','profit_loss','balance_sheet','day_book','payables')) || ' functions' as result;
    ```
 2. **Edge Functions.** Dashboard → **Edge Functions** → **Deploy a new function** → **Via Editor**, twice:
    - Name **`setup`**: replace the sample code with the content of `supabase/functions/setup/index.ts`, then **Deploy**.
@@ -122,7 +130,9 @@ If the update has new files in `supabase/migrations/`, run `supabase db push` fr
 1. Open `https://your-domain`. The **Set up SIM** screen appears (only on an empty project).
 2. Enter your name, the Admin username and a strong password, the company details shown on invoices, the exchange rate, VAT and the shops with their 3-letter codes.
 3. You are signed in as Admin. Next:
-   - **Inventory → Import from Excel** to load the catalogue (download the template there), or add items one by one.
+   - **Inventory → Categories** to make the categories (mark seasonal ones such as school items with the months they sell).
+   - **Inventory → Import from Excel** to load the catalogue (download the template there), or add items one by one. A category named in the sheet that does not exist yet is created.
+   - **Accounts → Suppliers** to add the suppliers with their credit days and the items each one supplies, and **Accounts → Ledgers** for the opening balances (cash, bank, capital).
    - **Users → Create login** for the warehouse operator, each shop admin and each till operator. Give each person their username and first password; SIM makes them choose their own at their first sign-in.
    - **Deliveries → New delivery** to put stock into the shops.
 

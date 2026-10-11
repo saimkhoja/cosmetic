@@ -9,6 +9,8 @@ import { Activity, AdminHome, SettingsPage, Upkeep, Users } from './pages/Admin'
 import Reports from './pages/Reports';
 import Till from './pages/Till';
 import { Invoices, ShopHome, ShopStock } from './pages/Shop';
+import { Books, GoodsIn, Returns } from './pages/Stores';
+import Accounts from './pages/Accounts';
 import { Empty } from './components/ui';
 import { startSync } from './offline/sync';
 
@@ -26,6 +28,7 @@ export default function App() {
     '/': profile.role === 'admin' ? <AdminHome /> : <ShopHome />, '/inventory': <Inventory />, '/deliveries': <Deliveries />, '/shop-stock': <ShopStockAll />,
     '/upkeep': <Upkeep />, '/reports': <Reports />, '/users': <Users />, '/settings': <SettingsPage />, '/activity': <Activity />,
     '/till': <Till />, '/invoices': <Invoices />, '/stock': <ShopStock />, '/received': <Received />,
+    '/goods-in': <GoodsIn />, '/returns': <Returns />, '/books': <Books />, '/accounts': <Accounts />,
   };
   return (
     <Layout>

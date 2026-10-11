@@ -1,9 +1,9 @@
 // Browser storage (IndexedDB) for the till: the catalogue snapshot used offline, the till's
 // registration and invoice counter, and the outbox of sales not yet sent to the server.
 import { openDB, type IDBPDatabase } from 'idb';
-import type { Invoice, Product, Settings, Shop } from '../lib/types';
+import type { Category, Invoice, Product, Rank, Settings, Shop } from '../lib/types';
 
-export interface Snapshot { shop: Shop; settings: Settings; products: Product[]; stock: Record<string, { qty: number; open_pieces: number }>; at: number }
+export interface Snapshot { shop: Shop; settings: Settings; products: Product[]; stock: Record<string, { qty: number; open_pieces: number }>; at: number; categories?: Category[]; ranks?: Rank[] }
 export interface Device { id: string; code: string; shop_id: string; shop_code: string; last_seq: number }
 export interface SalePayload {
   id: string; no: string; device_id: string; cashier_id: string; t: string; rate: number; vat_rate: number; disc_pct: number; tendered: number;

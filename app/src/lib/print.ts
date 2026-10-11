@@ -1,9 +1,9 @@
 // Printed documents: customer receipt, delivery note, day end slip and sales report.
 // Layouts are those approved on the demo. Printing uses the browser; for one-tap printing at
 // the till, start Chrome with --kiosk-printing and set the receipt printer as default.
-import type { Company, Delivery, Invoice, Product, Shop } from './types';
-import { ctnTxt } from './units';
-import { dt, esc, fCDF, fUSD, sum, today } from './format';
+import type { Company, Delivery, Invoice, Product, Shop, Statement } from './types';
+import { ctnTxt, unitLabel, unitsOf } from './units';
+import { dt, esc, fCDF, fUSD, sum, toCDF, today } from './format';
 
 export function printHTML(html: string) {
   const el = document.getElementById('print-area')!;
@@ -75,4 +75,36 @@ export function reportHTML(r: Report, c: Company, where: string, by: string, sho
   <table class="t"><thead><tr><th>Invoice</th><th>Date and time</th>${allShops ? '<th>Shop</th>' : ''}<th>Customer</th><th>Cashier</th><th class="r">Items</th><th class="r">Total FC</th></tr></thead><tbody>${r.invoices.map((i) => `<tr><td>${esc(i.no)}${i.edited ? ' (edited)' : ''}</td><td>${dt(i.t)}</td>${allShops ? `<td>${esc(shopName(i.shop_id))}</td>` : ''}<td>${esc(i.customer)}</td><td>${esc(i.cashier_name)}</td><td class="r">${i.items}</td><td class="r">${fCDF(i.total)}</td></tr>`).join('') || '<tr><td colspan="6">No invoices</td></tr>'}</tbody></table>
   <p style="margin-top:14px">All amounts in Congolese Francs, VAT ${vat}% included. Payments are in cash.</p>
   <div style="margin-top:26px">Signature ____________________</div></div>`;
+}
+
+/** Price tickets: an A4 sheet (3 x 8 tickets of 70 x 37 mm) or one 50 x 30 mm label per ticket for a label printer. */
+export function ticketsHTML(items: { p: Product; copies: number }[], rate: number, layout: 'a4' | 'label', shopName = '') {
+  const one = (p: Product) => {
+    const us = unitsOf(p);
+    return `<div class="ticket ${layout}"><div class="tn">${esc(p.name)}</div><div class="tp">${fCDF(toCDF(us[0].usd, rate))}<small> / ${esc(unitLabel(us[0]))}</small></div>${us.slice(1).map((u) => `<div class="tu">${esc(unitLabel(u))}${u.mult > 1 ? ` (${u.mult})` : ''}: <b>${fCDF(toCDF(u.usd, rate))}</b></div>`).join('')}<div class="tf"><span>${esc(p.sku)}</span><span>${esc(shopName)}</span></div></div>`;
+  };
+  const all = items.flatMap((x) => Array.from({ length: Math.max(0, Math.min(200, x.copies)) }, () => one(x.p)));
+  if (layout === 'label') return all.join('<div class="pagebreak"></div>');
+  const pages: string[] = [];
+  for (let i = 0; i < all.length; i += 24) pages.push(`<div class="tsheet">${all.slice(i, i + 24).join('')}</div>`);
+  return pages.join('<div class="pagebreak"></div>');
+}
+
+/** A plain A4 document with the company heading, used by the book keeping reports. */
+export function bookHTML(c: Company, title: string, sub: string, body: string, by: string) {
+  return `<div class="doc"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2>${esc(c.name)}</h2><div>${esc(c.address)}</div><div>RCCM ${esc(c.rccm)}, NIF ${esc(c.nif)}</div></div>
+  <div style="text-align:right"><h2>${esc(title)}</h2><div>${esc(sub)}</div><div>Printed ${dt(Date.now())} by ${esc(by)}</div></div></div><hr style="border:0;border-top:1px solid #ccc;margin:14px 0">${body}</div>`;
+}
+const drcr = (n: number) => (Math.abs(n) < 0.005 ? '0.00' : `${fUSD(Math.abs(n))} ${n > 0 ? 'Dr' : 'Cr'}`);
+export const balTxt = drcr;
+export function statementHTML(st: Statement, c: Company, by: string) {
+  let run = st.brought_forward;
+  const rows = st.lines.map((l) => { run += l.side === 'Dr' ? l.base : -l.base; return `<tr><td>${l.date}</td><td>${esc(l.no)}</td><td>${esc(l.narration)}${l.memo ? `<br><small>${esc(l.memo)}</small>` : ''}${l.bill_ref ? `<br><small>Bill ${esc(l.bill_ref)}${l.due_date ? ', due ' + l.due_date : ''}</small>` : ''}</td><td class="r">${l.currency === 'FC' ? fCDF(l.amount) + `<br><small>@ ${l.rate}</small>` : ''}</td><td class="r">${l.side === 'Dr' ? fUSD(l.base) : ''}</td><td class="r">${l.side === 'Cr' ? fUSD(l.base) : ''}</td><td class="r">${drcr(run)}</td></tr>`; }).join('');
+  const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(st.account.name)}</b>, ${esc(st.account.group)}</p>
+  <table class="t"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th class="r">FC</th><th class="r">Debit USD</th><th class="r">Credit USD</th><th class="r">Balance</th></tr></thead><tbody>
+  ${st.with_opening ? `<tr><td>${st.from}</td><td></td><td><b>Opening balance</b></td><td></td><td class="r">${st.brought_forward > 0 ? fUSD(st.brought_forward) : ''}</td><td class="r">${st.brought_forward < 0 ? fUSD(-st.brought_forward) : ''}</td><td class="r">${drcr(st.brought_forward)}</td></tr>` : ''}
+  ${rows || '<tr><td colspan="7">No entries in this period</td></tr>'}
+  <tr><td colspan="4"><b>Totals for the period</b></td><td class="r"><b>${fUSD(st.total_dr)}</b></td><td class="r"><b>${fUSD(st.total_cr)}</b></td><td class="r"><b>${drcr(st.closing)}</b></td></tr></tbody></table>
+  <p style="margin-top:12px">Amounts in USD; lines entered in Francs show the FC amount and its rate.${st.with_opening ? '' : ' Opening balance not included.'}</p>`;
+  return bookHTML(c, 'Statement of account', `${st.from} to ${st.to}`, body, by);
 }

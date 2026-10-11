@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
-import { ctnTxt, takeLocal, totals, unitsOf } from './units';
+import { ctnTxt, hotSort, takeLocal, totals, unitsOf } from './units';
 import { itemProblem } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
 
 const P = (o: Partial<Product>): Product => ({ id: 'p', sku: 'SK-1', name: 'X', category: 'C', stock_unit: 'pcs', is_bundle: false, per_carton: 24, pieces_per_set: 0,
-  price_usd: 1.5, dozen_usd: 16, carton_usd: 30, piece_usd: 0, reorder: 0, wh_qty: 0, active: true, ...o });
+  price_usd: 1.5, half_dozen_usd: 0, dozen_usd: 16, carton_usd: 30, piece_usd: 0, reorder: 0, wh_qty: 0, active: true, ...o });
 
 describe('money', () => {
   it('rounds shop prices to the nearest 10 FC like the demo', () => {
@@ -29,6 +29,16 @@ describe('units', () => {
     expect(unitsOf(P({ per_carton: 12 })).map((u) => u.u)).toEqual(['pcs', 'carton']);
     expect(unitsOf(P({ dozen_usd: 0 })).map((u) => u.u)).toEqual(['pcs', 'carton']);
   });
+  it('half dozen when it has a price; carton only when it has a price', () => {
+    expect(unitsOf(P({ half_dozen_usd: 8.5 })).map((u) => `${u.u}:${u.mult}`)).toEqual(['pcs:1', 'half dzn:6', 'dzn:12', 'carton:24']);
+    expect(unitsOf(P({ half_dozen_usd: 8.5, per_carton: 6 })).map((u) => u.u)).toEqual(['pcs', 'dzn', 'carton']);
+    expect(unitsOf(P({ carton_usd: 0 })).map((u) => u.u)).toEqual(['pcs', 'dzn']);
+  });
+  it('hot items first, seasonal items out of season last', () => {
+    const list = [P({ id: 'a', name: 'A' }), P({ id: 'b', name: 'B' }), P({ id: 'c', name: 'C' }), P({ id: 'd', name: 'D' })];
+    const ranks = [{ product_id: 'a', sold_30: 2, in_season: true }, { product_id: 'b', sold_30: 50, in_season: false }, { product_id: 'c', sold_30: 9, in_season: true }, { product_id: 'd', sold_30: 0, in_season: true }];
+    expect(hotSort(list, ranks).map((p) => p.id)).toEqual(['c', 'a', 'd', 'b']);
+  });
   it('set and piece for a mixed set', () => {
     expect(unitsOf(P({ is_bundle: true, stock_unit: 'set', piece_usd: 1.8 })).map((u) => u.u)).toEqual(['set', 'piece']);
   });
@@ -43,13 +53,15 @@ describe('units', () => {
 });
 
 describe('item validation', () => {
-  const base = { name: 'A', category: 'B', is_bundle: false, carton_cost: 24, per_carton: 24, pc: 1.5, dzn: 16, ctn: 30, set_cost: 0, set_price: 0, pcs: 0, piece: 0 };
+  const base = { name: 'A', category: 'B', is_bundle: false, carton_cost: 24, per_carton: 24, pc: 1.5, half: 0, dzn: 16, ctn: 30, set_cost: 0, set_price: 0, pcs: 0, piece: 0 };
   it('accepts a good carton item', () => expect(itemProblem(base)).toBeNull());
   it('refuses a price below cost', () => {
     expect(itemProblem({ ...base, pc: 0.5 })).toBe('Price per pc is below the cost of one pc ($1.00)');
     expect(itemProblem({ ...base, dzn: 10 })).toMatch(/dozen is below/);
     expect(itemProblem({ ...base, ctn: 20 })).toMatch(/carton cannot be below/);
+    expect(itemProblem({ ...base, half: 5 })).toMatch(/half dozen is below/);
   });
+  it('carton and half dozen prices are optional', () => expect(itemProblem({ ...base, ctn: 0, half: 0, dzn: 0 })).toBeNull());
 });
 
 describe('import', () => {

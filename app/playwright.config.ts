@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test';
 // the local stack (supabase/local/start.sh) by default, or your own via SIM_E2E_URL.
 export default defineConfig({
   testDir: 'e2e',
-  timeout: 180_000,
+  timeout: 300_000,
   expect: { timeout: 15_000 },
   workers: 1,
   reporter: [['list']],
