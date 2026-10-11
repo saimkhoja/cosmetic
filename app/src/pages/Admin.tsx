@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useAudit, useCosts, useProducts, useRefresh, useReport, useSettings, useShops, useStock, useUpkeep, useUsers } from '../data/queries';
+import { useAudit, useCosts, useLedgers, useProducts, useRefresh, useReport, useSettings, useShops, useStock, useUpkeep, useUsers } from '../data/queries';
 import { invoke, rpc } from '../lib/supabase';
 import { dt, fCDF, fUSD, sum, today } from '../lib/format';
 import { UPCATS } from '../lib/items';
@@ -17,7 +17,7 @@ export function AdminHome() {
   const products = useProducts(), costs = useCosts(true), settings = useSettings(), upkeep = useUpkeep(), stock = useStock(), shops = useShops();
   const rep = useReport(today(), today(), null);
   const [send, setSend] = useState<{ pid?: string; sid?: string } | null>(null);
-  const rate = settings.data?.rate ?? 1, P = products.data ?? [];
+  const rate = settings.data?.rate ?? 1, P = (products.data ?? []).filter((p) => p.active);
   const cost = new Map((costs.data ?? []).map((c) => [c.product_id, c.cost_usd]));
   const m = today().slice(0, 7), upM = sum((upkeep.data ?? []).filter((u) => u.date.startsWith(m)), (u) => u.amount_usd);
   const low = P.filter((p) => p.wh_qty <= p.reorder);
@@ -34,7 +34,7 @@ export function AdminHome() {
       </div>
       <div className="tiles">
         <Tile i="plus" l="Add new item" onClick={() => nav('/inventory')} /><Tile i="truck" l="Send stock to shops" onClick={() => setSend({})} />
-        <Tile i="store" l="Shop stock" onClick={() => nav('/shop-stock')} /><Tile i="chart" l="Sales report" onClick={() => nav('/reports')} /><Tile i="key" l="Create login" onClick={() => nav('/users')} />
+        <Tile i="wallet" l="Accounts" onClick={() => nav('/accounts')} /><Tile i="store" l="Shop stock" onClick={() => nav('/shop-stock')} /><Tile i="chart" l="Sales report" onClick={() => nav('/reports')} /><Tile i="key" l="Create login" onClick={() => nav('/users')} />
       </div>
       <div className="cols">
         <div className="card p0"><div style={{ padding: '16px 16px 0' }}><h3><Icon n="alert" /> Low stock in the store</h3></div>{low.length ? <div className="tw"><table className="t"><thead><tr><th>Item</th><th className="r">In store</th><th className="r">Reorder at</th></tr></thead><tbody>{low.slice(0, 15).map((p) => <tr key={p.id}><td><b>{p.name}</b></td><td className="r"><QtyCell p={p} q={p.wh_qty} cls="bad" /></td><td className="r">{p.reorder}</td></tr>)}</tbody></table></div> : <Empty i="check" t="All items above reorder level" />}</div>
@@ -46,19 +46,22 @@ export function AdminHome() {
 }
 
 export function Upkeep() {
-  const upkeep = useUpkeep(), settings = useSettings(), refresh = useRefresh(), toast = useToast(), a = useAction();
-  const [f, setF] = useState({ d: today(), c: UPCATS[0], desc: '', amt: '' });
+  const upkeep = useUpkeep(), settings = useSettings(), ledgers = useLedgers(), refresh = useRefresh(), toast = useToast(), a = useAction();
+  const [f, setF] = useState({ d: today(), c: UPCATS[0], desc: '', amt: '', cur: 'USD', from: '' });
+  const payFrom = (ledgers.data ?? []).filter((l) => l.active && (l.group_code === 'cash' || l.group_code === 'bank'));
   const rate = settings.data?.rate ?? 1, m = today().slice(0, 7), list = upkeep.data ?? [], month = list.filter((u) => u.date.startsWith(m));
   const byCat = UPCATS.map((c) => ({ name: c, val: sum(month.filter((u) => u.category === c), (u) => u.amount_usd) })).filter((x) => x.val > 0).map((x) => ({ ...x, txt: fUSD(x.val) }));
-  const save = () => a.run(async () => { await rpc('add_upkeep', { p_date: f.d, p_category: f.c, p_desc: f.desc, p_amount: Number(f.amt) }); await refresh('upkeep', 'audit'); setF({ ...f, desc: '', amt: '' }); toast('Expense saved'); });
+  const save = () => a.run(async () => { await rpc('add_upkeep', { p_date: f.d, p_category: f.c, p_desc: f.desc, p_amount: Number(f.amt), p_currency: f.cur, p_from: f.from || null }); await refresh('upkeep', 'audit'); setF({ ...f, desc: '', amt: '' }); toast('Expense saved and booked as a payment'); });
   return (
     <>
-      <Head t="Store upkeep" s="Running costs: rent, fuel, wages, transport. Amounts are entered in USD and shown in Francs too." />
+      <Head t="Store upkeep" s="Running costs: rent, fuel, wages, transport, paid in USD or Francs. Each one is booked in the accounts as a payment from the cash or bank you choose." />
       <div className="kpis"><Kpi i="wallet" l="Total this month" tone="warn"><Dual usd={sum(month, (u) => u.amount_usd)} rate={rate} /></Kpi><Kpi i="receipt" l="Expenses recorded this month"><Dual2 b={month.length} s="entries" /></Kpi></div>
       <div className="cols"><div className="card"><h3><Icon n="plus" /> Record an expense</h3>
         <div className="frow"><div className="field"><label>Date</label><input type="date" className="input" value={f.d} max={today()} onChange={(e) => setF({ ...f, d: e.target.value })} /></div><div className="field"><label>Type</label><select className="input" value={f.c} onChange={(e) => setF({ ...f, c: e.target.value })}>{UPCATS.map((c) => <option key={c}>{c}</option>)}</select></div></div>
         <div className="field"><label>Description</label><input className="input" maxLength={80} value={f.desc} placeholder="e.g. Generator diesel, 200 L" onChange={(e) => setF({ ...f, desc: e.target.value })} /></div>
-        <div className="field"><label>Amount (USD)</label><input type="number" min="0" step="0.01" className="input" value={f.amt} onChange={(e) => setF({ ...f, amt: e.target.value })} /><span className="hint">{Number(f.amt) > 0 ? '= ' + fCDF(Number(f.amt) * rate) : ''}</span></div>
+        <div className="frow"><div className="field"><label>Amount</label><div style={{ display: 'flex', gap: 6 }}><input type="number" min="0" step="0.01" className="input" value={f.amt} onChange={(e) => setF({ ...f, amt: e.target.value })} /><select className="input" style={{ width: 90 }} value={f.cur} onChange={(e) => setF({ ...f, cur: e.target.value })}><option>USD</option><option>FC</option></select></div>
+          <span className="hint">{Number(f.amt) > 0 ? '= ' + (f.cur === 'USD' ? fCDF(Number(f.amt) * rate) : fUSD(Number(f.amt) / rate)) : ''}</span></div>
+          <div className="field"><label>Paid from</label><select className="input" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })}><option value="">Cash – Head office</option>{payFrom.filter((l) => l.code !== 'CASH_HO').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div></div>
         <div className="lerr">{a.err}</div><button className="btn primary full" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Save expense</button></div>
         <div className="card"><h3><Icon n="chart" /> This month by type</h3><HList arr={byCat} /></div></div>
       <div className="card p0"><div className="tw">{list.length ? <table className="t"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Recorded by</th></tr></thead><tbody>{list.map((u) => <tr key={u.id}><td>{u.date}</td><td><span className="chip">{u.category}</span></td><td>{u.description}</td><td><Dual usd={u.amount_usd} rate={rate} /></td><td>{u.by_name}</td></tr>)}</tbody></table> : <Empty i="wallet" t="No expenses recorded yet" />}</div></div>
@@ -83,7 +86,7 @@ export function Users() {
           <td>{u.active ? (u.must_change_password ? <span className="chip warn">Must choose a password</span> : <span className="chip ok">Active</span>) : <span className="chip bad">Disabled</span>}</td>
           <td><div className="act"><button title="Edit name, role or shop" onClick={() => setOpen(u)}><Icon n="edit" /></button><button title="Reset password" onClick={() => setReset(u)}><Icon n="key" /></button>{u.id !== profile!.id ? <button title={u.active ? 'Disable account' : 'Enable account'} onClick={() => void toggle(u)}><Icon n={u.active ? 'lock' : 'unlock'} /></button> : null}</div></td></tr>)}
       </tbody></table></div></div>
-      <Note i="shield"><span>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives stock, sees every shop's stock, and sends and corrects deliveries to the shops, with no cost prices and no price changes. <b>Shop Admin</b>: reviews and approves the till operators' orders, takes the cash and prints, sells directly, discount on an invoice, edits a confirmed invoice, reprints, receives deliveries from the store and sees reports. <b>Till Operator</b>: types the customer name, picks the items and sends the order to the shop admin for approval; no cash, no invoice list and no reports.</span></Note>
+      <Note i="shield"><span>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives goods from a chosen supplier, receives returns from the shops, sees every shop's stock, sends and corrects deliveries, and reads the stock statements of the store and each shop; no cost prices per item and no price changes. <b>Shop Admin</b>: approves, rejects or edits the till operators' orders, takes the cash and prints, sells directly, discount on an invoice, edits a confirmed invoice, reprints, receives deliveries, sends returns to the store, prints price tickets, and reads the shop's cash, sales and stock statements and reports. <b>Till Operator</b>: types the customer name, picks the items (pcs, half dozen, dozen, carton) and sends the order for approval, prints it once it is approved, and prints price tickets; no cash, no invoice list and no reports.</span></Note>
       <Note><span>Passwords are stored only as secure hashes by Supabase Auth; nobody, not even the Admin, can read them. A new or reset login must choose its own password at first sign-in. The screen locks after 15 minutes without activity.</span></Note>
       {open ? <UserModal u={open === 'new' ? null : open} onClose={() => setOpen(null)} onCreated={(x) => setShown(x)} /> : null}
       {reset ? <ResetModal u={reset} onClose={() => setReset(null)} onDone={(p) => setShown({ u: reset.username, p, name: reset.name })} /> : null}

@@ -1,4 +1,4 @@
-import type { Product } from './types';
+import type { Product, Rank } from './types';
 import { toCDF } from './format';
 
 export interface Unit { u: string; mult: number; piece?: boolean; usd: number }
@@ -7,8 +7,9 @@ export interface Unit { u: string; mult: number; piece?: boolean; usd: number }
 export function unitsOf(p: Product): Unit[] {
   if (p.is_bundle) return [{ u: 'set', mult: 1, usd: p.price_usd }, { u: 'piece', mult: 0, piece: true, usd: p.piece_usd }];
   const u: Unit[] = [{ u: 'pcs', mult: 1, usd: p.price_usd }];
+  if (p.half_dozen_usd > 0 && p.per_carton !== 6) u.push({ u: 'half dzn', mult: 6, usd: p.half_dozen_usd });
   if (p.dozen_usd > 0 && p.per_carton !== 12) u.push({ u: 'dzn', mult: 12, usd: p.dozen_usd });
-  u.push({ u: 'carton', mult: p.per_carton, usd: p.carton_usd });
+  if (p.carton_usd > 0) u.push({ u: 'carton', mult: p.per_carton, usd: p.carton_usd });
   return u;
 }
 export const unitLabel = (u: Unit) => (u.piece ? '1 piece' : u.u);
@@ -38,4 +39,16 @@ export function cartPriced(cart: CartLine[], byId: Map<string, Product>, rate: n
 export function takeLocal(st: { qty: number; open_pieces: number }, qty: number, mult: number, piece: boolean, per: number) {
   if (piece) { const o = st.open_pieces + qty, k = Math.floor(o / Math.max(per, 1)); return { qty: st.qty - k, open_pieces: o % Math.max(per, 1) }; }
   return { qty: st.qty - qty * mult, open_pieces: st.open_pieces };
+}
+
+/** Hot items first: in-season items by units sold in the last 30 days, then the rest; seasonal items out of season last. */
+export function hotSort<T extends Pick<Product, 'id' | 'name'>>(list: T[], ranks?: Rank[] | null): T[] {
+  if (!ranks?.length) return list;
+  const r = new Map(ranks.map((x) => [x.product_id, x]));
+  const key = (p: T) => { const x = r.get(p.id); return { s: x ? (x.in_season ? 0 : 1) : 0, n: x ? Number(x.sold_30) : 0 }; };
+  return [...list].sort((a, b) => { const x = key(a), y = key(b); return x.s - y.s || y.n - x.n || a.name.localeCompare(b.name); });
+}
+/** "Hot" when it is among the 12 best sellers of the last 30 days. */
+export function hotSet(ranks?: Rank[] | null) {
+  return new Set((ranks ?? []).filter((x) => x.in_season && Number(x.sold_30) > 0).sort((a, b) => Number(b.sold_30) - Number(a.sold_30)).slice(0, 12).map((x) => x.product_id));
 }

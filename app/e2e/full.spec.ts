@@ -2,9 +2,11 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import path from 'node:path';
 import fs from 'node:fs';
 
-// One full working day, on a fresh install: setup, logins, catalogue, deliveries received by the
-// shop, orders prepared at the till and approved by the shop admin (one offline), an offline sale,
-// an invoice correction and the day end report.
+// One full working day, on a fresh install: setup, logins, categories and catalogue, a supplier,
+// goods in and the bill paid, deliveries received by the shop, orders prepared at the till (pcs,
+// dozen, half dozen; one offline) and approved, edited or rejected by the shop admin, printed at the
+// till, an offline sale, an invoice correction, the day end report, price tickets, a return to the
+// store, statements and the trial balance.
 const PW = { admin: 'AdminPass2026', op: 'OperatorPass2026', shop: 'ShopAdmin2026', till: 'TillPass2026x' };
 const firstPw: Record<string, string> = {};
 
@@ -61,11 +63,19 @@ test('a full day in SIM', async ({ browser }) => {
   }
   await expect(admin.locator('table.t tbody tr')).toHaveCount(4);
 
-  // ---- a carton item through the form
+  // ---- categories are made by the Admin; one is seasonal
   await admin.getByRole('link', { name: 'Inventory' }).click();
+  await admin.getByRole('button', { name: 'Categories' }).click();
+  for (const c of ['Skin care', 'Make-up']) { await admin.fill('#catname', c); await admin.getByRole('button', { name: 'Add category' }).click(); await expect(admin.locator('.modal tr', { hasText: c })).toBeVisible(); }
+  await admin.fill('#catname', 'School'); await admin.locator('.modal label.switch').click(); await admin.locator('.modal .mchips label', { hasText: 'Sep' }).click();
+  await admin.getByRole('button', { name: 'Add category' }).click();
+  await expect(admin.locator('.modal tr', { hasText: 'School' })).toContainText('Sep');
+  await admin.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+
+  // ---- a carton item through the form, with a half dozen price
   await admin.getByRole('button', { name: 'Add new item' }).click();
-  await admin.fill('#in', 'Shea body lotion 400 ml'); await admin.fill('#ic', 'Skin care');
-  await admin.fill('#icc', '76'); await admin.fill('#ipc', '24'); await admin.fill('#isell', '5'); await admin.fill('#idz', '57'); await admin.fill('#ictn', '108');
+  await admin.fill('#in', 'Shea body lotion 400 ml'); await admin.selectOption('#ic', 'Skin care');
+  await admin.fill('#icc', '76'); await admin.fill('#ipc', '24'); await admin.fill('#isell', '5'); await admin.fill('#ihz', '29'); await admin.fill('#idz', '57'); await admin.fill('#ictn', '108');
   await admin.fill('#iqc', '8');
   await expect(admin.locator('#iprev')).toContainText('14 250 FC');
   await admin.getByRole('button', { name: 'Save item' }).click();
@@ -79,7 +89,7 @@ test('a full day in SIM', async ({ browser }) => {
   await admin.setInputFiles('.modal input[type=file]', tpl);
   await expect(admin.getByText('3 ready')).toBeVisible();
   await admin.click('#impBtn');
-  await expect(admin.getByText('3 items imported')).toBeVisible();
+  await expect(admin.getByText('3 items imported, 2 new categories made')).toBeVisible();   // Hair care, Fragrance
   const csv = path.join(test.info().outputDir, 'items.csv');
   fs.writeFileSync(csv, 'Nom;Catégorie;Carton cost USD;Pcs per carton;Price per pc USD;Price per dozen USD;Price per carton USD;Opening cartons\nMatte lipstick;Make-up;76;48;3;33;130;5\nAloe vera gel 300 ml;Skin care;60;24;4;45;90;1\n');
   await admin.getByRole('button', { name: 'Import from Excel' }).click();
@@ -89,11 +99,30 @@ test('a full day in SIM', async ({ browser }) => {
   await admin.click('#impBtn');
   await expect(admin.getByText('5 items').first()).toBeVisible();
 
+  // ---- a supplier with credit terms
+  await admin.getByRole('link', { name: 'Accounts' }).click();
+  await admin.getByRole('button', { name: 'Add supplier' }).click();
+  await admin.fill('#sname', 'Beauté Import SARL'); await admin.fill('#sdays', '30');
+  await admin.locator('.modal .search input').fill('Shea'); await admin.locator('.modal .mchips label', { hasText: 'Shea body lotion' }).click();
+  await admin.getByRole('button', { name: 'Save supplier' }).click();
+  await expect(admin.getByText('Supplier added')).toBeVisible();
+
   // ---- the warehouse operator: no costs, sends to both shops, corrects one delivery
   const { page: op } = await open(browser);
   await firstSignIn(op, 'operator', PW.op);
   await expect(op.getByRole('heading', { name: 'Inventory' })).toBeVisible();
   await expect(op.getByText('Cost prices hidden for your role')).toBeVisible();
+  // goods from the supplier: the supplier must be chosen; quantities only
+  await op.getByRole('link', { name: 'Goods in' }).click();
+  await op.getByRole('button', { name: 'Receive from supplier' }).click();
+  await op.getByLabel('Quantity Shea body lotion 400 ml').fill('2');
+  await op.getByRole('button', { name: 'Add to store stock' }).click();
+  await expect(op.locator('.modal .lerr')).toContainText('Choose the supplier');
+  await op.selectOption('#gsup', { label: 'Beauté Import SARL' });
+  await op.fill('#gref', 'BL 4471');
+  await op.getByRole('button', { name: 'Add to store stock' }).click();
+  await expect(op.getByText('GRN-0001 saved: 48 units added')).toBeVisible();
+  await expect(op.locator('tr', { hasText: 'GRN-0001' })).toContainText('Waiting for the bill');
   await op.getByRole('link', { name: 'Deliveries' }).click();
   await op.getByRole('button', { name: 'New delivery' }).click();
   await op.locator('.modal label.chip', { hasText: 'Gombe' }).click();
@@ -111,7 +140,7 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(op.locator('.card', { hasText: 'DEL-0001' })).toContainText('Waiting for the shop to receive');
   await op.getByRole('link', { name: 'Shop stock' }).click();
   const sheaRow = op.locator('tr', { hasText: 'Shea body lotion' });
-  await expect(sheaRow).toContainText('192 pcs');                      // nothing has left the store yet
+  await expect(sheaRow).toContainText('240 pcs');                      // 192 + 48 from the supplier; nothing has left the store yet
   await expect(sheaRow).toContainText('+96 on the way');
 
   // ---- the shop admin receives: one in full, one short with a note
@@ -154,34 +183,59 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(till.locator('.offline-bar')).toBeVisible();
   await till.fill('#cust', 'Papa Lokwa'); await till.press('#cust', 'Enter');
   await till.locator('.ptile', { hasText: 'Shea body lotion' }).click();
-  await till.locator('.ubtn', { hasText: 'pcs' }).first().click();
+  await till.locator('.ubtn', { hasText: 'half dzn' }).click();
   await till.getByRole('button', { name: 'Send to shop admin for approval' }).click();
   await expect(till.locator('.pill')).toContainText('1 saved on device');
   await expect(till.locator('.myorders')).toContainText('Not sent yet');
   await tillCtx.setOffline(false);
   await till.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect(till.locator('.pill')).toContainText('all synced', { timeout: 40000 });
+  await till.fill('#cust', 'Tata Mbo'); await till.press('#cust', 'Enter');
+  await till.locator('.ptile', { hasText: 'Shea body lotion' }).click();
+  await till.locator('.ubtn', { hasText: 'pcs' }).first().click();
+  await till.getByRole('button', { name: 'Send to shop admin for approval' }).click();
 
-  // ---- the shop admin reviews: opens the order, adds one pc, approves; rejects the other
+  // ---- the shop admin reviews from the panel without touching the sale being made:
+  //      edits one order and approves it, approves one as it is, rejects one
   await shop.getByRole('link', { name: 'Till' }).click();
   const review = shop.locator('.review');
-  await expect(review.locator('.rcard', { hasText: 'Papa Lokwa' })).toBeVisible({ timeout: 30000 });
-  await review.locator('.rcard', { hasText: 'Mama Nzuzi' }).getByRole('button', { name: 'Open' }).click();
-  await expect(shop.locator('#custname')).toHaveText('Mama Nzuzi');
-  await expect(shop.locator('#cart .line')).toHaveCount(2);
-  await shop.locator('#cart .line', { hasText: 'Shea body lotion' }).getByLabel('One more').click();
-  await shop.getByRole('button', { name: 'Approve, take cash and print' }).click();
-  await expect(shop.getByText(/Sale GOM-T1-000001 for Mama Nzuzi done/)).toBeVisible();
-  const slipPrint = (await prints(shop)).at(-1)!;
-  expect(slipPrint).toContain('Mama Nzuzi'); expect(slipPrint).toContain('Grace Mbuyi'); expect(slipPrint).toContain('Copie magasin');
-  await expect(review.locator('.rcard', { hasText: 'Mama Nzuzi' })).toHaveCount(0);
-  await review.locator('.rcard', { hasText: 'Papa Lokwa' }).getByTitle('Reject this order').click();
+  await expect(review.locator('.rcard', { hasText: 'Tata Mbo' })).toBeVisible({ timeout: 30000 });
+  await shop.fill('#cust', 'Counter customer'); await shop.press('#cust', 'Enter');
+  await shop.locator('.ptile', { hasText: 'Matte lipstick' }).click(); await shop.locator('.ubtn', { hasText: 'pcs' }).first().click();
+  await review.locator('.rcard', { hasText: 'Mama Nzuzi' }).getByRole('button', { name: 'Edit order for Mama Nzuzi' }).click();
+  await expect(shop.locator('.modal tbody tr')).toHaveCount(2);
+  await shop.locator('.modal tr', { hasText: 'Shea body lotion' }).getByLabel('One more').click();
+  await shop.click('#oapprove');
+  await expect(shop.getByText(/Order for Mama Nzuzi approved as GOM-T1-000001/)).toBeVisible();
+  await review.locator('.rcard', { hasText: 'Papa Lokwa' }).getByRole('button', { name: 'Approve order for Papa Lokwa' }).click();
+  await expect(shop.getByText(/Order for Papa Lokwa approved as GOM-T1-000002/)).toBeVisible();
+  expect(await prints(shop)).toHaveLength(0);                          // approved orders are printed at the till
+  await expect(shop.locator('#custname')).toHaveText('Counter customer');   // the sale being made is untouched
+  await expect(shop.locator('#cart .line')).toHaveCount(1);
+  await shop.locator('#cart').getByLabel('Clear sale').click();
+  await review.locator('.rcard', { hasText: 'Tata Mbo' }).getByRole('button', { name: 'Reject order for Tata Mbo' }).click();
   await shop.fill('#rreason', 'Customer left');
-  await shop.getByRole('button', { name: 'Reject order' }).click();
+  await shop.locator('.modal footer').getByRole('button', { name: 'Reject order' }).click();
   await expect(review.locator('.rcard')).toHaveCount(0);
+  await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
+  // the till prints its approved orders, once
   await till.reload();
-  await expect(till.locator('.myorders')).toContainText('Approved', { timeout: 30000 });
-  await expect(till.locator('.myorders')).toContainText('Rejected: Customer left');
+  await expect(till.locator('.myorders')).toContainText('Rejected: Customer left', { timeout: 30000 });
+  const mama = till.locator('.morow', { hasText: 'Mama Nzuzi' });
+  await mama.getByRole('button', { name: 'Print' }).click();
+  await expect(mama).toContainText('Approved, printed');
+  const tillPrint = (await prints(till)).at(-1)!;
+  expect(tillPrint).toContain('Mama Nzuzi'); expect(tillPrint).toContain('Grace Mbuyi'); expect(tillPrint).toContain('Copie magasin');
+  await till.locator('.morow', { hasText: 'Papa Lokwa' }).getByRole('button', { name: 'Print' }).click();
+  await expect(till.locator('.morow', { hasText: 'Papa Lokwa' })).toContainText('Approved, printed');
+  expect((await prints(till)).at(-1)!).toContain('1 x half dzn @ 82 650 FC');
+  // price tickets at the till
+  await till.getByRole('button', { name: 'Tickets' }).click();
+  await till.getByLabel('Tickets for Shea body lotion 400 ml').fill('3');
+  await till.click('#tprint');
+  const tk = (await prints(till)).at(-1)!;
+  expect(tk).toContain('14 250 FC'); expect(tk).toContain('half dzn');
+  await till.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
 
   // ---- the shop admin sells directly while offline; it is sent when back online
   const shopCtx = shop.context();
@@ -192,16 +246,16 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.locator('.ptile', { hasText: 'Shea body lotion' }).click();
   await shop.locator('.ubtn', { hasText: 'carton' }).click();
   await shop.getByRole('button', { name: 'Take cash and print' }).click();
-  await expect(shop.getByText(/Sale GOM-T1-000002 for Walk-in customer done/)).toBeVisible();
+  await expect(shop.getByText(/Sale GOM-T1-000003 for Walk-in customer done/)).toBeVisible();
   await expect(shop.locator('.pill')).toContainText('1 saved on device');
-  await expect(shop.locator('.ptile', { hasText: 'Shea body lotion' })).toContainText('46 in shop'); // 72 - 2 - 24
+  await expect(shop.locator('.ptile', { hasText: 'Shea body lotion' })).toContainText('40 in shop'); // 72 - 2 - 6 - 24
   await shopCtx.setOffline(false);
   await shop.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
 
   // ---- correct the approved invoice, then the day end report
   await shop.getByRole('link', { name: 'Invoices' }).click();
-  await expect(shop.locator('main table.t tbody tr')).toHaveCount(2);
+  await expect(shop.locator('main table.t tbody tr')).toHaveCount(3);
   await expect(shop.locator('tr', { hasText: 'GOM-T1-000001' })).toContainText('Mama Nzuzi');
   await shop.locator('tr', { hasText: 'GOM-T1-000001' }).getByTitle('Edit invoice').click();
   await shop.locator('.modal tr', { hasText: 'Matte lipstick' }).locator('input').fill('0');   // customer gave the dozen back
@@ -217,10 +271,53 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(slip).toContainText('SIM Beauté Gombe');
   const txt = await slip.innerText();
   const n = (k: string) => Number(new RegExp(k + '\\s*:\\s*([\\d.]+)').exec(txt)![1]);
-  expect(n('Total Invoice')).toBe(2);
+  expect(n('Total Invoice')).toBe(3);
   expect(n('Return FC')).toBe(94050);                          // the returned dozen
   expect(n('Balance FC')).toBe(n('Invoice Value FC'));
   expect(txt).not.toContain('Shea body lotion');               // no item lines on the slip
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+
+  // ---- the shop sends 2 pcs back; the warehouse receives them
+  await shop.getByRole('link', { name: 'Returns' }).click();
+  await shop.getByRole('button', { name: 'New return' }).click();
+  await shop.fill('#retr', 'Damaged packaging');
+  await shop.getByLabel('Quantity Shea body lotion 400 ml').fill('2');
+  await shop.locator('.modal tr', { hasText: 'Shea body lotion' }).locator('select').selectOption('pcs');
+  await shop.getByRole('button', { name: 'Send back' }).click();
+  await expect(shop.getByText('RET-0001 sent to the central store')).toBeVisible();
+  await op.getByRole('link', { name: 'Returns' }).click();
+  await op.locator('.card', { hasText: 'RET-0001' }).getByRole('button', { name: 'Receive' }).click();
+  await op.getByRole('button', { name: 'Receive into the store' }).click();
+  await expect(op.getByText('RET-0001 received: 2 of 2 units')).toBeVisible();
+  // the warehouse reads the Gombe stock account; the shop reads its cash account
+  await op.getByRole('link', { name: 'Statements' }).click();
+  await op.selectOption('#stacc', { label: 'Stock – SIM Beauté Gombe' });
+  await expect(op.locator('#sttable')).toContainText('DEL-0001');
+  await expect(op.locator('#sttable')).toContainText('RET-0001');
+  await shop.getByRole('link', { name: 'Statements' }).click();
+  await shop.selectOption('#stacc', { label: 'Cash – SIM Beauté Gombe (FC)' });
+  await expect(shop.locator('#sttable')).toContainText('GOM-T1-000003');
+  await expect(shop.locator('#stclose')).toContainText('Dr');
+
+  // ---- the Admin enters the supplier's bill, pays it, and the trial balance agrees
+  await admin.getByRole('link', { name: 'Goods in' }).click();
+  await admin.locator('tr', { hasText: 'GRN-0001' }).getByRole('button', { name: 'Enter bill' }).click();
+  await admin.fill('#bno', 'F-1001'); await admin.fill('#bamt', '160');
+  await admin.getByRole('button', { name: 'Save bill' }).click();
+  await expect(admin.getByText(/Bill F-1001 entered/)).toBeVisible();
+  await admin.getByRole('link', { name: 'Accounts' }).click();
+  await admin.getByRole('button', { name: 'Bills & payables' }).click();
+  await expect(admin.locator('tr', { hasText: 'F-1001' })).toContainText('$160.00');
+  await admin.locator('tr', { hasText: 'Beauté Import SARL' }).getByRole('button', { name: 'Pay' }).click();
+  await admin.locator('.modal .vamt').nth(0).fill('100'); await admin.locator('.modal .vamt').nth(1).fill('100');
+  await admin.getByRole('button', { name: 'Oldest bills first' }).click();
+  await admin.getByRole('button', { name: 'Save voucher' }).click();
+  await expect(admin.getByText(/Payment PAY-00001 saved/)).toBeVisible();
+  await expect(admin.locator('tr', { hasText: 'F-1001' })).toContainText('$60.00');
+  await admin.getByRole('button', { name: 'Trial balance' }).click();
+  const last = admin.locator('#tb tr').last().locator('td');
+  await expect(last.nth(1)).toHaveText(/\$[\d,.]+/);                 // Total | Dr | Cr
+  expect(await last.nth(1).innerText()).toBe(await last.nth(2).innerText());
 
   // ---- the Admin sees the activity; disabling the till ends its access
   await admin.getByRole('link', { name: 'Activity' }).click();

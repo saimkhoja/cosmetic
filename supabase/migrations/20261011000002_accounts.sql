@@ -3,7 +3,6 @@
 -- suppliers with credit terms and assigned items, bill-wise payables, statements and reports.
 -- Run after part 1. Safe to run more than once.
 
-alter table public.settings add column if not exists books_start date not null default current_date;
 
 -- ---------- chart of accounts ----------
 create table if not exists public.account_groups (

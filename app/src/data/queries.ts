@@ -1,7 +1,7 @@
 // Server reads, cached with TanStack Query. Rows are already filtered by role on the server (RLS).
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase, rows, rpc } from '../lib/supabase';
-import type { Cost, Delivery, Invoice, Product, Profile, SaleOrder, Settings, Shop, StockRow } from '../lib/types';
+import type { Category, Cost, Delivery, Grn, Invoice, Ledger, Product, Profile, Rank, SaleOrder, Settings, Shop, ShopReturn, StockRow, Supplier } from '../lib/types';
 import type { Report } from '../lib/print';
 
 /** Reads every row of a query, 1000 at a time (Supabase returns at most 1000 per request). */
@@ -46,8 +46,16 @@ export const useOrders = (status: 'pending' | 'all', sinceISO?: string) => useQu
   queryKey: ['orders', status, sinceISO ?? ''], refetchInterval: 15000,
   queryFn: async () => { let q = supabase.from('sale_orders').select('*').order('created_at', { ascending: status === 'pending' }).limit(200); if (status === 'pending') q = q.eq('status', 'pending'); if (sinceISO) q = q.gte('created_at', sinceISO); return rows<SaleOrder>(await q); },
 });
+export const useCategories = () => useQuery({ queryKey: ['categories'], queryFn: async () => rows<Category>(await supabase.from('categories').select('id,name,seasonal,season_months').order('name')) });
+/** Units sold per item in the last 30 days (one shop, or all) and whether it is in season: hot items first. */
+export const useRanks = (shopId?: string | null) => useQuery({ queryKey: ['ranks', shopId ?? 'all'], staleTime: 300000, queryFn: () => rpc<Rank[]>('item_ranks', { p_shop: shopId ?? null }) });
+export const useSuppliers = (enabled = true) => useQuery({ queryKey: ['suppliers'], enabled, queryFn: async () => rows<Supplier>(await supabase.from('suppliers').select('*, supplier_items(product_id)').order('name')) });
+export const useGrns = (enabled = true) => useQuery({ queryKey: ['grns'], enabled, queryFn: async () => rows<Grn>(await supabase.from('grns').select('*, grn_items(product_id,qty,std_cost_usd)').order('received_at', { ascending: false }).limit(300)) });
+export const useReturns = (enabled = true) => useQuery({ queryKey: ['returns'], enabled, refetchInterval: 30000, queryFn: async () => rows<ShopReturn>(await supabase.from('shop_returns').select('*, return_items(product_id,qty,received_qty)').order('created_at', { ascending: false }).limit(300)) });
+/** Ledgers the signed-in user may open, with balances in USD (Dr positive). */
+export const useLedgers = (enabled = true) => useQuery({ queryKey: ['ledgers'], enabled, queryFn: () => rpc<Ledger[]>('ledger_list') });
 /** After a change, refresh everything that may show it. */
 export function useRefresh() {
   const qc = useQueryClient();
-  return (...keys: string[]) => Promise.all((keys.length ? keys : ['products', 'costs', 'stock', 'deliveries', 'invoices', 'report', 'audit', 'orders']).map((k) => qc.invalidateQueries({ queryKey: [k] })));
+  return (...keys: string[]) => Promise.all((keys.length ? [...keys, 'ledgers', 'books'] : ['products', 'costs', 'stock', 'deliveries', 'invoices', 'report', 'audit', 'orders', 'ledgers', 'books', 'grns', 'returns', 'ranks']).map((k) => qc.invalidateQueries({ queryKey: [k] })));
 }

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useDeliveries, useProducts, useRefresh, useSettings, useShops, useStock } from '../data/queries';
+import { useDeliveries, useProducts, useRanks, useRefresh, useSettings, useShops, useStock } from '../data/queries';
 import { rpc } from '../lib/supabase';
-import { ctnTxt } from '../lib/units';
+import { ctnTxt, hotSort } from '../lib/units';
 import { dt, fCDF, sum } from '../lib/format';
 import { deliveryNoteHTML, printHTML } from '../lib/print';
 import { Dual, Empty, Head, Modal, Note, useAction, useToast } from '../components/ui';
@@ -144,7 +144,7 @@ export function DeliveryModal({ d, pid, sid, onClose, onSent }: { d: Delivery | 
   // store stock not yet promised to deliveries waiting at a shop (this one excluded when editing)
   const avail = (p: Product) => p.wh_qty - sum((dels.data ?? []).filter((x) => x.status === 'pending' && x.id !== d?.id), (x) => sum(x.delivery_items.filter((i) => i.product_id === p.id), (i) => i.qty));
   const stockAt = (s: string, p: string) => stock.data?.find((r) => r.shop_id === s && r.product_id === p)?.qty ?? 0;
-  const all = products.data ?? [], chosen = all.filter((p) => pcsOf(p) > 0), k = sel.length;
+  const all = (products.data ?? []).filter((p) => p.active), chosen = all.filter((p) => pcsOf(p) > 0), k = sel.length;
   const short = chosen.filter((p) => avail(p) < pcsOf(p) * Math.max(1, k));
   const ql = q.trim().toLowerCase();
   const list = all.filter((p) => pcsOf(p) > 0 || !ql || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql)).sort((x, y) => Number(pcsOf(y) > 0) - Number(pcsOf(x) > 0)).slice(0, 150);
@@ -193,14 +193,15 @@ export function DeliveryModal({ d, pid, sid, onClose, onSent }: { d: Delivery | 
 export function ShopStockAll() {
   const shops = useShops(), products = useProducts(), stock = useStock();
   const [q, setQ] = useState(''), [only, setOnly] = useState('all'), [send, setSend] = useState<{ pid: string; sid?: string } | null>(null);
-  const list = (products.data ?? []).filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(q.toLowerCase()));
+  const ranks = useRanks(only === 'all' ? null : only);
+  const list = hotSort((products.data ?? []).filter((p) => p.active), ranks.data).filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(q.toLowerCase()));
   const cols = (shops.data ?? []).filter((s) => s.active && (only === 'all' || s.id === only));
   const at = new Map((stock.data ?? []).map((r) => [r.shop_id + '|' + r.product_id, r.qty]));
   const dels = useDeliveries(), coming = new Map<string, number>();
   (dels.data ?? []).filter((x) => x.status === 'pending').forEach((x) => x.delivery_items.forEach((i) => coming.set(x.shop_id + '|' + i.product_id, (coming.get(x.shop_id + '|' + i.product_id) ?? 0) + i.qty)));
   return (
     <>
-      <Head t="Shop stock" s="What each outlet has right now, next to the central store. Send stock straight from here." a={<button className="btn primary" onClick={() => setSend({ pid: '' })}><Icon n="truck" /> New delivery</button>} />
+      <Head t="Shop stock" s="What each outlet has right now, next to the central store, best sellers of the last 30 days first. Send stock straight from here." a={<button className="btn primary" onClick={() => setSend({ pid: '' })}><Icon n="truck" /> New delivery</button>} />
       <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Search by name, code or category" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <select className="input" style={{ width: 'auto' }} value={only} onChange={(e) => setOnly(e.target.value)}><option value="all">All outlets</option>{(shops.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
         <span className="chip warn">5 or fewer</span><span className="chip bad">None or sold on order</span></div>

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useDeliveries, useInvoices, useOrders, useProducts, useRefresh, useReport, useSettings, useShops, useStock } from '../data/queries';
+import { useDeliveries, useInvoices, useOrders, useProducts, useRanks, useRefresh, useReport, useSettings, useShops, useStock } from '../data/queries';
 import { rpc } from '../lib/supabase';
-import { ctnTxt, totals, unitLabel, unitsOf } from '../lib/units';
+import { ctnTxt, hotSet, hotSort, totals, unitLabel, unitsOf } from '../lib/units';
+import { TicketsModal } from '../components/Tickets';
 import { dt, fCDF, ld, sum, tm, toCDF, today } from '../lib/format';
 import { printHTML, receiptHTML } from '../lib/print';
 import { Dual2, Empty, Head, Kpi, Modal, Note, Tile, useAction, useToast } from '../components/ui';
@@ -40,17 +41,23 @@ export function ShopHome() {
 export function ShopStock() {
   const { profile } = useAuth();
   const sid = profile!.shop_id!;
-  const products = useProducts(), stock = useStock(sid), settings = useSettings();
-  const rate = settings.data?.rate ?? 0, at = new Map((stock.data ?? []).map((r) => [r.product_id, r]));
+  const products = useProducts(), stock = useStock(sid), settings = useSettings(), ranks = useRanks(sid), shops = useShops();
+  const [tickets, setTickets] = useState(false), [q0, setQ] = useState('');
+  const rate = settings.data?.rate ?? 0, at = new Map((stock.data ?? []).map((r) => [r.product_id, r])), hot = hotSet(ranks.data);
+  const live = hotSort((products.data ?? []).filter((p) => p.active), ranks.data), ql = q0.trim().toLowerCase();
+  const list = live.filter((p) => !ql || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql));
   return (
     <>
-      <Head t="Shop stock" s="Prices come from the Admin and are locked. Items can still be sold when stock reaches zero; the shortage shows here in red." />
-      <div className="card p0"><div className="tw">{(products.data ?? []).length ? <table className="t"><thead><tr><th>Item</th><th>Category</th><th>Sold as</th><th className="r">In shop</th><th>Prices</th></tr></thead><tbody>
-        {(products.data ?? []).map((p) => { const s = at.get(p.id), q = s?.qty ?? 0; return <tr key={p.id}><td><b>{p.name}</b><div className="code">{p.sku}{p.is_bundle ? `, set of ${p.pieces_per_set}${s?.open_pieces ? `, ${s.open_pieces} pieces already sold from an open set` : ''}` : ''}</div></td><td>{p.category}</td>
+      <Head t="Shop stock" s="Prices come from the Admin and are locked. Items can still be sold when stock reaches zero; the shortage shows here in red. Best sellers of the last 30 days come first."
+        a={<button className="btn primary" onClick={() => setTickets(true)}><Icon n="printer" /> Price tickets</button>} />
+      <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Search by name, code or category" value={q0} onChange={(e) => setQ(e.target.value)} /></div></div>
+      <div className="card p0"><div className="tw">{list.length ? <table className="t"><thead><tr><th>Item</th><th>Category</th><th>Sold as</th><th className="r">In shop</th><th>Prices</th></tr></thead><tbody>
+        {list.map((p) => { const s = at.get(p.id), q = s?.qty ?? 0; return <tr key={p.id}><td><b>{p.name}</b>{hot.has(p.id) ? <> <span className="chip hot">Hot</span></> : null}<div className="code">{p.sku}{p.is_bundle ? `, set of ${p.pieces_per_set}${s?.open_pieces ? `, ${s.open_pieces} pieces already sold from an open set` : ''}` : ''}</div></td><td>{p.category}</td>
           <td>{unitsOf(p).map((u, k) => <span key={k}><span className="uchip">{unitLabel(u)}</span> </span>)}</td>
           <td className="r"><span className={`chip ${q < 0 ? 'bad' : q <= 5 ? 'warn' : 'ok'}`}>{q < 0 ? Math.abs(q) + ' on order' : q}</span>{q > 0 && ctnTxt(p, q) ? <div className="code">{ctnTxt(p, q)}</div> : null}</td>
           <td>{unitsOf(p).map((u, k) => <div key={k} style={{ whiteSpace: 'nowrap' }}><Icon n="lock" /> <b>{fCDF(toCDF(u.usd, rate))}</b> <span className="code">per {unitLabel(u)}</span></div>)}</td></tr>; })}
-      </tbody></table> : <Empty i="box" t={products.isLoading ? 'Loading' : 'No items yet'} />}</div></div>
+      </tbody></table> : <Empty i="box" t={products.isLoading ? 'Loading' : 'No items found'} />}</div></div>
+      {tickets ? <TicketsModal products={live} rate={rate} shopName={shops.data?.find((x) => x.id === sid)?.name ?? ''} onClose={() => setTickets(false)} /> : null}
     </>
   );
 }
