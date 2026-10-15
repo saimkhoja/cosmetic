@@ -106,6 +106,14 @@ test('a full day in SIM', async ({ browser }) => {
   await admin.locator('.modal .search input').fill('Shea'); await admin.locator('.modal .mchips label', { hasText: 'Shea body lotion' }).click();
   await admin.getByRole('button', { name: 'Save supplier' }).click();
   await expect(admin.getByText('Supplier added')).toBeVisible();
+  // a supplier added by mistake is deleted
+  await admin.getByRole('button', { name: 'Add supplier' }).click();
+  await admin.fill('#sname', 'Wrong Supplier'); await admin.getByRole('button', { name: 'Save supplier' }).click();
+  await expect(admin.locator('tr', { hasText: 'Wrong Supplier' })).toBeVisible();
+  admin.once('dialog', (d) => void d.accept());
+  await admin.locator('tr', { hasText: 'Wrong Supplier' }).getByTitle('Delete supplier').click();
+  await expect(admin.getByText('Wrong Supplier deleted')).toBeVisible();
+  await expect(admin.locator('main tbody tr')).toHaveCount(1);
 
   // ---- the warehouse operator: no costs, sends to both shops, corrects one delivery
   const { page: op } = await open(browser);
@@ -174,8 +182,9 @@ test('a full day in SIM', async ({ browser }) => {
   await till.locator('.ptile', { hasText: 'Matte lipstick' }).click();
   await till.locator('.ubtn', { hasText: 'dzn' }).click();
   await till.getByRole('button', { name: 'Send to shop admin for approval' }).click();
-  await expect(till.getByText('Order for Mama Nzuzi sent to the shop admin for approval')).toBeVisible();
-  expect(await prints(till)).toHaveLength(0);                          // nothing printed at the till
+  await expect(till.getByText(/Order #\w{6} for Mama Nzuzi sent to the shop admin/)).toBeVisible();
+  const orderSlip = (await prints(till)).at(-1)!;                       // the till prints an order slip, not an invoice
+  expect(orderSlip).toContain('BON DE COMMANDE'); expect(orderSlip).toContain('Mama Nzuzi'); expect(orderSlip).not.toContain('FACTURE');
   await expect(till.locator('.myorders')).toContainText('Waiting for approval', { timeout: 30000 });
   // a second order while offline is kept and sent later
   await tillCtx.setOffline(true);
@@ -206,10 +215,12 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.locator('.modal tbody tr')).toHaveCount(2);
   await shop.locator('.modal tr', { hasText: 'Shea body lotion' }).getByLabel('One more').click();
   await shop.click('#oapprove');
-  await expect(shop.getByText(/Order for Mama Nzuzi approved as GOM-T1-000001/)).toBeVisible();
+  await expect(shop.getByText(/Order #\w{6} for Mama Nzuzi approved as GOM-T1-000001/)).toBeVisible();
+  const inv1 = (await prints(shop)).at(-1)!;                            // the shop admin prints the invoice on approval
+  expect(inv1).toContain('Mama Nzuzi'); expect(inv1).toContain('Grace Mbuyi'); expect(inv1).toContain('Copie magasin');
   await review.locator('.rcard', { hasText: 'Papa Lokwa' }).getByRole('button', { name: 'Approve order for Papa Lokwa' }).click();
-  await expect(shop.getByText(/Order for Papa Lokwa approved as GOM-T1-000002/)).toBeVisible();
-  expect(await prints(shop)).toHaveLength(0);                          // approved orders are printed at the till
+  await expect(shop.getByText(/Order #\w{6} for Papa Lokwa approved as GOM-T1-000002/)).toBeVisible();
+  expect((await prints(shop)).at(-1)!).toContain('1 x half dzn @ 82 650 FC');
   await expect(shop.locator('#custname')).toHaveText('Counter customer');   // the sale being made is untouched
   await expect(shop.locator('#cart .line')).toHaveCount(1);
   await shop.locator('#cart').getByLabel('Clear sale').click();
@@ -218,23 +229,18 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.locator('.modal footer').getByRole('button', { name: 'Reject order' }).click();
   await expect(review.locator('.rcard')).toHaveCount(0);
   await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
-  // the till prints its approved orders, once
+  // the till operator sees what was decided
   await till.reload();
   await expect(till.locator('.myorders')).toContainText('Rejected: Customer left', { timeout: 30000 });
-  const mama = till.locator('.morow', { hasText: 'Mama Nzuzi' });
-  await mama.getByRole('button', { name: 'Print' }).click();
-  await expect(mama).toContainText('Approved, printed');
-  const tillPrint = (await prints(till)).at(-1)!;
-  expect(tillPrint).toContain('Mama Nzuzi'); expect(tillPrint).toContain('Grace Mbuyi'); expect(tillPrint).toContain('Copie magasin');
-  await till.locator('.morow', { hasText: 'Papa Lokwa' }).getByRole('button', { name: 'Print' }).click();
-  await expect(till.locator('.morow', { hasText: 'Papa Lokwa' })).toContainText('Approved, printed');
-  expect((await prints(till)).at(-1)!).toContain('1 x half dzn @ 82 650 FC');
-  // price tickets at the till
+  await expect(till.locator('.morow', { hasText: 'Mama Nzuzi' })).toContainText('Approved');
+  // price tickets at the till, with the units chosen
   await till.getByRole('button', { name: 'Tickets' }).click();
+  await till.locator('#tunits label', { hasText: 'Half dozen' }).click();
+  await till.locator('#tunits label', { hasText: 'Carton' }).click();
   await till.getByLabel('Tickets for Shea body lotion 400 ml').fill('3');
   await till.click('#tprint');
   const tk = (await prints(till)).at(-1)!;
-  expect(tk).toContain('14 250 FC'); expect(tk).toContain('half dzn');
+  expect(tk).toContain('SHEA BODY LOTION 400 ML'); expect(tk).toContain('14 250 FC'); expect(tk).toContain('HALF DOZEN (6)'); expect(tk).not.toContain('CARTON');
   await till.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
 
   // ---- the shop admin sells directly while offline; it is sent when back online
@@ -298,6 +304,27 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.selectOption('#stacc', { label: 'Cash – SIM Beauté Gombe (FC)' });
   await expect(shop.locator('#sttable')).toContainText('GOM-T1-000003');
   await expect(shop.locator('#stclose')).toContainText('Dr');
+
+  // ---- the shop admin changes a line's unit, deletes an invoice and prints a stock count sheet
+  await shop.getByRole('link', { name: 'Invoices' }).click();
+  await shop.locator('tr', { hasText: 'GOM-T1-000003' }).getByTitle('Edit invoice').click();
+  await shop.locator('.modal select[data-eu="0"]').selectOption({ label: 'dzn (12)' });
+  await shop.locator('.modal input[data-eq="0"]').fill('2');
+  await expect(shop.locator('.modal')).toContainText('New total 324 900 FC');      // 2 dozen at 162 450 FC instead of 1 carton
+  await shop.fill('#ereason', 'Customer took 2 dozen');
+  await shop.getByRole('button', { name: 'Save changes' }).click();
+  await expect(shop.getByText('Invoice updated')).toBeVisible();
+  await expect(shop.locator('tr', { hasText: 'GOM-T1-000003' })).toContainText('324 900 FC');
+  await shop.locator('tr', { hasText: 'GOM-T1-000002' }).getByTitle('Delete invoice').click();
+  await shop.fill('#dreason', 'Customer cancelled');
+  await shop.click('#delbtn');
+  await expect(shop.getByText('Invoice GOM-T1-000002 deleted')).toBeVisible();
+  await expect(shop.locator('main table.t tbody tr')).toHaveCount(2);
+  await shop.getByRole('link', { name: 'Stock' }).click();
+  await expect(shop.locator('tr', { hasText: 'Shea body lotion' })).toContainText('44');     // 38 + the 6 pcs of the deleted invoice
+  await shop.getByRole('button', { name: 'Print stock count sheet' }).click();
+  const sheet = (await prints(shop)).at(-1)!;
+  expect(sheet).toContain('Stock count sheet'); expect(sheet).toContain('Shea body lotion'); expect(sheet).toContain('Counted');
 
   // ---- the Admin enters the supplier's bill, pays it, and the trial balance agrees
   await admin.getByRole('link', { name: 'Goods in' }).click();

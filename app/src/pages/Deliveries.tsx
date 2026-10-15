@@ -5,7 +5,7 @@ import { useDeliveries, useProducts, useRanks, useRefresh, useSettings, useShops
 import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSort } from '../lib/units';
 import { dt, fCDF, sum } from '../lib/format';
-import { deliveryNoteHTML, printHTML } from '../lib/print';
+import { deliveryNoteHTML, printHTML, stockCountHTML } from '../lib/print';
 import { Dual, Empty, Head, Modal, Note, useAction, useToast } from '../components/ui';
 import { QtyCell } from './Inventory';
 import type { Delivery, Product, Shop } from '../lib/types';
@@ -191,8 +191,8 @@ export function DeliveryModal({ d, pid, sid, onClose, onSent }: { d: Delivery | 
 }
 
 export function ShopStockAll() {
-  const shops = useShops(), products = useProducts(), stock = useStock();
-  const [q, setQ] = useState(''), [only, setOnly] = useState('all'), [send, setSend] = useState<{ pid: string; sid?: string } | null>(null);
+  const shops = useShops(), products = useProducts(), stock = useStock(), settings = useSettings(), { profile } = useAuth();
+  const [q, setQ] = useState(''), [only, setOnly] = useState('all'), [send, setSend] = useState<{ pid: string; sid?: string } | null>(null), [count, setCount] = useState(false);
   const ranks = useRanks(only === 'all' ? null : only);
   const list = hotSort((products.data ?? []).filter((p) => p.active), ranks.data).filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(q.toLowerCase()));
   const cols = (shops.data ?? []).filter((s) => s.active && (only === 'all' || s.id === only));
@@ -201,7 +201,7 @@ export function ShopStockAll() {
   (dels.data ?? []).filter((x) => x.status === 'pending').forEach((x) => x.delivery_items.forEach((i) => coming.set(x.shop_id + '|' + i.product_id, (coming.get(x.shop_id + '|' + i.product_id) ?? 0) + i.qty)));
   return (
     <>
-      <Head t="Shop stock" s="What each outlet has right now, next to the central store, best sellers of the last 30 days first. Send stock straight from here." a={<button className="btn primary" onClick={() => setSend({ pid: '' })}><Icon n="truck" /> New delivery</button>} />
+      <Head t="Shop stock" s="What each outlet has right now, next to the central store, best sellers of the last 30 days first. Send stock straight from here." a={<><button className="btn ghost" onClick={() => setCount(true)}><Icon n="printer" /> Print stock count sheet</button><button className="btn primary" onClick={() => setSend({ pid: '' })}><Icon n="truck" /> New delivery</button></>} />
       <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Search by name, code or category" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <select className="input" style={{ width: 'auto' }} value={only} onChange={(e) => setOnly(e.target.value)}><option value="all">All outlets</option>{(shops.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
         <span className="chip warn">5 or fewer</span><span className="chip bad">None or sold on order</span></div>
@@ -212,6 +212,23 @@ export function ShopStockAll() {
             <td><div className="act"><button title="Send to shops" onClick={() => setSend({ pid: p.id, sid: only !== 'all' ? only : undefined })}><Icon n="truck" /></button></div></td></tr>)}
         </tbody></table>}</div></div>
       {send ? <DeliveryModal d={null} pid={send.pid || undefined} sid={send.sid} onClose={() => setSend(null)} /> : null}
+      {count ? <CountSheet onClose={() => setCount(false)} first={only} print={(where, sid, zero) => {
+        const all = (products.data ?? []).filter((p) => p.active).map((p) => ({ p, qty: sid ? at.get(sid + '|' + p.id) ?? 0 : p.wh_qty })).filter((r) => zero || r.qty !== 0).sort((a, b) => a.p.category.localeCompare(b.p.category) || a.p.name.localeCompare(b.p.name));
+        printHTML(stockCountHTML(settings.data?.company ?? {}, where, profile!.name, all)); setCount(false);
+      }} /> : null}
     </>
+  );
+}
+
+function CountSheet({ first, onClose, print }: { first: string; onClose: () => void; print: (where: string, sid: string | null, zero: boolean) => void }) {
+  const shops = useShops();
+  const [w, setW] = useState(first === 'all' ? 'store' : first), [zero, setZero] = useState(true);
+  const name = w === 'store' ? 'Central store' : shops.data?.find((s) => s.id === w)?.name ?? '';
+  return (
+    <Modal title="Print stock count sheet" icon="printer" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="cntprint" onClick={() => print(name, w === 'store' ? null : w, zero)}><Icon n="printer" /> Print</button></>}>
+      <p>A sheet with every item and the stock SIM shows, and empty columns to write what you count, to check the system against the shelves.</p>
+      <div className="field"><label>Where</label><select id="cntwhere" className="input" value={w} onChange={(e) => setW(e.target.value)}><option value="store">Central store</option>{(shops.data ?? []).filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+      <label className="switch"><input type="checkbox" checked={zero} onChange={(e) => setZero(e.target.checked)} /><span>Include items with no stock in the system</span></label>
+    </Modal>
   );
 }

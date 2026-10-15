@@ -6,13 +6,20 @@ export interface Unit { u: string; mult: number; piece?: boolean; usd: number }
 /** Selling units for an item, in the same order the server checks them. */
 export function unitsOf(p: Product): Unit[] {
   if (p.is_bundle) return [{ u: 'set', mult: 1, usd: p.price_usd }, { u: 'piece', mult: 0, piece: true, usd: p.piece_usd }];
-  const u: Unit[] = [{ u: 'pcs', mult: 1, usd: p.price_usd }];
+  const u: Unit[] = p.price_usd > 0 ? [{ u: 'pcs', mult: 1, usd: p.price_usd }] : [];
   if (p.half_dozen_usd > 0 && p.per_carton !== 6) u.push({ u: 'half dzn', mult: 6, usd: p.half_dozen_usd });
   if (p.dozen_usd > 0 && p.per_carton !== 12) u.push({ u: 'dzn', mult: 12, usd: p.dozen_usd });
   if (p.carton_usd > 0) u.push({ u: 'carton', mult: p.per_carton, usd: p.carton_usd });
   return u;
 }
 export const unitLabel = (u: Unit) => (u.piece ? '1 piece' : u.u);
+/** Value of one pc (or set) at selling price, from the first unit that has a price. Mirrors app.pc_value. */
+export function pcValue(p: Product) {
+  if (p.is_bundle || p.price_usd > 0) return p.price_usd;
+  if (p.half_dozen_usd > 0) return p.half_dozen_usd / 6;
+  if (p.dozen_usd > 0) return p.dozen_usd / 12;
+  return p.carton_usd > 0 && p.per_carton > 0 ? p.carton_usd / p.per_carton : 0;
+}
 export function unitNote(p: Product, u: Unit) {
   return u.piece ? `single piece from an open ${p.stock_unit}` : u.mult > 1 ? `${u.mult} ${p.stock_unit}` : `single ${p.stock_unit}`;
 }

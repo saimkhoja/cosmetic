@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
-import { ctnTxt, hotSort, takeLocal, totals, unitsOf } from './units';
+import { ctnTxt, hotSort, pcValue, takeLocal, totals, unitsOf } from './units';
 import { itemProblem } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
@@ -33,6 +33,8 @@ describe('units', () => {
     expect(unitsOf(P({ half_dozen_usd: 8.5 })).map((u) => `${u.u}:${u.mult}`)).toEqual(['pcs:1', 'half dzn:6', 'dzn:12', 'carton:24']);
     expect(unitsOf(P({ half_dozen_usd: 8.5, per_carton: 6 })).map((u) => u.u)).toEqual(['pcs', 'dzn', 'carton']);
     expect(unitsOf(P({ carton_usd: 0 })).map((u) => u.u)).toEqual(['pcs', 'dzn']);
+    expect(unitsOf(P({ price_usd: 0 })).map((u) => u.u)).toEqual(['dzn', 'carton']);
+    expect(pcValue(P({ price_usd: 0 }))).toBeCloseTo(16 / 12);
   });
   it('hot items first, seasonal items out of season last', () => {
     const list = [P({ id: 'a', name: 'A' }), P({ id: 'b', name: 'B' }), P({ id: 'c', name: 'C' }), P({ id: 'd', name: 'D' })];
@@ -61,7 +63,11 @@ describe('item validation', () => {
     expect(itemProblem({ ...base, ctn: 20 })).toMatch(/carton cannot be below/);
     expect(itemProblem({ ...base, half: 5 })).toMatch(/half dozen is below/);
   });
-  it('carton and half dozen prices are optional', () => expect(itemProblem({ ...base, ctn: 0, half: 0, dzn: 0 })).toBeNull());
+  it('every price is optional, but one is needed', () => {
+    expect(itemProblem({ ...base, ctn: 0, half: 0, dzn: 0 })).toBeNull();
+    expect(itemProblem({ ...base, pc: 0 })).toBeNull();
+    expect(itemProblem({ ...base, pc: 0, dzn: 0, ctn: 0 })).toMatch(/at least one selling price/);
+  });
 });
 
 describe('import', () => {

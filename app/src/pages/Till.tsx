@@ -6,11 +6,10 @@ import { rpc, rows, supabase } from '../lib/supabase';
 import { cartPriced, hotSet, hotSort, takeLocal, totals, unitLabel, unitNote, unitsOf, type CartLine } from '../lib/units';
 import { catIcon } from '../lib/items';
 import { fCDF, tm, toCDF, today } from '../lib/format';
-import { printHTML, receiptHTML, saleCopies } from '../lib/print';
+import { orderRef, orderSlipHTML, printHTML, receiptHTML, saleCopies } from '../lib/print';
 import { Empty, Modal, Note, useAction, useToast } from '../components/ui';
 import { TicketsModal } from '../components/Tickets';
 import { useDeliveries, useOrders } from '../data/queries';
-import { useQuery } from '@tanstack/react-query';
 import { getDevice, getSnapshot, nextInvoiceNo, outboxAll, outboxPut, setDevice, setSnapshot, type Device, type OutboxEntry, type Snapshot } from '../offline/store';
 import { isNetworkError, startSync, syncOutbox } from '../offline/sync';
 import type { Category, Invoice, Product, Rank, SaleOrder, Settings, Shop, StockRow } from '../lib/types';
@@ -68,10 +67,6 @@ export default function Till() {
   const startOfDay = useMemo(() => new Date(today() + 'T00:00:00').toISOString(), []);
   const orders = useOrders(isAdmin ? 'pending' : 'all', isAdmin ? undefined : startOfDay);
   const dels = useDeliveries(shopId, isAdmin);
-  // the till reads the invoices of its own approved orders (RLS) to print them
-  const approvedIds = (isAdmin ? [] : (orders.data ?? [])).filter((o) => o.status === 'approved' && o.invoice_id).map((o) => o.invoice_id!);
-  const tillInvs = useQuery({ queryKey: ['tillinv', approvedIds.join(',')], enabled: approvedIds.length > 0, queryFn: async () => rows<{ id: string; till_printed_at: string | null }>(await supabase.from('invoices').select('id,till_printed_at').in('id', approvedIds)) });
-  const tillInv = new Map((tillInvs.data ?? []).map((i) => [i.id, i.till_printed_at]));
 
   const loadOutbox = useCallback(() => { void outboxAll().then((l) => setOutbox(l.filter((e) => e.shop_id === shopId))); }, [shopId]);
   const load = useCallback(async () => {
@@ -148,21 +143,23 @@ export default function Till() {
     return { lines, missing };
   };
 
-  // till operator: the order goes to the shop admin; nothing is sold or printed yet
+  // till operator: the order goes to the shop admin and an order slip prints for the customer;
+  // nothing is sold and no stock moves until the shop admin approves it
   const sendOrder = async () => {
-    if (busy.current || !priced.length || !customer) return;
+    if (busy.current || !priced.length || !customer || !snap) return;
     busy.current = true;
     try {
       const id = crypto.randomUUID(), t = new Date().toISOString();
       await outboxPut({ kind: 'order', id, t, shop_id: shopId, tries: 0, total: T.total, created_by: profile!.id,
         payload: { id, customer, t, items: priced.map((l) => ({ product_id: l.pid, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty })) } });
-      toast(`Order for ${customer} sent to the shop admin for approval`);
+      printHTML(orderSlipHTML({ ref: orderRef(id), customer, t, by: profile!.name, total: T.total, lines: priced.map((l) => ({ name: l.p.name, unit: unitLabel(l.u), qty: l.qty, price: l.price })) }, snap.settings.company, snap.shop));
+      toast(`Order ${orderRef(id)} for ${customer} sent to the shop admin. Printing the order slip.`);
       resetSale(); void syncOutbox();
     } finally { busy.current = false; }
   };
 
-  // shop admin: a sale is saved on the device, then sent to the server (works offline too).
-  // Own sales print here; an approved order is printed by the till operator who prepared it.
+  // shop admin: a sale is saved on the device, printed, then sent to the server (works offline too).
+  // Approving an order is the same: the invoice prints here and the stock goes down.
   const sell = async (lines: CartLine[], disc: number, cust: string, order: SaleOrder | null) => {
     if (busy.current || !snap || !cust) return false;
     if (!dev) { toast('Connect to the internet once to register this till', 'bad'); return false; }
@@ -179,9 +176,9 @@ export default function Till() {
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
-      if (!order) printHTML(saleCopies(inv, snap.settings.company, snap.shop));
+      printHTML(saleCopies(inv, snap.settings.company, snap.shop));
       setLast(inv);
-      toast(order ? `Order for ${cust} approved as ${no}, ${fCDF(S.total)}. ${order.created_by_name.split(' ')[0]} prints it at the till.` : `Sale ${no} for ${cust} done, ${fCDF(S.total)}. Printing.`);
+      toast(order ? `Order ${orderRef(order.id)} for ${cust} approved as ${no}, ${fCDF(S.total)}. Printing the invoice.` : `Sale ${no} for ${cust} done, ${fCDF(S.total)}. Printing.`);
       void syncOutbox();
       return true;
     } finally { busy.current = false; }
@@ -215,7 +212,7 @@ export default function Till() {
       <div className="pgrid">{list.length ? list.map((p) => { const us = unitsOf(p), lf = left(p); return (
         <button key={p.id} className="ptile" onClick={() => add(p.id)}><span className="ptop"><span className="ico"><Icon n={p.is_bundle ? 'gift' : catIcon(p.category)} /></span>
           <span className="tchips">{hot.has(p.id) ? <span className="chip hot">Hot</span> : null}{p.is_bundle ? <span className="chip">set + piece</span> : us.length > 1 ? <span className="chip">{us.map((x) => SHORT[x.u] ?? x.u).join(' · ')}</span> : null}</span></span>
-          <span className="nm">{p.name}</span><span className="pr">{fCDF(toCDF(p.price_usd, rate))}<small> / {p.stock_unit}</small></span>
+          <span className="nm">{p.name}</span><span className="pr">{us.length ? <>{fCDF(toCDF(us[0].usd, rate))}<small> / {us[0].u === 'pcs' ? p.stock_unit : unitLabel(us[0])}</small></> : <small>no price</small>}</span>
           <span className={`st ${lf <= 0 ? 'neg' : ''}`}>{lf > 0 ? lf + ' in shop' : lf === 0 ? 'None left, sells on order' : Math.abs(lf) + ' on order'}</span></button>); })
         : <Empty i="search" t={snap.products.length ? 'No items found. Try another word or another category.' : 'No items yet. The Admin adds them in Inventory.'} />}</div>
     </section>
@@ -236,8 +233,8 @@ export default function Till() {
         {isAdmin && last ? <div className="row muted" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13.5 }}><span className="chip ok"><Icon n="check" /> Last sale</span><span style={{ flex: 1 }}><b>{last.no}</b>, <span style={{ whiteSpace: 'nowrap' }}>{fCDF(last.total)}</span></span><button className="btn sm" onClick={() => setView(last)}><Icon n="eye" /> View</button></div> : null}
         {!isAdmin && (myUnsent.length || myOrders.length) ? <div className="myorders"><div className="code" style={{ margin: '10px 0 4px', fontWeight: 800 }}>My orders today</div>
           {myUnsent.map((e) => <div key={e.id} className="morow"><span>{e.kind === 'order' ? e.payload.customer : ''}</span><span className="chip warn">{e.error ? 'Not accepted: ' + e.error : 'Not sent yet'}</span></div>)}
-          {myOrders.filter((o) => !myUnsent.some((e) => e.id === o.id)).map((o) => <div key={o.id} className="morow"><span>{o.customer} <span className="code">{tm(o.created_at)}</span></span>
-            {o.status === 'pending' ? <span className="chip">Waiting for approval</span> : o.status === 'approved' ? <TillPrint o={o} printed={tillInv.get(o.invoice_id ?? '')} onPrinted={() => void tillInvs.refetch()} snap={snap} /> : <span className="chip bad" title={o.reason ?? ''}>Rejected{o.reason ? ': ' + o.reason : ''}</span>}</div>)}
+          {myOrders.filter((o) => !myUnsent.some((e) => e.id === o.id)).map((o) => <div key={o.id} className="morow"><span>{o.customer} <span className="code">{orderRef(o.id)}, {tm(o.created_at)}</span></span>
+            {o.status === 'pending' ? <span className="chip">Waiting for approval</span> : o.status === 'approved' ? <span className="chip ok">Approved</span> : <span className="chip bad" title={o.reason ?? ''}>Rejected{o.reason ? ': ' + o.reason : ''}</span>}</div>)}
         </div> : null}
       </div>
     </section></div>
@@ -256,7 +253,7 @@ export default function Till() {
               {toReview.length ? toReview.map((o) => (
                 <div key={o.id} className={`rcard ${editing?.id === o.id ? 'on' : ''}`}>
                   <div className="rrow"><b title={o.customer}>{o.customer}</b><span className="amt">{fCDF(orderTotal(o))}</span></div>
-                  <div className="rrow"><span className="code" style={{ flex: 1 }}>{o.items.reduce((s, i) => s + i.qty, 0)} items · {o.created_by_name.split(' ')[0]}, {tm(o.created_at)}</span>
+                  <div className="rrow"><span className="code" style={{ flex: 1 }}>{orderRef(o.id)} · {o.items.reduce((s, i) => s + i.qty, 0)} items · {o.created_by_name.split(' ')[0]}, {tm(o.created_at)}</span>
                     <button className="rbtn ok" title="Approve this order" aria-label={`Approve order for ${o.customer}`} onClick={() => void approve(o)}><Icon n="check" /></button>
                     <button className="rbtn bad" title="Reject this order" aria-label={`Reject order for ${o.customer}`} onClick={() => setReject(o)}><Icon n="x" /></button>
                     <button className="rbtn ed" title="Check and change before approving" aria-label={`Edit order for ${o.customer}`} onClick={() => setEditing(o)}><Icon n="edit" /></button></div>
@@ -319,24 +316,6 @@ function DiscModal({ v, onApply, onClose }: { v: number; onApply: (v: number) =>
   );
 }
 
-/** The till operator prints an order once the shop admin approved it (once; duplicates come from the shop admin). */
-function TillPrint({ o, printed, onPrinted, snap }: { o: SaleOrder; printed: string | null | undefined; onPrinted: () => void; snap: Snapshot }) {
-  const toast = useToast(), [busy, setBusy] = useState(false);
-  if (printed) return <span className="chip ok"><Icon n="check" /> Approved, printed</span>;
-  const go = async () => {
-    setBusy(true);
-    try {
-      const inv = rows<Invoice>(await supabase.from('invoices').select('*, items:invoice_items(line_no,product_id,name,unit,mult,piece,qty,price,line)').eq('id', o.invoice_id!))[0];
-      if (!inv) throw new Error('The invoice is not on the server yet. Try again in a moment.');
-      inv.items.sort((a, b) => (a.line_no ?? 0) - (b.line_no ?? 0));
-      await rpc('record_till_print', { p_id: inv.id });
-      printHTML(saleCopies(inv, snap.settings.company, snap.shop));
-      toast(`Printing ${inv.no} for ${o.customer}`); onPrinted();
-    } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
-  };
-  return <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><span className="chip ok">Approved</span><button className="btn primary sm tprint" disabled={busy} onClick={() => void go()}><Icon n="printer" /> Print</button></span>;
-}
-
 /** The shop admin checks and changes an order in its own window; the sale being made on the till stays as it is. */
 function OrderEditor({ o, init, byId, snap, onClose, onReject, onApprove }: { o: SaleOrder; init: { lines: CartLine[]; missing: string[] }; byId: Map<string, Product>; snap: Snapshot; onClose: () => void; onReject: () => void; onApprove: (lines: CartLine[], dp: number) => Promise<void> }) {
   const [lines, setLines] = useState<CartLine[]>(init.lines), [dp, setDp] = useState(0), [q, setQ] = useState(''), [busy, setBusy] = useState(false);
@@ -346,9 +325,9 @@ function OrderEditor({ o, init, byId, snap, onClose, onReject, onApprove }: { o:
   const unit = (i: number, ui: number) => setLines((c) => c.map((l, k) => (k === i ? { ...l, ui } : l)));
   const add = (p: Product) => { setLines((c) => { const l = c.find((x) => x.pid === p.id && x.ui === 0); return l ? c.map((x) => (x === l ? { ...x, qty: x.qty + 1 } : x)) : [...c, { pid: p.id, ui: 0, qty: 1 }]; }); setQ(''); };
   return (
-    <Modal title={`Order for ${o.customer}`} icon="receipt" wide onClose={onClose} foot={<><button className="btn danger" onClick={onReject}><Icon n="x" /> Reject</button><span className="sp" /><button className="btn" onClick={onClose}>Close</button>
+    <Modal title={`Order ${orderRef(o.id)} for ${o.customer}`} icon="receipt" wide onClose={onClose} foot={<><button className="btn danger" onClick={onReject}><Icon n="x" /> Reject</button><span className="sp" /><button className="btn" onClick={onClose}>Close</button>
       <button className="btn primary" id="oapprove" disabled={!priced.length || busy} onClick={() => { setBusy(true); void onApprove(lines, dp).finally(() => setBusy(false)); }}><Icon n="check" /> Approve {fCDF(T.total)}</button></>}>
-      <p>Prepared by {o.created_by_name} at {tm(o.created_at)}. Change quantities or units, add or remove items, then approve. {o.created_by_name.split(' ')[0]} prints the invoice at the till.</p>
+      <p>Order {orderRef(o.id)}, prepared by {o.created_by_name} at {tm(o.created_at)}. Change quantities or units, add or remove items, then approve: the invoice prints here and the stock goes down.</p>
       {init.missing.length ? <Note i="alert" warn>Not added: {init.missing.join(', ')}. The unit or item is no longer sold.</Note> : null}
       <div className="tw"><table className="t"><thead><tr><th>Item</th><th>Unit</th><th className="r">Price</th><th style={{ width: 150 }}>Qty</th><th className="r">Line</th></tr></thead><tbody>
         {priced.map((l, i) => <tr key={l.pid + ':' + l.ui}><td><b>{l.p.name}</b><div className="code">{snap.stock[l.pid]?.qty ?? 0} in shop</div></td>

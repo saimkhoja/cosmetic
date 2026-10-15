@@ -2,7 +2,7 @@
 // Layouts are those approved on the demo. Printing uses the browser; for one-tap printing at
 // the till, start Chrome with --kiosk-printing and set the receipt printer as default.
 import type { Company, Delivery, Invoice, Product, Shop, Statement } from './types';
-import { ctnTxt, unitLabel, unitsOf } from './units';
+import { ctnTxt, unitsOf } from './units';
 import { dt, esc, fCDF, fUSD, sum, toCDF, today } from './format';
 
 export function printHTML(html: string) {
@@ -77,17 +77,44 @@ export function reportHTML(r: Report, c: Company, where: string, by: string, sho
   <div style="margin-top:26px">Signature ____________________</div></div>`;
 }
 
-/** Price tickets: an A4 sheet (3 x 8 tickets of 70 x 37 mm) or one 50 x 30 mm label per ticket for a label printer. */
-export function ticketsHTML(items: { p: Product; copies: number }[], rate: number, layout: 'a4' | 'label', shopName = '') {
+export type TicketUnit = 'pcs' | 'half dzn' | 'dzn' | 'carton';
+/** Price tickets: an A4 sheet (3 x 8 tickets of 70 x 37 mm) or one 50 x 30 mm label per ticket for a label printer.
+ *  Only the chosen units are printed (pcs also covers a set and its piece). Items with none of them are left out. */
+export function ticketsHTML(items: { p: Product; copies: number }[], rate: number, layout: 'a4' | 'label', shopName = '', units: TicketUnit[] = ['pcs', 'half dzn', 'dzn', 'carton']) {
+  const want = (u: { u: string; piece?: boolean }) => units.includes((u.u === 'set' || u.piece ? 'pcs' : u.u) as TicketUnit);
+  const label = (u: { u: string; mult: number; piece?: boolean }) => (u.piece ? '1 piece' : u.u === 'pcs' ? 'pc' : u.u === 'half dzn' ? 'half dozen (6)' : u.u === 'dzn' ? 'dozen (12)' : u.u === 'carton' ? `carton (${u.mult})` : u.u);
   const one = (p: Product) => {
-    const us = unitsOf(p);
-    return `<div class="ticket ${layout}"><div class="tn">${esc(p.name)}</div><div class="tp">${fCDF(toCDF(us[0].usd, rate))}<small> / ${esc(unitLabel(us[0]))}</small></div>${us.slice(1).map((u) => `<div class="tu">${esc(unitLabel(u))}${u.mult > 1 ? ` (${u.mult})` : ''}: <b>${fCDF(toCDF(u.usd, rate))}</b></div>`).join('')}<div class="tf"><span>${esc(p.sku)}</span><span>${esc(shopName)}</span></div></div>`;
+    const us = unitsOf(p).filter(want);
+    if (!us.length) return '';
+    const up = (t: string) => esc(t.toLocaleUpperCase('fr'));   // tickets are printed in capitals
+    return `<div class="ticket ${layout}"><div class="tn">${up(p.name)}</div><div class="tl">${us.map((u) => `<div class="tu"><span>${up(label(u))}</span><b>${fCDF(toCDF(u.usd, rate))}</b></div>`).join('')}</div><div class="tf"><span>${up(p.sku)}</span><span>${up(shopName)}</span></div></div>`;
   };
-  const all = items.flatMap((x) => Array.from({ length: Math.max(0, Math.min(200, x.copies)) }, () => one(x.p)));
+  const all = items.flatMap((x) => { const t = one(x.p); return t ? Array.from({ length: Math.max(0, Math.min(200, x.copies)) }, () => t) : []; });
   if (layout === 'label') return all.join('<div class="pagebreak"></div>');
   const pages: string[] = [];
   for (let i = 0; i < all.length; i += 24) pages.push(`<div class="tsheet">${all.slice(i, i + 24).join('')}</div>`);
   return pages.join('<div class="pagebreak"></div>');
+}
+
+/** Order slip printed at the till when the order is sent: the customer takes it to the shop admin, who prints the invoice. */
+export function orderSlipHTML(o: { ref: string; customer: string; t: string; by: string; lines: { name: string; unit: string; qty: number; price: number }[]; total: number }, c: Company, shop: Shop) {
+  return `<div class="receipt"><div class="c"><div class="big">${esc(c.name)}</div><div>${esc(shop.name)}</div></div><hr>
+  <div class="c big">BON DE COMMANDE</div><div class="c small">Ce bon n'est pas une facture. Payez à la caisse.</div><hr>
+  <table><tr><td>Réf.</td><td class="r"><b>${esc(o.ref)}</b></td></tr><tr><td>Date</td><td class="r">${dt(o.t)}</td></tr><tr><td>Client</td><td class="r">${esc(o.customer)}</td></tr><tr><td>Préparé par</td><td class="r">${esc(o.by)}</td></tr></table><hr>
+  <table>${o.lines.map((l) => `<tr><td colspan="2">${esc(l.name)}</td></tr><tr><td>&nbsp;${l.qty} x ${esc(l.unit)} @ ${fCDF(l.price)}</td><td class="r">${fCDF(l.price * l.qty)}</td></tr>`).join('')}</table><hr>
+  <div class="rtotal"><span>TOTAL À PAYER</span><span>${fCDF(o.total)}</span></div>
+  <div class="c small">Articles : ${sum(o.lines, (l) => l.qty)}. TVA incluse. Montant indicatif ; la facture de la caisse fait foi.</div></div>`;
+}
+/** Short reference of an order, the same on the till's slip and in the shop admin's review list. */
+export const orderRef = (id: string) => '#' + id.replace(/-/g, '').slice(0, 6).toUpperCase();
+
+/** Stock count sheet: what the system shows, with empty columns to write the physical count. */
+export function stockCountHTML(c: Company, where: string, by: string, rows: { p: Product; qty: number }[]) {
+  const body = `<table class="t count"><thead><tr><th>#</th><th>Item</th><th>Code</th><th>Category</th><th class="r">System stock</th><th style="width:22%">Counted</th><th style="width:14%">Difference</th></tr></thead><tbody>
+  ${rows.map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.p.name)}</b></td><td>${esc(r.p.sku)}</td><td>${esc(r.p.category)}</td><td class="r"><b>${r.qty} ${esc(r.p.stock_unit)}</b>${ctnTxt(r.p, r.qty) ? `<br><small>${ctnTxt(r.p, r.qty)}</small>` : ''}</td><td></td><td></td></tr>`).join('') || '<tr><td colspan="7">No items</td></tr>'}</tbody></table>
+  <p style="color:#000;margin-top:14px">${rows.length} items, ${sum(rows, (r) => r.qty)} units in the system. Write what you count; the difference is Counted minus System stock.</p>
+  <div style="display:flex;justify-content:space-between;margin-top:28px;gap:20px"><div>Counted by: ____________________<br><br>Signature ____________</div><div>Checked by: ____________________<br><br>Signature ____________</div></div>`;
+  return bookHTML(c, 'Stock count sheet', where + ', ' + today(), body, by);
 }
 
 /** A plain A4 document with the company heading, used by the book keeping reports. */

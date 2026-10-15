@@ -385,6 +385,80 @@ select t.ok(jsonb_array_length(public.day_book(current_date, current_date)) = (s
 select t.ok((select count(*) from jsonb_array_elements(public.day_book(current_date, current_date, 'sales'))) = 3, 'day book filters by voucher type');
 reset role;
 
+-- ===== price per pc optional; invoice units can be edited; invoices can be deleted =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.fails($$select public.save_product('{"name":"No price","category":"Skin care","carton_cost":24,"per_carton":24}')$$, 'at least one selling price', 'an item needs at least one selling price');
+select t.put('dzonly', public.save_product('{"name":"Hair pins","category":"Skin care","carton_cost":24,"per_carton":48,"dzn":9,"qty_loose":48}')::text);
+select t.ok((select price_usd from products where id = t.get('dzonly')::uuid) = 0, 'the price per pc is optional');
+select t.put('gelbox', public.save_product('{"name":"Gel box","category":"Skin care","carton_cost":24,"per_carton":12,"dzn":30}')::text);
+select t.ok((select carton_usd from products where id = t.get('gelbox')::uuid) = 30, 'a carton of 12 sold only by the dozen: the dozen price is the carton price');
+select public.create_deliveries(array[t.get('gom')::uuid], jsonb_build_array(jsonb_build_object('product_id', t.get('dzonly'), 'qty', 24)));
+select t.ok((select i.price_usd from delivery_items i where i.product_id = t.get('dzonly')::uuid) = 0.75, 'a delivery values an item with no pc price at its dozen price / 12');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.receive_delivery((select d.id from deliveries d join delivery_items i on i.delivery_id = d.id where i.product_id = t.get('dzonly')::uuid), '[]', '');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000010","device_id":"%s","customer":"X","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":1000}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('dzonly')),
+  'Unit not valid', 'no pc price means it is not sold by the pc');
+-- change the half dozen line of inv3 to 6 pcs
+select t.put('lot_b', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid));
+select public.edit_invoice(t.get('inv3')::uuid, '[{"line_no":1,"qty":6,"mult":1}]', 0, 'Customer took loose pcs');
+select t.ok((select unit || '/' || price || '/' || qty from invoice_items where invoice_id = t.get('inv3')::uuid) = 'pcs/4560/6', 'edited line changed from half dozen to 6 pcs at the pc price');
+select t.ok((select total from invoices where id = t.get('inv3')::uuid) = 6 * 4560, 'invoice total follows the new unit');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('lot_b')::int, 'same 6 pcs leave the stock');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id where v.source_id = t.get('inv3')::uuid and l.account_id = t.shop_acc('CASH_SHOP', t.get('gom')::uuid)) = 6 * 4560, 'the books follow the edited invoice');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails(format($$select public.edit_invoice('%s', '[{"line_no":1,"qty":1,"mult":7}]', 0, 'bad unit')$$, t.get('inv3')), 'Unit not valid', 'a unit the item does not have is refused');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000e');
+select t.fails(format($$select public.delete_invoice('%s', 'not mine')$$, t.get('inv3')), 'not found', 'another shop cannot delete the invoice');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails(format($$select public.delete_invoice('%s', '')$$, t.get('inv3')), 'reason', 'deleting needs a reason');
+select public.delete_invoice(t.get('inv3')::uuid, 'Typed twice by mistake');
+select t.ok(not exists (select 1 from invoices where id = t.get('inv3')::uuid), 'the invoice is removed');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('lot_b')::int + 6, 'its stock goes back to the shop');
+select public.delete_invoice(t.get('inv1')::uuid, 'Customer cancelled');
+select t.ok((select status || ':' || (reason like 'Invoice GOM-T2-000001 deleted%')::text from sale_orders where id = t.get('ord1')::uuid) = 'rejected:true', 'the order of a deleted invoice shows as rejected with the reason');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok(not exists (select 1 from vouchers where source_id in (t.get('inv1')::uuid, t.get('inv3')::uuid)), 'deleted invoices leave the books');
+select t.ok(t.unbalanced() = 0, 'the books still balance');
+select t.ok(exists (select 1 from audit_log where action like 'Invoice GOM-T2-000003 deleted by Patrick Kabongo%Typed twice by mistake'), 'the activity log keeps what was deleted and why');
+reset role;
+
+-- ===== deleting suppliers =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('sup2', public.save_supplier('{"name":"Unused Supplier"}')::text);
+select t.put('sup2acc', (select account_id::text from suppliers where id = t.get('sup2')::uuid));
+select t.ok(public.delete_supplier(t.get('sup2')::uuid) = 'deleted', 'a supplier with nothing recorded is deleted');
+select t.ok(not exists (select 1 from accounts where id = t.get('sup2acc')::uuid), 'its ledger goes with it');
+select t.fails(format($$select public.delete_supplier('%s')$$, t.get('sup')), 'still has a balance', 'a supplier we still owe cannot be deleted');
+select t.put('sup3', public.save_supplier('{"name":"Old Supplier"}')::text);
+select public.receive_goods(jsonb_build_object('supplier_id', t.get('sup3'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1))));
+select public.enter_bill(jsonb_build_object('grn_id', (select id from grns where supplier_id = t.get('sup3')::uuid), 'bill_no', 'OS-1', 'amount', 1));
+select public.post_voucher(jsonb_build_object('type', 'payment', 'lines', jsonb_build_array(
+  jsonb_build_object('account', (select account_id from suppliers where id = t.get('sup3')::uuid), 'side', 'Dr', 'amount', 1),
+  jsonb_build_object('account', t.acc('CASH_HO'), 'side', 'Cr', 'amount', 1))));
+select t.ok(public.delete_supplier(t.get('sup3')::uuid) = 'archived', 'a supplier with history is made inactive, not deleted');
+select t.ok((select not active from suppliers where id = t.get('sup3')::uuid), 'the inactive supplier stays with its history');
+select t.fails(format($$select public.receive_goods('{"supplier_id":"%s","lines":[{"product_id":"%s","qty":1}]}')$$, t.get('sup3'), t.get('lotion')), 'Choose the supplier', 'nothing new is received from an inactive supplier');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000b');
+select t.fails(format($$select public.delete_supplier('%s')$$, t.get('sup3')), 'permission', 'only the Admin deletes suppliers');
+reset role;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
