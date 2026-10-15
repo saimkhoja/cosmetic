@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useDeliveries, useInvoices, useOrders, useProducts, useRanks, useRefresh, useReport, useSettings, useShops, useStock } from '../data/queries';
+import { useDeliveries, useInvoices, useOrders, useProducts, useRanks, useRefresh, useReport, useSettings, useShops, useStock, useStockRequests } from '../data/queries';
 import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSet, hotSort, totals, unitLabel, unitsOf } from '../lib/units';
 import { TicketsModal } from '../components/Tickets';
@@ -21,6 +21,7 @@ export function ShopHome() {
   const low = (stock.data ?? []).filter((x) => x.qty <= 5 && byId.has(x.product_id)).sort((a, b) => a.qty - b.qty);
   const lastDel = dels.data?.find((d) => d.status === 'received');
   const toReceive = (dels.data ?? []).filter((d) => d.status === 'pending').length, toReview = (useOrders('pending').data ?? []).length;
+  const myReqs = (useStockRequests().data ?? []).filter((r) => r.status === 'pending').length;
   return (
     <>
       <Head t={`Good ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, ${profile!.name.split(' ')[0]}`} s={`${shop?.name ?? ''}, ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}`} />
@@ -30,7 +31,7 @@ export function ShopHome() {
         <Kpi i="edit" l="Invoices edited today" tone={r?.edited ? 'warn' : ''}><Dual2 b={r?.edited ?? 0} s="by the shop admin" /></Kpi>
         <Kpi i="alert" l="Items running low" tone={low.length ? 'bad' : ''}><Dual2 b={low.length} s="5 or fewer left" /></Kpi>
       </div>
-      <div className="tiles"><Tile i="cart" l={<>Open till{toReview ? <em>{toReview} to review</em> : null}</>} onClick={() => nav('/till')} /><Tile i="receipt" l="Invoices" onClick={() => nav('/invoices')} /><Tile i="truck" l={<>Deliveries{toReceive ? <em>{toReceive} to receive</em> : null}</>} onClick={() => nav('/received')} /><Tile i="chart" l="Sales report" onClick={() => nav('/reports')} /></div>
+      <div className="tiles"><Tile i="cart" l={<>Open till{toReview ? <em>{toReview} to review</em> : null}</>} onClick={() => nav('/till')} /><Tile i="receipt" l="Invoices" onClick={() => nav('/invoices')} /><Tile i="truck" l={<>Deliveries{toReceive ? <em>{toReceive} to receive</em> : null}</>} onClick={() => nav('/received')} /><Tile i="plus" l={<>Order stock{myReqs ? <em>{myReqs} waiting</em> : null}</>} onClick={() => nav('/requests')} /><Tile i="chart" l="Sales report" onClick={() => nav('/reports')} /></div>
       <div className="card p0"><div style={{ padding: '16px 16px 0' }}><h3><Icon n="alert" /> Running low or sold on order</h3></div>
         {low.length ? <><div className="tw"><table className="t"><tbody>{low.slice(0, 30).map((x) => <tr key={x.product_id}><td><b>{byId.get(x.product_id)!.name}</b></td><td className="r"><span className={`chip ${x.qty > 0 ? 'warn' : 'bad'}`}>{x.qty > 0 ? x.qty + ' left' : x.qty < 0 ? Math.abs(x.qty) + ' sold on order' : 'None left'}</span></td></tr>)}</tbody></table></div>
           <Note i="truck" style={{ margin: '12px 16px' }}>The central store sees this list and sends stock directly.{lastDel ? <> Last delivery received: <b>{lastDel.no}</b> on {dt(lastDel.received_at ?? lastDel.created_at)}.</> : null}</Note></> : <Empty i="check" t="Stock levels look good" />}</div>

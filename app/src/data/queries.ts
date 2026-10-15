@@ -1,7 +1,7 @@
 // Server reads, cached with TanStack Query. Rows are already filtered by role on the server (RLS).
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase, rows, rpc } from '../lib/supabase';
-import type { Category, Cost, Delivery, Grn, Invoice, Ledger, Product, Profile, Rank, SaleOrder, Settings, Shop, ShopReturn, StockRow, Supplier } from '../lib/types';
+import type { Category, Cost, Delivery, Grn, Invoice, Ledger, Product, Profile, Rank, SaleOrder, Settings, Shop, ShopReturn, StockRequest, StockRow, Supplier } from '../lib/types';
 import type { Report } from '../lib/print';
 
 /** Reads every row of a query, 1000 at a time (Supabase returns at most 1000 per request). */
@@ -54,8 +54,10 @@ export const useGrns = (enabled = true) => useQuery({ queryKey: ['grns'], enable
 export const useReturns = (enabled = true) => useQuery({ queryKey: ['returns'], enabled, refetchInterval: 30000, queryFn: async () => rows<ShopReturn>(await supabase.from('shop_returns').select('*, return_items(product_id,qty,received_qty)').order('created_at', { ascending: false }).limit(300)) });
 /** Ledgers the signed-in user may open, with balances in USD (Dr positive). */
 export const useLedgers = (enabled = true) => useQuery({ queryKey: ['ledgers'], enabled, queryFn: () => rpc<Ledger[]>('ledger_list') });
+/** Stock requests from the shops: the shop admin sees the shop's, the warehouse and Admin all (RLS). */
+export const useStockRequests = () => useQuery({ queryKey: ['requests'], refetchInterval: 30000, queryFn: async () => rows<StockRequest>(await supabase.from('stock_requests').select('*, stock_request_items(product_id,qty,approved_qty)').order('created_at', { ascending: false }).limit(300)) });
 /** After a change, refresh everything that may show it. */
 export function useRefresh() {
   const qc = useQueryClient();
-  return (...keys: string[]) => Promise.all((keys.length ? [...keys, 'ledgers', 'books'] : ['products', 'costs', 'stock', 'deliveries', 'invoices', 'report', 'audit', 'orders', 'ledgers', 'books', 'grns', 'returns', 'ranks']).map((k) => qc.invalidateQueries({ queryKey: [k] })));
+  return (...keys: string[]) => Promise.all((keys.length ? [...keys, 'ledgers', 'books'] : ['products', 'costs', 'stock', 'deliveries', 'invoices', 'report', 'audit', 'orders', 'ledgers', 'books', 'grns', 'returns', 'ranks', 'requests']).map((k) => qc.invalidateQueries({ queryKey: [k] })));
 }

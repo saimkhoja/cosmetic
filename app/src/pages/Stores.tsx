@@ -12,11 +12,11 @@ import { QtyCell } from './Inventory';
 import { BillModal, StatementView } from './Accounts';
 import type { Grn, Product, ShopReturn } from '../lib/types';
 
-type Line = { n: string; u: 'ctn' | 'pcs' };
-const per = (p: Product) => (!p.is_bundle && p.per_carton > 1 ? p.per_carton : 0);
+export type Line = { n: string; u: 'ctn' | 'pcs' };
+export const per = (p: Product) => (!p.is_bundle && p.per_carton > 1 ? p.per_carton : 0);
 /** Quantity entry by carton or pcs, shared by goods in and returns. */
-function useQtyLines() {
-  const [lines, setLines] = useState<Record<string, Line>>({});
+export function useQtyLines(init: Record<string, Line> = {}) {
+  const [lines, setLines] = useState<Record<string, Line>>(init);
   const pcsOf = (p: Product) => { const l = lines[p.id]; if (!l) return 0; const n = Math.max(0, parseInt(l.n) || 0); return l.u === 'ctn' ? n * per(p) : n; };
   const setLine = (p: Product, patch: Partial<Line>) => setLines((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? { n: '', u: per(p) ? 'ctn' : 'pcs' }), ...patch } }));
   const cell = (p: Product) => { const l = lines[p.id] ?? { n: '', u: per(p) ? 'ctn' : 'pcs' }; return (
