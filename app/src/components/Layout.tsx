@@ -6,6 +6,7 @@ import { useShops } from '../data/queries';
 import { outboxAll } from '../offline/store';
 import { syncOutbox } from '../offline/sync';
 import type { Role } from '../lib/types';
+import { getTheme, nextTheme, setTheme, THEME_ICON, THEME_LABEL, type ThemePref } from '../lib/theme';
 
 export const R: Record<Role, string> = { admin: 'Admin', whop: 'Warehouse Operator', shopadmin: 'Shop Admin', till: 'Till Operator' };
 const ROLEICON: Record<Role, string> = { admin: 'shield', whop: 'warehouse', shopadmin: 'store', till: 'cart' };
@@ -31,8 +32,9 @@ export default function Layout({ children }: { children: ReactNode }) {
   const shops = useShops();
   const loc = useLocation();
   const waiting = useWaiting();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false), [theme, setThemeState] = useState<ThemePref>(getTheme);
   if (!profile) return null;
+  const switchTheme = () => { const t = nextTheme(theme); setTheme(t); setThemeState(t); };
   const shop = profile.shop_id ? shops.data?.find((s) => s.id === profile.shop_id) : null;
   if (shop) localStorage.setItem('sim.shopname', shop.name);
   const shopName = shop?.name ?? (profile.shop_id ? localStorage.getItem('sim.shopname') : null);
@@ -51,6 +53,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="sp" />
         {pill}
         <div className="who"><span className="av"><Icon n={ROLEICON[profile.role]} /></span><div><b>{profile.name}</b><small>{R[profile.role]}</small></div></div>
+        <button className="iconbtn" id="themebtn" onClick={switchTheme} title={`Screen: ${THEME_LABEL[theme]}. Click to change`} aria-label={`Screen colours: ${THEME_LABEL[theme]}. Click to change`}><Icon n={THEME_ICON[theme]} /></button>
         <button className="iconbtn" onClick={doSignOut} title="Sign out" aria-label="Sign out"><Icon n="logout" /></button>
       </header>
       {offline || !navigator.onLine ? <div className="offline-bar">No internet. {profile.role === 'till' || profile.role === 'shopadmin' ? 'The till keeps working; sales and orders are sent when the connection returns.' : 'Changes need the connection.'}</div> : null}

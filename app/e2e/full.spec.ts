@@ -48,6 +48,12 @@ test('a full day in SIM', async ({ browser }) => {
   await admin.locator('.frow.three').nth(1).locator('input').nth(1).fill('LIM');
   await admin.getByRole('button', { name: /Create Admin/ }).click();
   await expect(admin.getByRole('heading', { name: 'Admin dashboard' })).toBeVisible();
+  // screen colours: Auto, then Light, then Dark, kept after a reload
+  await expect(admin.locator('#themebtn')).toHaveAttribute('title', /Auto/);
+  await admin.click('#themebtn'); await expect(admin.locator('html')).toHaveAttribute('data-theme', 'light');
+  await admin.click('#themebtn'); await expect(admin.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await admin.reload(); await expect(admin.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await admin.click('#themebtn'); await expect(admin.locator('html')).not.toHaveAttribute('data-theme', /./);
 
   // ---- logins for the other roles; each gets a one-time password
   await admin.getByRole('link', { name: 'Users' }).click();

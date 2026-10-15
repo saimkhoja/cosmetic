@@ -7,7 +7,9 @@ import './styles.css';
 import App from './App';
 import { AuthProvider } from './auth/AuthProvider';
 import { Toasts } from './components/ui';
+import { applyTheme, getTheme } from './lib/theme';
 
+applyTheme(getTheme());
 registerSW({ immediate: true });
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: true } } });
 

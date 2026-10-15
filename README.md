@@ -37,6 +37,7 @@ There are no demo accounts. The first visit to a new installation shows a **setu
 - **Prices locked.** Only the Admin sets prices; shops sell exactly what was set. Invoices keep the prices and rate of the moment of sale.
 - **Editable invoices** by the Shop Admin, with a reason: quantities, the unit of a line (for example pcs to dozen, charged at that unit's price) and the discount; stock is adjusted and the change is logged. An invoice can also be deleted with a reason: its stock goes back to the shop and it leaves sales, reports and the books, and the activity log keeps what it was.
 - **Reports** over any dates, printable or as PDF. A single day prints the **day end report** per shop in the shift end slip format: total invoices, invoice value in USD and FC, collected, returned and balance.
+- **Light or dark screens.** The button next to Sign out switches between Auto (follows the device), Light and Dark; each computer or phone remembers its choice.
 - **Security.** Real passwords (hashed by Supabase Auth; 10+ characters with letters and numbers), each person chooses their own at first sign-in, disabled accounts are shut out at once, the screen locks after 15 minutes, access rules on every table, every change goes through checked database functions, and a full activity log.
 
 ## Currency
