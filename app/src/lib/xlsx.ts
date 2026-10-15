@@ -128,7 +128,7 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
   if (hi < 0) throw new Error('No header row found. The first row needs column names such as Name, Category, Carton cost USD. Download the template to see them.');
   const col: Record<string, number> = {};
   rows[hi].forEach((h, i) => { const k = hkey(h); Object.entries(IMPKEYS).forEach(([f, al]) => { if (col[f] === undefined && al.includes(k)) col[f] = i; }); });
-  const label: Record<string, string> = { name: 'Name', cartonCost: 'Carton cost USD', perCarton: 'Pcs per carton', pc: 'Price per pc USD' };
+  const label: Record<string, string> = { name: 'Name', cartonCost: 'Carton cost USD', perCarton: 'Pcs per carton' };
   const miss = Object.keys(label).filter((f) => col[f] === undefined);
   if (miss.length) throw new Error('Missing columns: ' + miss.map((f) => label[f]).join(', '));
   const g = (r: Cell[], f: string) => (col[f] === undefined ? '' : r[col[f]] ?? '');
@@ -138,7 +138,7 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
     if (!r || !r.some((c) => String(c ?? '').trim() !== '')) return;
     const name = String(g(r, 'name')).trim().replace(/\s+/g, ' ').slice(0, 60), sku = String(g(r, 'sku')).trim().slice(0, 20), dz = inum(g(r, 'dzn')), hz = inum(g(r, 'half')), ct = inum(g(r, 'ctn'));
     const oc = inum(g(r, 'openCtn')), op = inum(g(r, 'openPcs')), ro = inum(g(r, 'reorder'));
-    const o = { name, category: String(g(r, 'category')).trim().replace(/\s+/g, ' ').slice(0, 30) || 'Other', carton_cost: inum(g(r, 'cartonCost')), per_carton: inum(g(r, 'perCarton')), pc: inum(g(r, 'pc')), half: isNaN(hz) ? 0 : hz, dzn: isNaN(dz) ? 0 : dz, ctn: isNaN(ct) ? 0 : ct,
+    const o = { name, category: String(g(r, 'category')).trim().replace(/\s+/g, ' ').slice(0, 30) || 'Other', carton_cost: inum(g(r, 'cartonCost')), per_carton: inum(g(r, 'perCarton')), pc: (() => { const v = inum(g(r, 'pc')); return isNaN(v) ? 0 : v; })(), half: isNaN(hz) ? 0 : hz, dzn: isNaN(dz) ? 0 : dz, ctn: isNaN(ct) ? 0 : ct,
       open_cartons: isNaN(oc) ? 0 : oc, open_pcs: isNaN(op) ? 0 : op, reorder: isNaN(ro) ? null : ro };
     const row: ImportRow = { n: hi + i + 2, o, sku, status: 'ok', msg: '', qty: 0 };
     if (name && names.has(name.toLowerCase())) { row.status = 'skip'; row.msg = 'Name already exists'; }

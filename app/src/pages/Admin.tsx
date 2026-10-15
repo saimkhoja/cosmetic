@@ -9,6 +9,7 @@ import { UPCATS } from '../lib/items';
 import { Dual, Dual2, Empty, Head, HList, Kpi, Modal, Note, Tile, useAction, useToast } from '../components/ui';
 import { R } from '../components/Layout';
 import { QtyCell } from './Inventory';
+import { pcValue } from '../lib/units';
 import { DeliveryModal } from './Deliveries';
 import type { Profile, Role } from '../lib/types';
 
@@ -28,7 +29,7 @@ export function AdminHome() {
       <Head t="Admin dashboard" s={`Exchange rate today: 1 USD = ${fCDF(rate)}`} />
       <div className="kpis">
         <Kpi i="box" l="Store stock at cost"><Dual usd={sum(P, (p) => (cost.get(p.id) ?? 0) * p.wh_qty)} rate={rate} /></Kpi>
-        <Kpi i="tag" l="Same stock at selling price"><Dual usd={sum(P, (p) => p.price_usd * p.wh_qty)} rate={rate} /></Kpi>
+        <Kpi i="tag" l="Same stock at selling price"><Dual usd={sum(P, (p) => pcValue(p) * p.wh_qty)} rate={rate} /></Kpi>
         <Kpi i="wallet" l="Upkeep this month" tone="warn"><Dual usd={upM} rate={rate} /></Kpi>
         <Kpi i="chart" l="All shops, sales today" tone="ok"><Dual2 b={fUSD(rep.data?.total_usd ?? 0)} s={`${fCDF(rep.data?.total ?? 0)} from ${rep.data?.n ?? 0} invoices`} /></Kpi>
       </div>
@@ -86,7 +87,7 @@ export function Users() {
           <td>{u.active ? (u.must_change_password ? <span className="chip warn">Must choose a password</span> : <span className="chip ok">Active</span>) : <span className="chip bad">Disabled</span>}</td>
           <td><div className="act"><button title="Edit name, role or shop" onClick={() => setOpen(u)}><Icon n="edit" /></button><button title="Reset password" onClick={() => setReset(u)}><Icon n="key" /></button>{u.id !== profile!.id ? <button title={u.active ? 'Disable account' : 'Enable account'} onClick={() => void toggle(u)}><Icon n={u.active ? 'lock' : 'unlock'} /></button> : null}</div></td></tr>)}
       </tbody></table></div></div>
-      <Note i="shield"><span>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives goods from a chosen supplier, receives returns from the shops, sees every shop's stock, sends and corrects deliveries, and reads the stock statements of the store and each shop; no cost prices per item and no price changes. <b>Shop Admin</b>: approves, rejects or edits the till operators' orders, takes the cash and prints, sells directly, discount on an invoice, edits a confirmed invoice, reprints, receives deliveries, sends returns to the store, prints price tickets, and reads the shop's cash, sales and stock statements and reports. <b>Till Operator</b>: types the customer name, picks the items (pcs, half dozen, dozen, carton) and sends the order for approval, prints it once it is approved, and prints price tickets; no cash, no invoice list and no reports.</span></Note>
+      <Note i="shield"><span>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives goods from a chosen supplier, receives returns from the shops, sees every shop's stock, sends and corrects deliveries, and reads the stock statements of the store and each shop; no cost prices per item and no price changes. <b>Shop Admin</b>: approves, rejects or edits the till operators' orders (approving prints the invoice and takes the stock), takes the cash, sells directly, discount on an invoice, edits (quantities, units) or deletes an invoice with a reason, reprints, prints the stock count sheet, receives deliveries, sends returns to the store, prints price tickets, and reads the shop's cash, sales and stock statements and reports. <b>Till Operator</b>: types the customer name, picks the items (pcs, half dozen, dozen, carton), sends the order for approval and prints an order slip for the customer, and prints price tickets; no cash, no invoice list and no reports.</span></Note>
       <Note><span>Passwords are stored only as secure hashes by Supabase Auth; nobody, not even the Admin, can read them. A new or reset login must choose its own password at first sign-in. The screen locks after 15 minutes without activity.</span></Note>
       {open ? <UserModal u={open === 'new' ? null : open} onClose={() => setOpen(null)} onCreated={(x) => setShown(x)} /> : null}
       {reset ? <ResetModal u={reset} onClose={() => setReset(null)} onDone={(p) => setShown({ u: reset.username, p, name: reset.name })} /> : null}

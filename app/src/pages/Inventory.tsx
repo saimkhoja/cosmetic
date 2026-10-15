@@ -3,7 +3,7 @@ import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useCategories, useCosts, useProducts, useRanks, useRefresh, useSettings } from '../data/queries';
 import { rpc } from '../lib/supabase';
-import { ctnTxt, hotSet, hotSort, unitLabel, unitsOf } from '../lib/units';
+import { ctnTxt, hotSet, hotSort, pcValue, unitLabel, unitsOf } from '../lib/units';
 import { itemProblem, MONTHS, type ItemInput } from '../lib/items';
 import { ReceiveGoodsModal } from './Stores';
 import { fCDF, fUSD, toCDF } from '../lib/format';
@@ -52,7 +52,7 @@ export default function Inventory() {
                 <td className="r"><QtyCell p={p} q={p.wh_qty} cls={p.wh_qty <= p.reorder ? 'bad' : 'ok'} /></td>
                 {isAdmin ? <td>{c ? (p.is_bundle ? <><Dual usd={c.cost_usd} rate={rate} /><div className="code">per set</div></> : <><Dual usd={c.carton_cost_usd} rate={rate} /><div className="code">per carton, {fUSD(c.cost_usd)} per pc</div></>) : '-'}</td> : null}
                 <td>{unitsOf(p).map((u, k) => <div key={k} style={{ whiteSpace: 'nowrap' }}><span className="uchip">{unitLabel(u)}</span> <b>{fCDF(toCDF(u.usd, rate))}</b>{isAdmin ? <span className="code"> {fUSD(u.usd)}</span> : null}</div>)}</td>
-                {isAdmin ? <td className="r"><b>{c && p.price_usd > 0 ? Math.round(((p.price_usd - c.cost_usd) / p.price_usd) * 100) : 0}%</b><div className="code">per {p.is_bundle ? 'set' : 'pc'}</div></td> : null}
+                {isAdmin ? <td className="r"><b>{c && pcValue(p) > 0 ? Math.round(((pcValue(p) - c.cost_usd) / pcValue(p)) * 100) : 0}%</b><div className="code">per {p.is_bundle ? 'set' : 'pc'}</div></td> : null}
                 <td><div className="act">{!p.active ? <button title="Restore this item" onClick={() => void restore(p)}><Icon n="refresh" /></button>
                   : isAdmin ? <><button title="Edit item and prices" onClick={() => setEdit(p)}><Icon n="edit" /></button><button title="Stock count: correct the store quantity" onClick={() => setCount(p)}><Icon n="layers" /></button><button title="Delete item" onClick={() => void del(p)}><Icon n="trash" /></button></>
                   : <button title="Receive from supplier" onClick={() => setRecv(p)}><Icon n="plus" /></button>}</div></td>
@@ -73,7 +73,7 @@ function ItemModal({ p, cost, rate, onClose, onCats }: { p: Product | null; cost
   const v = (x: number | undefined) => (x === undefined || x === null || (!p && x === 0) ? '' : String(x));
   const [f, setF] = useState({
     name: p?.name ?? '', category: p?.category ?? '', is_bundle: p?.is_bundle ?? false,
-    carton_cost: v(p && !p.is_bundle ? cost?.carton_cost_usd : undefined), per_carton: v(p?.per_carton || undefined), pc: p && !p.is_bundle ? String(p.price_usd) : '',
+    carton_cost: v(p && !p.is_bundle ? cost?.carton_cost_usd : undefined), per_carton: v(p?.per_carton || undefined), pc: p && !p.is_bundle && p.price_usd > 0 ? String(p.price_usd) : '',
     half: p?.half_dozen_usd ? String(p.half_dozen_usd) : '', dzn: p?.dozen_usd ? String(p.dozen_usd) : '', ctn: v(p?.carton_usd || undefined),
     set_cost: p?.is_bundle ? String(cost?.cost_usd ?? '') : '', set_price: p?.is_bundle ? String(p.price_usd) : '', pcs: String(p?.pieces_per_set || 12), piece: p?.piece_usd ? String(p.piece_usd) : '',
     qc: '0', ql: '0', reorder: String(p?.reorder ?? 20),
@@ -101,11 +101,11 @@ function ItemModal({ p, cost, rate, onClose, onCats }: { p: Product | null; cost
       {!f.is_bundle ? <>
         <div className="frow"><div className="field"><label>Cost of one carton (USD)</label><input id="icc" className="input" type="number" min="0" step="0.01" value={f.carton_cost} onChange={set('carton_cost')} /></div>
           <div className="field"><label>Pcs in one carton</label><input id="ipc" className="input" type="number" min="2" step="1" value={f.per_carton} onChange={set('per_carton')} /></div></div>
-        <div className="frow"><div className="field"><label>Selling price per pc (USD)</label><input id="isell" className="input" type="number" min="0" step="0.01" value={f.pc} onChange={set('pc')} /></div>
+        <div className="frow"><div className="field"><label>Selling price per pc (USD)</label><input id="isell" className="input" type="number" min="0" step="0.01" value={f.pc} placeholder="Optional" onChange={set('pc')} /></div>
           <div className="field"><label>Per half dozen, 6 pcs (USD)</label><input id="ihz" className="input" type="number" min="0" step="0.01" value={f.half} placeholder="Optional" onChange={set('half')} /></div></div>
         <div className="frow"><div className="field"><label>Per dozen, 12 pcs (USD)</label><input id="idz" className="input" type="number" min="0" step="0.01" value={f.dzn} placeholder="Optional" onChange={set('dzn')} /></div>
           <div className="field"><label>Per carton (USD)</label><input id="ictn" className="input" type="number" min="0" step="0.01" value={f.ctn} placeholder="Optional" onChange={set('ctn')} /></div></div>
-        <span className="hint" style={{ display: 'block', margin: '-6px 0 12px' }}>Leave a price empty when the item is not sold that way: the till only offers the units that have a price. Stock is counted in pcs.</span>
+        <span className="hint" style={{ display: 'block', margin: '-6px 0 12px' }}>Every price is optional, but enter at least one. Leave a price empty when the item is not sold that way: the till only offers the units that have a price. Stock is counted in pcs.</span>
       </> : <>
         <div className="frow"><div className="field"><label>Cost of one set (USD)</label><input id="iscost" className="input" type="number" min="0" step="0.01" value={f.set_cost} onChange={set('set_cost')} /></div>
           <div className="field"><label>Selling price for one set (USD)</label><input id="isset" className="input" type="number" min="0" step="0.01" value={f.set_price} onChange={set('set_price')} /></div></div>
@@ -147,7 +147,7 @@ function ImportModal({ products, rate, onClose }: { products: Product[]; rate: n
   });
   return (
     <Modal title="Import items from Excel" icon="download" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="impBtn" disabled={!ok.length || a.busy} onClick={() => void go()}><Icon n="check" /> Import {ok.length} item{ok.length === 1 ? '' : 's'}</button></>}>
-      <Note i="doc">One row per new item. Prices are in USD, like the item form. Stock is counted in pcs. Leave <b>Price per half dozen</b>, <b>Price per dozen</b> or <b>Price per carton</b> empty when an item is not sold that way. A category that does not exist yet is created. Items whose name or code already exists are skipped, so nothing is overwritten.</Note>
+      <Note i="doc">One row per new item. Prices are in USD, like the item form. Stock is counted in pcs. Leave any price (per pc, half dozen, dozen or carton) empty when an item is not sold that way; each item needs at least one. A category that does not exist yet is created. Items whose name or code already exists are skipped, so nothing is overwritten.</Note>
       <div className="tw" style={{ marginBottom: 12 }}><table className="t nw" style={{ fontSize: 13 }}><thead><tr>{IMPCOLS.map((c) => <th key={c}>{c}</th>)}</tr></thead><tbody><tr><td>Aloe vera gel 300 ml</td><td>Skin care</td><td>60</td><td>24</td><td>4</td><td>23</td><td>45</td><td>90</td><td>5</td><td>0</td><td>24</td><td /></tr></tbody></table></div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
         <button className="btn ghost" onClick={() => saveBlob(templateXlsx(), 'SIM-items-template.xlsx')}><Icon n="download" /> Download Excel template</button>
