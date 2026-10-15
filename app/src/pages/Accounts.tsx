@@ -41,20 +41,27 @@ export default function Accounts() {
 
 // ---------- suppliers ----------
 function Suppliers() {
-  const suppliers = useSuppliers(), pay = usePayables(), products = useProducts();
-  const [open, setOpen] = useState<Supplier | 'new' | null>(null), [q, setQ] = useState('');
+  const suppliers = useSuppliers(), pay = usePayables(), products = useProducts(), refresh = useRefresh(), toast = useToast();
+  const [open, setOpen] = useState<Supplier | 'new' | null>(null), [q, setQ] = useState(''), [inactive, setInactive] = useState(false);
   const owed = new Map((pay.data ?? []).map((p) => [p.id, p]));
-  const list = (suppliers.data ?? []).filter((s) => !q || (s.name + ' ' + s.phone + ' ' + s.contact).toLowerCase().includes(q.toLowerCase()));
+  const gone = (suppliers.data ?? []).filter((s) => !s.active).length;
+  const list = (suppliers.data ?? []).filter((s) => s.active !== inactive && (!q || (s.name + ' ' + s.phone + ' ' + s.contact).toLowerCase().includes(q.toLowerCase())));
+  const del = async (s: Supplier) => {
+    if (!confirm(`Delete the supplier ${s.name}? A supplier with goods received, bills or payments is made inactive instead, so its history stays.`)) return;
+    try { const r = await rpc<string>('delete_supplier', { p_id: s.id }); await refresh('suppliers', 'audit'); toast(r === 'deleted' ? `${s.name} deleted` : `${s.name} made inactive. Find it under Inactive; edit it to make it active again.`, 'warn'); }
+    catch (e) { toast((e as Error).message, 'bad'); }
+  };
   return (
     <>
-      <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Supplier name, contact or phone" value={q} onChange={(e) => setQ(e.target.value)} /></div><span className="sp" /><button className="btn primary" onClick={() => setOpen('new')}><Icon n="plus" /> Add supplier</button></div>
+      <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Supplier name, contact or phone" value={q} onChange={(e) => setQ(e.target.value)} /></div>{gone ? <div className="seg"><button className={inactive ? '' : 'on'} onClick={() => setInactive(false)}>Active</button><button className={inactive ? 'on' : ''} onClick={() => setInactive(true)}>Inactive ({gone})</button></div> : null}
+        <span className="sp" /><button className="btn primary" onClick={() => setOpen('new')}><Icon n="plus" /> Add supplier</button></div>
       <div className="card p0"><div className="tw">{list.length ? <table className="t"><thead><tr><th>Supplier</th><th>Contact</th><th>Credit terms</th><th className="r">Items</th><th className="r">We owe</th><th className="r">Overdue</th><th /></tr></thead><tbody>
         {list.map((s) => { const o = owed.get(s.id), over = sum((o?.bills ?? []).filter((b) => b.days_overdue > 0), (b) => b.outstanding); return <tr key={s.id}>
           <td><b>{s.name}</b>{s.active ? null : <> <span className="chip bad">Inactive</span></>}<div className="code">{s.tax_no ? 'NIF ' + s.tax_no : ''}</div></td><td>{s.contact}<div className="code">{s.phone}{s.email ? ' · ' + s.email : ''}</div></td>
           <td>{s.credit_days} days{s.credit_limit > 0 ? <div className="code">limit {fUSD(s.credit_limit)}</div> : null}</td><td className="r">{s.supplier_items?.length ?? 0}</td>
           <td className="r"><b>{o ? balTxt(-o.balance) : '-'}</b></td><td className="r">{over > 0 ? <span className="chip bad">{fUSD(over)}</span> : '-'}</td>
-          <td><div className="act"><button title="Edit supplier" onClick={() => setOpen(s)}><Icon n="edit" /></button></div></td></tr>; })}
-      </tbody></table> : <Empty i="users" t={suppliers.isLoading ? 'Loading' : 'No suppliers yet. Add the first one.'} />}</div></div>
+          <td><div className="act"><button title="Edit supplier" onClick={() => setOpen(s)}><Icon n="edit" /></button>{s.active ? <button title="Delete supplier" onClick={() => void del(s)}><Icon n="trash" /></button> : null}</div></td></tr>; })}
+      </tbody></table> : <Empty i="users" t={suppliers.isLoading ? 'Loading' : inactive ? 'No inactive suppliers' : 'No suppliers yet. Add the first one.'} />}</div></div>
       {open ? <SupplierModal s={open === 'new' ? null : open} products={(products.data ?? []).filter((p) => p.active)} onClose={() => setOpen(null)} /> : null}
     </>
   );

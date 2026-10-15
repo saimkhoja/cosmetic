@@ -436,6 +436,29 @@ select t.ok(t.unbalanced() = 0, 'the books still balance');
 select t.ok(exists (select 1 from audit_log where action like 'Invoice GOM-T2-000003 deleted by Patrick Kabongo%Typed twice by mistake'), 'the activity log keeps what was deleted and why');
 reset role;
 
+-- ===== deleting suppliers =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('sup2', public.save_supplier('{"name":"Unused Supplier"}')::text);
+select t.put('sup2acc', (select account_id::text from suppliers where id = t.get('sup2')::uuid));
+select t.ok(public.delete_supplier(t.get('sup2')::uuid) = 'deleted', 'a supplier with nothing recorded is deleted');
+select t.ok(not exists (select 1 from accounts where id = t.get('sup2acc')::uuid), 'its ledger goes with it');
+select t.fails(format($$select public.delete_supplier('%s')$$, t.get('sup')), 'still has a balance', 'a supplier we still owe cannot be deleted');
+select t.put('sup3', public.save_supplier('{"name":"Old Supplier"}')::text);
+select public.receive_goods(jsonb_build_object('supplier_id', t.get('sup3'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1))));
+select public.enter_bill(jsonb_build_object('grn_id', (select id from grns where supplier_id = t.get('sup3')::uuid), 'bill_no', 'OS-1', 'amount', 1));
+select public.post_voucher(jsonb_build_object('type', 'payment', 'lines', jsonb_build_array(
+  jsonb_build_object('account', (select account_id from suppliers where id = t.get('sup3')::uuid), 'side', 'Dr', 'amount', 1),
+  jsonb_build_object('account', t.acc('CASH_HO'), 'side', 'Cr', 'amount', 1))));
+select t.ok(public.delete_supplier(t.get('sup3')::uuid) = 'archived', 'a supplier with history is made inactive, not deleted');
+select t.ok((select not active from suppliers where id = t.get('sup3')::uuid), 'the inactive supplier stays with its history');
+select t.fails(format($$select public.receive_goods('{"supplier_id":"%s","lines":[{"product_id":"%s","qty":1}]}')$$, t.get('sup3'), t.get('lotion')), 'Choose the supplier', 'nothing new is received from an inactive supplier');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000b');
+select t.fails(format($$select public.delete_supplier('%s')$$, t.get('sup3')), 'permission', 'only the Admin deletes suppliers');
+reset role;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

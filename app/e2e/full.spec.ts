@@ -106,6 +106,14 @@ test('a full day in SIM', async ({ browser }) => {
   await admin.locator('.modal .search input').fill('Shea'); await admin.locator('.modal .mchips label', { hasText: 'Shea body lotion' }).click();
   await admin.getByRole('button', { name: 'Save supplier' }).click();
   await expect(admin.getByText('Supplier added')).toBeVisible();
+  // a supplier added by mistake is deleted
+  await admin.getByRole('button', { name: 'Add supplier' }).click();
+  await admin.fill('#sname', 'Wrong Supplier'); await admin.getByRole('button', { name: 'Save supplier' }).click();
+  await expect(admin.locator('tr', { hasText: 'Wrong Supplier' })).toBeVisible();
+  admin.once('dialog', (d) => void d.accept());
+  await admin.locator('tr', { hasText: 'Wrong Supplier' }).getByTitle('Delete supplier').click();
+  await expect(admin.getByText('Wrong Supplier deleted')).toBeVisible();
+  await expect(admin.locator('main tbody tr')).toHaveCount(1);
 
   // ---- the warehouse operator: no costs, sends to both shops, corrects one delivery
   const { page: op } = await open(browser);

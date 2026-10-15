@@ -171,9 +171,36 @@ begin
   return jsonb_build_object('no', inv.no, 'total', inv.total);
 end $$;
 
+-- ---------- delete a supplier ----------
+-- A supplier with nothing recorded is deleted with its ledger. One with goods received, bills or
+-- payments keeps its history: it is made inactive (hidden, nothing new can be received from it) and
+-- can be made active again from its form. Money still owed either way must be settled first.
+create or replace function public.delete_supplier(p_id uuid) returns text
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare u public.profiles := app.req('admin'); s public.suppliers; a public.accounts; bal numeric;
+begin
+  select * into s from suppliers where id = p_id for update;
+  if not found then raise exception 'Supplier not found'; end if;
+  select * into a from accounts where id = s.account_id;
+  bal := app.opening_base(a) + coalesce((select sum(case when l.side = 'Dr' then l.base else -l.base end) from voucher_lines l join vouchers v on v.id = l.voucher_id
+    where l.account_id = a.id and v.status = 'posted'), 0);
+  if abs(bal) > 0.005 then
+    raise exception '% still has a balance of % %. Settle it (or clear the opening balance) first', s.name, app.usd(abs(bal)), case when bal < 0 then 'owed to them' else 'owed to us' end;
+  end if;
+  if exists (select 1 from grns where supplier_id = p_id) or exists (select 1 from voucher_lines where account_id = a.id) then
+    update suppliers set active = false where id = p_id;
+    perform app.log(u, 'Supplier ' || s.name || ' made inactive (it has goods receipts or entries)');
+    return 'archived';
+  end if;
+  delete from suppliers where id = p_id;
+  delete from accounts where id = a.id;
+  perform app.log(u, 'Deleted supplier ' || s.name);
+  return 'deleted';
+end $$;
+
 -- ---------- who may call what ----------
 revoke execute on all functions in schema public from public, anon;
 revoke execute on all functions in schema app from public, anon;
 grant execute on function public.setup_needed() to anon, authenticated;
-grant execute on function public.edit_invoice(uuid, jsonb, int, text), public.delete_invoice(uuid, text) to authenticated;
+grant execute on function public.edit_invoice(uuid, jsonb, int, text), public.delete_invoice(uuid, text), public.delete_supplier(uuid) to authenticated;
 revoke execute on function public.app_setup(uuid, text, text, jsonb) from authenticated;
