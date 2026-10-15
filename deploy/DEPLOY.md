@@ -27,8 +27,9 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    5. `supabase/migrations/20261011000001_catalogue.sql` (categories made by the Admin, half dozen and optional carton prices, deleting and archiving items, hot items first, the till printing approved orders)
    6. `supabase/migrations/20261011000002_accounts.sql` (book keeping: suppliers, goods in and bills, payments, returns from shops, ledgers, statements and reports)
    7. `supabase/migrations/20261015000001_shop_changes.sql` (price per pc optional, changing the unit when editing an invoice, deleting an invoice or a supplier)
+   8. `supabase/migrations/20261015000002_statement_order.sql` (statements and the day book list same-day entries in the order they were made)
 
-   **Already running SIM?** Run only the files you have not run yet, in order (for example only 7). They keep your data:
+   **Already running SIM?** Run only the files you have not run yet, in order (for example only 8). They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
