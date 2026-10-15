@@ -57,3 +57,8 @@ export interface DayBookEntry { id: string; no: string; type: string; date: stri
   lines: { account: string; side: 'Dr' | 'Cr'; amount: number; currency: Cur; rate: number; base: number; memo: string }[] }
 export interface PayableBill { id: string; no: string; date: string; bill_ref: string; due_date: string; amount: number; original: number; currency: Cur; outstanding: number; days_overdue: number }
 export interface Payable { id: string; name: string; credit_days: number; phone: string; balance: number; bills: PayableBill[] }
+export interface StockRequest {
+  id: string; no: string; shop_id: string; note: string; status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  created_by_name: string; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null; reason: string | null; delivery_id: string | null;
+  stock_request_items: { product_id: string; qty: number; approved_qty: number | null }[];
+}

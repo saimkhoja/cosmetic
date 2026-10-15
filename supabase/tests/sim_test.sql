@@ -35,6 +35,8 @@ create function t.outstanding(b uuid) returns numeric language sql security defi
 create function t.unbalanced() returns bigint language sql security definer as $$
   select count(*) from (select v.id from vouchers v join voucher_lines l on l.voucher_id = v.id group by v.id
     having abs(sum(case when l.side = 'Dr' then l.base else -l.base end)) > 0.011) x $$;
+-- a stock request from the signed-in shop admin; returns its id
+create function t.req(lines jsonb, note text default '') returns text language sql as $$ select public.create_stock_request(jsonb_build_object('note', note, 'lines', lines))->>'id' $$;
 grant execute on all functions in schema t to anon, authenticated, service_role;
 
 -- logins (normally made by Supabase Auth through the Edge Functions)
@@ -460,6 +462,50 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000b');
 select t.fails(format($$select public.delete_supplier('%s')$$, t.get('sup3')), 'permission', 'only the Admin deletes suppliers');
+reset role;
+
+-- ===== stock requests: the shop asks, the warehouse approves, edits or rejects =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('req1', t.req(jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 2), jsonb_build_object('product_id', t.get('brush'), 'qty', 1)), 'For the weekend'));
+select t.ok((select no || ':' || status from stock_requests where id = t.get('req1')::uuid) = 'REQ-0001:pending', 'the shop admin sends a stock request');
+select t.put('req2', t.req(jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1))));
+select t.put('req3', t.req(jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 999999))));
+select t.put('req4', t.req(jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1))));
+select t.put('req5', t.req(jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1))));
+select public.cancel_stock_request(t.get('req4')::uuid, 'Not needed');
+select t.ok((select status from stock_requests where id = t.get('req4')::uuid) = 'cancelled', 'the shop can cancel a waiting request');
+select t.fails($$select public.create_stock_request('{"lines":[]}')$$, 'quantity', 'a request needs at least one item');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000e');
+select t.ok((select count(*) from stock_requests) = 0, 'another shop does not see the requests');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000b');
+select t.fails(format($$select public.create_stock_request('{"lines":[{"product_id":"%s","qty":1}]}')$$, t.get('lotion')), 'permission', 'the warehouse does not make requests');
+select t.ok((select count(*) from stock_requests where status = 'pending') = 4, 'the warehouse sees the waiting requests of every shop');
+select t.fails(format($$select public.reject_stock_request('%s', '')$$, t.get('req2')), 'reason', 'rejecting needs a reason');
+select public.reject_stock_request(t.get('req2')::uuid, 'No stock this week');
+select t.ok((select status || ':' || reason from stock_requests where id = t.get('req2')::uuid) = 'rejected:No stock this week', 'request rejected with the reason');
+select t.fails(format($$select public.approve_stock_request('%s')$$, t.get('req3')), 'Not enough in the store', 'more than the store can send is refused');
+select t.put('wh_before', (select wh_qty::text from products where id = t.get('lotion')::uuid));
+select t.fails(format($$select public.approve_stock_request('%s', '[{"product_id":"%s","qty":1}]', '')$$, t.get('req1'), t.get('lotion')), 'changed the request', 'an edited approval needs a reason');
+select t.put('appr1', public.approve_stock_request(t.get('req1')::uuid, jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1)), 'Only one carton left')::text);
+select t.ok((t.get('appr1')::jsonb->>'edited')::boolean and (t.get('appr1')::jsonb->>'delivery_no') like 'DEL-%', 'approved with changes: a delivery is made');
+select t.ok((select string_agg(qty || '>' || approved_qty, ',' order by qty desc) from stock_request_items where request_id = t.get('req1')::uuid) = '2>1,1>0', 'what was asked and what is sent are both kept');
+select t.ok((select d.status || ':' || d.shop_id::text from deliveries d join stock_requests r on r.delivery_id = d.id where r.id = t.get('req1')::uuid) = 'pending:' || t.get('gom'), 'the delivery waits for the shop to receive it');
+select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = t.get('wh_before')::int, 'no stock moves when the request is approved');
+select t.fails(format($$select public.approve_stock_request('%s')$$, t.get('req1')), 'already approved', 'a request is approved once');
+select t.ok((public.approve_stock_request(t.get('req5')::uuid)->>'edited')::boolean = false, 'approved as asked');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails(format($$select public.cancel_stock_request('%s', 'x')$$, t.get('req1')), 'already approved', 'an approved request cannot be cancelled');
+select t.ok((select reason from stock_requests where id = t.get('req1')::uuid) = 'Only one carton left', 'the shop admin sees why the request was changed');
+select t.put('shop_lot', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid));
+select public.receive_delivery((select delivery_id from stock_requests where id = t.get('req1')::uuid), '[]', '');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('shop_lot')::int + 1, 'the shop receives the approved request like any delivery');
 reset role;
 
 -- ===== admin sees everything; disabled users are shut out =====

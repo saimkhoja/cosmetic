@@ -11,9 +11,9 @@ import { getTheme, nextTheme, setTheme, THEME_ICON, THEME_LABEL, type ThemePref 
 export const R: Record<Role, string> = { admin: 'Admin', whop: 'Warehouse Operator', shopadmin: 'Shop Admin', till: 'Till Operator' };
 const ROLEICON: Record<Role, string> = { admin: 'shield', whop: 'warehouse', shopadmin: 'store', till: 'cart' };
 export const NAV: Record<Role, [string, string, string][]> = {
-  admin: [['/', 'Dashboard', 'home'], ['/inventory', 'Inventory', 'box'], ['/goods-in', 'Goods in', 'download'], ['/deliveries', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/shop-stock', 'Shop stock', 'store'], ['/accounts', 'Accounts', 'wallet'], ['/upkeep', 'Upkeep', 'cash'], ['/reports', 'Reports', 'chart'], ['/users', 'Users', 'users'], ['/settings', 'Settings', 'settings'], ['/activity', 'Activity', 'shield']],
-  whop: [['/inventory', 'Inventory', 'box'], ['/goods-in', 'Goods in', 'download'], ['/deliveries', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/shop-stock', 'Shop stock', 'store'], ['/books', 'Statements', 'doc']],
-  shopadmin: [['/', 'Home', 'home'], ['/till', 'Till', 'cart'], ['/invoices', 'Invoices', 'receipt'], ['/stock', 'Stock', 'box'], ['/received', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/books', 'Statements', 'doc'], ['/reports', 'Reports', 'chart']],
+  admin: [['/', 'Dashboard', 'home'], ['/inventory', 'Inventory', 'box'], ['/goods-in', 'Goods in', 'download'], ['/requests', 'Requests', 'receipt'], ['/deliveries', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/shop-stock', 'Shop stock', 'store'], ['/accounts', 'Accounts', 'wallet'], ['/upkeep', 'Upkeep', 'cash'], ['/reports', 'Reports', 'chart'], ['/users', 'Users', 'users'], ['/settings', 'Settings', 'settings'], ['/activity', 'Activity', 'shield']],
+  whop: [['/inventory', 'Inventory', 'box'], ['/goods-in', 'Goods in', 'download'], ['/requests', 'Requests', 'receipt'], ['/deliveries', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/shop-stock', 'Shop stock', 'store'], ['/books', 'Statements', 'doc']],
+  shopadmin: [['/', 'Home', 'home'], ['/till', 'Till', 'cart'], ['/invoices', 'Invoices', 'receipt'], ['/stock', 'Stock', 'box'], ['/requests', 'Order stock', 'plus'], ['/received', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/books', 'Statements', 'doc'], ['/reports', 'Reports', 'chart']],
   till: [['/till', 'Till', 'cart']],
 };
 

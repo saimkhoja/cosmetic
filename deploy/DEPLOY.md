@@ -28,13 +28,14 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    6. `supabase/migrations/20261011000002_accounts.sql` (book keeping: suppliers, goods in and bills, payments, returns from shops, ledgers, statements and reports)
    7. `supabase/migrations/20261015000001_shop_changes.sql` (price per pc optional, changing the unit when editing an invoice, deleting an invoice or a supplier)
    8. `supabase/migrations/20261015000002_statement_order.sql` (statements and the day book list same-day entries in the order they were made)
+   9. `supabase/migrations/20261016000001_stock_requests.sql` (the shop admin orders stock; the warehouse approves, edits or rejects the request)
 
-   **Already running SIM?** Run only the files you have not run yet, in order (for example only 8). They keep your data:
+   **Already running SIM?** Run only the files you have not run yet, in order (for example only 9). They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
 
-   To check, run this in a new query. It should return `30 tables, 45 functions`:
+   To check, run this in a new query. It should return `32 tables, 49 functions`:
    ```sql
    select (select count(*) from information_schema.tables where table_schema = 'public') || ' tables, ' ||
           (select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname in
@@ -44,7 +45,8 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
              'delete_product','restore_product','item_ranks','record_till_print','save_supplier','receive_goods','enter_bill',
              'post_voucher','cancel_voucher','save_account','delete_account','adjust_stock','create_return','cancel_return',
              'receive_return','account_statement','ledger_list','trial_balance','profit_loss','balance_sheet','day_book','payables',
-             'delete_invoice','delete_supplier')) || ' functions' as result;
+             'delete_invoice','delete_supplier','create_stock_request','cancel_stock_request','reject_stock_request',
+             'approve_stock_request')) || ' functions' as result;
    ```
 2. **Edge Functions.** Dashboard → **Edge Functions** → **Deploy a new function** → **Via Editor**, twice:
    - Name **`setup`**: replace the sample code with the content of `supabase/functions/setup/index.ts`, then **Deploy**.

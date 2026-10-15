@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useDeliveries, useProducts, useRanks, useRefresh, useSettings, useShops, useStock } from '../data/queries';
+import { useDeliveries, useProducts, useRanks, useRefresh, useSettings, useShops, useStock, useStockRequests } from '../data/queries';
 import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSort } from '../lib/units';
 import { dt, fCDF, sum } from '../lib/format';
@@ -56,10 +56,12 @@ export default function Deliveries() {
   const byId = useMemo(() => new Map((products.data ?? []).map((p) => [p.id, p])), [products.data]);
   const shopOf = (id: string) => shops.data?.find((s) => s.id === id);
   const list = (dels.data ?? []).filter((d) => !q || (d.no + ' ' + (shopOf(d.shop_id)?.name ?? '')).toLowerCase().includes(q.toLowerCase()));
+  const reqs = (useStockRequests().data ?? []).filter((r) => r.status === 'pending').length;
   return (
     <>
       <Head t="Deliveries to shops" s="Pick the outlets and the quantities, then send. Each shop admin checks the goods and approves them; only then do they leave the store stock and enter the shop. A delivery can be corrected or cancelled until it is received."
         a={<><button className="btn ghost" onClick={() => nav('/shop-stock')}><Icon n="store" /> Shop stock</button><button className="btn primary" onClick={() => setOpen('new')}><Icon n="truck" /> New delivery</button></>} />
+      {reqs ? <Note i="receipt" warn><span>{reqs} stock request{reqs > 1 ? 's' : ''} from the shops waiting for review. <button className="linkbtn" onClick={() => nav('/requests')}>Open Requests</button></span></Note> : null}
       <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Delivery number or shop" value={q} onChange={(e) => setQ(e.target.value)} /></div><span className="chip">{dels.data?.length ?? 0} deliveries</span></div>
       {dels.isLoading ? <div className="card"><Empty i="refresh" t="Loading" /></div> : list.length ? list.map((d) => <DeliveryCard key={d.id} d={d} shop={shopOf(d.shop_id)} products={byId} store rate={settings.data?.rate ?? 1} onEdit={() => setOpen(d)} onCancel={() => setCancel(d)} onNote={() => setNote(d)} />) : <div className="card"><Empty i="truck" t="No deliveries yet" /></div>}
       {cancel ? <ReasonModal title={`Cancel delivery ${cancel.no}`} text="Nothing has left the store yet, so no stock moves. The shop admin will see it as cancelled." button="Cancel delivery" fn="cancel_delivery" id={cancel.id} done="Delivery cancelled" onClose={() => setCancel(null)} /> : null}

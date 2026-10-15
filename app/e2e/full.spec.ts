@@ -311,6 +311,43 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.locator('#sttable')).toContainText('GOM-T1-000003');
   await expect(shop.locator('#stclose')).toContainText('Dr');
 
+  // ---- the shop admin orders stock; the warehouse edits and approves one request and rejects another
+  await shop.getByRole('link', { name: 'Order stock' }).click();
+  await shop.getByRole('button', { name: 'New request' }).click();
+  await shop.getByLabel('Quantity Shea body lotion 400 ml').fill('2');
+  await shop.getByLabel('Quantity Matte lipstick').fill('1');
+  await shop.fill('#reqnote', 'For the weekend');
+  await shop.click('#reqsend');
+  await expect(shop.getByText('REQ-0001 sent to the warehouse')).toBeVisible();
+  await shop.getByRole('button', { name: 'New request' }).click();
+  await shop.getByLabel('Quantity Matte lipstick').fill('3');
+  await shop.click('#reqsend');
+  await expect(shop.getByText('REQ-0002 sent to the warehouse')).toBeVisible();
+  await expect(shop.locator('.card', { hasText: 'REQ-0001' })).toContainText('Waiting for the warehouse');
+  await op.getByRole('link', { name: 'Requests' }).click();
+  await expect(op.locator('tr.reqrow')).toHaveCount(2);
+  await op.getByRole('button', { name: 'Edit REQ-0001' }).click();
+  await op.locator('.modal').getByLabel('Quantity Shea body lotion 400 ml').fill('1');
+  await op.click('#reqapprove');
+  await expect(op.locator('.modal .lerr')).toContainText('Write a short reason');
+  await op.fill('#reqreason', 'Only one carton for now');
+  await op.click('#reqapprove');
+  await expect(op.getByText(/REQ-0001 approved: DEL-\d{4} is on its way to SIM Beauté Gombe/)).toBeVisible();
+  await op.getByRole('button', { name: 'Reject REQ-0002' }).click();
+  await op.fill('#reqwhy', 'Lipsticks are on order from the supplier');
+  await op.click('#reqreject');
+  await expect(op.locator('tr.reqrow')).toHaveCount(0);
+  await shop.reload();
+  const req1 = shop.locator('.card', { hasText: 'REQ-0001' });
+  await expect(req1).toContainText('Approved with changes'); await expect(req1).toContainText('Only one carton for now');
+  await expect(shop.locator('.card', { hasText: 'REQ-0002' })).toContainText('Lipsticks are on order from the supplier');
+  await expect(req1).toContainText(/DEL-\d{4}/);
+  const reqDel = (await req1.innerText()).match(/DEL-\d{4}/)![0];
+  await shop.getByRole('link', { name: 'Deliveries' }).click();
+  await shop.locator('.card', { hasText: reqDel }).getByRole('button', { name: 'Receive' }).click();
+  await shop.getByRole('button', { name: 'Approve and add to shop stock' }).click();
+  await expect(shop.getByText(`${reqDel} received: 72 of 72 units`)).toBeVisible();     // 1 carton of 24 + 1 carton of 48
+
   // ---- the shop admin changes a line's unit, deletes an invoice and prints a stock count sheet
   await shop.getByRole('link', { name: 'Invoices' }).click();
   await shop.locator('tr', { hasText: 'GOM-T1-000003' }).getByTitle('Edit invoice').click();
@@ -326,8 +363,8 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.click('#delbtn');
   await expect(shop.getByText('Invoice GOM-T1-000002 deleted')).toBeVisible();
   await expect(shop.locator('main table.t tbody tr')).toHaveCount(2);
-  await shop.getByRole('link', { name: 'Stock' }).click();
-  await expect(shop.locator('tr', { hasText: 'Shea body lotion' })).toContainText('44');     // 38 + the 6 pcs of the deleted invoice
+  await shop.getByRole('link', { name: 'Stock', exact: true }).click();
+  await expect(shop.locator('tr', { hasText: 'Shea body lotion' })).toContainText('68');     // 38 + 24 requested + the 6 pcs of the deleted invoice
   await shop.getByRole('button', { name: 'Print stock count sheet' }).click();
   const sheet = (await prints(shop)).at(-1)!;
   expect(sheet).toContain('Stock count sheet'); expect(sheet).toContain('Shea body lotion'); expect(sheet).toContain('Counted');
