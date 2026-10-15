@@ -450,6 +450,9 @@ select public.enter_bill(jsonb_build_object('grn_id', (select id from grns where
 select public.post_voucher(jsonb_build_object('type', 'payment', 'lines', jsonb_build_array(
   jsonb_build_object('account', (select account_id from suppliers where id = t.get('sup3')::uuid), 'side', 'Dr', 'amount', 1),
   jsonb_build_object('account', t.acc('CASH_HO'), 'side', 'Cr', 'amount', 1))));
+select t.ok((select string_agg(x->>'side', ',') from jsonb_array_elements(public.account_statement((select account_id from suppliers where id = t.get('sup3')::uuid), current_date, current_date)->'lines') x) = 'Cr,Dr',
+  'statement lists same-day entries in the order they were made: the bill, then its payment');
+select t.ok((select string_agg(x->>'type', ',') from jsonb_array_elements(public.day_book(current_date, current_date)) x) like '%purchase,payment', 'the day book too');
 select t.ok(public.delete_supplier(t.get('sup3')::uuid) = 'archived', 'a supplier with history is made inactive, not deleted');
 select t.ok((select not active from suppliers where id = t.get('sup3')::uuid), 'the inactive supplier stays with its history');
 select t.fails(format($$select public.receive_goods('{"supplier_id":"%s","lines":[{"product_id":"%s","qty":1}]}')$$, t.get('sup3'), t.get('lotion')), 'Choose the supplier', 'nothing new is received from an inactive supplier');
