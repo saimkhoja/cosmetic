@@ -29,8 +29,9 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    7. `supabase/migrations/20261015000001_shop_changes.sql` (price per pc optional, changing the unit when editing an invoice, deleting an invoice or a supplier)
    8. `supabase/migrations/20261015000002_statement_order.sql` (statements and the day book list same-day entries in the order they were made)
    9. `supabase/migrations/20261016000001_stock_requests.sql` (the shop admin orders stock; the warehouse approves, edits or rejects the request)
+   10. `supabase/migrations/20261018000001_supermarket.sql` (two switches in Settings, both off until the Admin turns them on: the customer name optional, and barcode scanning)
 
-   **Already running SIM?** Run only the files you have not run yet, in order (for example only 9). They keep your data:
+   **Already running SIM?** Run only the files you have not run yet, in order (for example only 10). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
@@ -149,12 +150,26 @@ If the update has new files in `supabase/migrations/`, run `supabase db push` fr
   `"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing --app=https://your-domain/till`
 - **Without internet** the till keeps selling and printing. Sales are kept on the till and sent automatically when the connection returns; the pill at the top shows how many are waiting. Do not clear the browser data on a till that shows sales waiting.
 
-## 6. Backups and exporting data
+## 6. Another client (a separate installation)
+
+Each client has **their own Supabase project and their own website**, built from the same code. Their data, logins and backups are completely separate: a site only talks to the project whose URL and key it was built with. Nothing you do for a new client touches an existing client's project.
+
+1. **New Supabase project** in the client's name (supabase.com → New project). Do all of section 1 for it: every migration file, the `setup` and `admin-users` functions with **Verify JWT off**, and the Auth settings. Write down its Project URL and publishable key.
+2. **New Vercel project** for the same repository (section 3a again: Add New → Project → import `saimkhoja/cosmetic`, Root Directory `app`). Give it a name such as `sim-clientname`, and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to **the new project's** values. Optionally add the client's own domain under Settings → Domains.
+3. In the **new** Supabase project set **Site URL** (and the `SIM_ALLOWED_ORIGIN` secret if you use it) to the new site's address.
+4. The client opens the new site: the **Set up SIM** screen asks for their name, Admin username and password, company details for the invoices, rate, VAT and their shops (section 4). Their Admin then creates the other logins.
+5. Features they need are turned on under **Settings → Till options**:
+   - **Customer name optional**: walk-in sales and orders without typing a name. The invoice then has no Client line, and lists show "Walk-in".
+   - **Barcode scanning**: a Barcode field in the item form and a `Barcode` column in the Excel template. At the till a USB scanner (it works as a keyboard, no driver needed) scans into the search box: the item goes into the sale as 1 pc, and the unit can be changed in the cart. Price check finds barcodes too.
+
+**Updating every client.** Every Vercel project redeploys by itself when `main` changes. A new migration file has to be run on **each** client's Supabase project (section 1, only the new files), at the same time; back up that client's database first (section 7). The app keeps working on a project that has not run the newest file yet, but the new features stay off there.
+
+## 7. Backups and exporting data
 
 - Supabase Pro takes daily backups (Dashboard → Database → Backups).
 - For your own copy at any time: `supabase db dump --data-only -f sim-backup.sql` from your computer.
 
-## 7. Checking the build yourself
+## 8. Checking the build yourself
 
 ```bash
 supabase/tests/run.sh                    # database rules and functions (needs Docker)

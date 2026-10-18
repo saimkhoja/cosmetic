@@ -13,7 +13,7 @@ async function all<T>(make: (from: number, to: number) => PromiseLike<{ data: T[
     if (page.length < 1000) return out;
   }
 }
-export const useSettings = () => useQuery({ queryKey: ['settings'], queryFn: async () => rows<Settings>(await supabase.from('settings').select('rate,vat,tz,company'))[0] });
+export const useSettings = () => useQuery({ queryKey: ['settings'], queryFn: async () => rows<Settings>(await supabase.from('settings').select('*'))[0] });
 export const useShops = () => useQuery({ queryKey: ['shops'], queryFn: async () => rows<Shop>(await supabase.from('shops').select('*').order('name')) });
 export const useProducts = () => useQuery({ queryKey: ['products'], queryFn: () => all<Product>((a, b) => supabase.from('products').select('*').order('name').range(a, b)) });
 export const useCosts = (enabled: boolean) => useQuery({ queryKey: ['costs'], enabled, queryFn: () => all<Cost>((a, b) => supabase.from('product_costs').select('*').range(a, b)) });
