@@ -72,7 +72,7 @@ export function reportHTML(r: Report, c: Company, where: string, by: string, sho
   <h3 style="margin:16px 0 6px">Items sold</h3>
   <table class="t"><thead><tr><th>Item</th><th class="r">Quantity</th><th class="r">Value FC</th></tr></thead><tbody>${r.top.map((x) => `<tr><td>${esc(x.name)}</td><td class="r">${x.qty}</td><td class="r">${fCDF(x.val)}</td></tr>`).join('') || '<tr><td colspan="3">No items</td></tr>'}</tbody></table>
   <h3 style="margin:16px 0 6px">Invoices</h3>
-  <table class="t"><thead><tr><th>Invoice</th><th>Date and time</th>${allShops ? '<th>Shop</th>' : ''}<th>Customer</th><th>Cashier</th><th class="r">Items</th><th class="r">Total FC</th></tr></thead><tbody>${r.invoices.map((i) => `<tr><td>${esc(i.no)}${i.edited ? ' (edited)' : ''}</td><td>${dt(i.t)}</td>${allShops ? `<td>${esc(shopName(i.shop_id))}</td>` : ''}<td>${esc(i.customer)}</td><td>${esc(i.cashier_name)}</td><td class="r">${i.items}</td><td class="r">${fCDF(i.total)}</td></tr>`).join('') || '<tr><td colspan="6">No invoices</td></tr>'}</tbody></table>
+  <table class="t"><thead><tr><th>Invoice</th><th>Date and time</th>${allShops ? '<th>Shop</th>' : ''}<th>Customer</th><th>Cashier</th><th class="r">Items</th><th class="r">Total FC</th></tr></thead><tbody>${r.invoices.map((i) => `<tr><td>${esc(i.no)}${i.edited ? ' (edited)' : ''}</td><td>${dt(i.t)}</td>${allShops ? `<td>${esc(shopName(i.shop_id))}</td>` : ''}<td>${esc(i.customer || '-')}</td><td>${esc(i.cashier_name)}</td><td class="r">${i.items}</td><td class="r">${fCDF(i.total)}</td></tr>`).join('') || '<tr><td colspan="6">No invoices</td></tr>'}</tbody></table>
   <p style="margin-top:14px">All amounts in Congolese Francs, VAT ${vat}% included. Payments are in cash.</p>
   <div style="margin-top:26px">Signature ____________________</div></div>`;
 }
@@ -100,7 +100,7 @@ export function ticketsHTML(items: { p: Product; copies: number }[], rate: numbe
 export function orderSlipHTML(o: { ref: string; customer: string; t: string; by: string; lines: { name: string; unit: string; qty: number; price: number }[]; total: number }, c: Company, shop: Shop) {
   return `<div class="receipt"><div class="c"><div class="big">${esc(c.name)}</div><div>${esc(shop.name)}</div></div><hr>
   <div class="c big">BON DE COMMANDE</div><div class="c small">Ce bon n'est pas une facture. Payez à la caisse.</div><hr>
-  <table><tr><td>Réf.</td><td class="r"><b>${esc(o.ref)}</b></td></tr><tr><td>Date</td><td class="r">${dt(o.t)}</td></tr><tr><td>Client</td><td class="r">${esc(o.customer)}</td></tr><tr><td>Préparé par</td><td class="r">${esc(o.by)}</td></tr></table><hr>
+  <table><tr><td>Réf.</td><td class="r"><b>${esc(o.ref)}</b></td></tr><tr><td>Date</td><td class="r">${dt(o.t)}</td></tr>${o.customer ? `<tr><td>Client</td><td class="r">${esc(o.customer)}</td></tr>` : ''}<tr><td>Préparé par</td><td class="r">${esc(o.by)}</td></tr></table><hr>
   <table>${o.lines.map((l) => `<tr><td colspan="2">${esc(l.name)}</td></tr><tr><td>&nbsp;${l.qty} x ${esc(l.unit)} @ ${fCDF(l.price)}</td><td class="r">${fCDF(l.price * l.qty)}</td></tr>`).join('')}</table><hr>
   <div class="rtotal"><span>TOTAL À PAYER</span><span>${fCDF(o.total)}</span></div>
   <div class="c small">Articles : ${sum(o.lines, (l) => l.qty)}. TVA incluse. Montant indicatif ; la facture de la caisse fait foi.</div></div>`;

@@ -389,6 +389,28 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(last.nth(1)).toHaveText(/\$[\d,.]+/);                 // Total | Dr | Cr
   expect(await last.nth(1).innerText()).toBe(await last.nth(2).innerText());
 
+  // ---- supermarket switches: walk-in sales without a name and barcode scanning
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await admin.check('#s-customer_optional'); await admin.check('#s-barcode');
+  await admin.getByRole('button', { name: 'Save settings' }).click();
+  await expect(admin.getByText('Settings saved')).toBeVisible();
+  await admin.getByRole('link', { name: 'Inventory' }).click();
+  await admin.locator('tr', { hasText: 'Shea body lotion' }).getByTitle('Edit item and prices').click();
+  await admin.fill('#ibar', '6001234567890');
+  await admin.getByRole('button', { name: 'Save item' }).click();
+  await expect(admin.getByText('Item saved')).toBeVisible();
+  await expect(admin.locator('tr', { hasText: 'Shea body lotion' })).toContainText('6001234567890');
+  await shop.goto('/till');
+  await expect(shop.locator('#cust')).toHaveAttribute('placeholder', 'Customer name (optional)');
+  await shop.fill('#scan', '6001234567890'); await shop.press('#scan', 'Enter');
+  await expect(shop.locator('.line', { hasText: 'Shea body lotion' })).toContainText('pcs');
+  await expect(shop.locator('#scan')).toHaveValue('');
+  await shop.fill('#scan', '9999999999'); await shop.press('#scan', 'Enter');
+  await expect(shop.getByText('No item has the barcode 9999999999')).toBeVisible();
+  await shop.getByRole('button', { name: 'Take cash and print' }).click();
+  await expect(shop.getByText(/Sale GOM-T1-\d+ for Walk-in done/)).toBeVisible();
+  expect((await prints(shop)).at(-1)).not.toContain('Client');
+
   // ---- the Admin sees the activity; disabling the till ends its access
   await admin.getByRole('link', { name: 'Activity' }).click();
   await expect(admin.getByText(/Invoice GOM-T1-000001 edited/)).toBeVisible();

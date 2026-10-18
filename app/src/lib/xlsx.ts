@@ -1,7 +1,7 @@
 // Excel (.xlsx) and CSV reading/writing with no outside library, so import works offline.
 import { itemProblem } from './items';
 
-export const IMPCOLS = ['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per half dozen USD', 'Price per dozen USD', 'Price per carton USD', 'Opening cartons', 'Opening pcs', 'Reorder at (pcs)', 'SKU'];
+export const IMPCOLS = ['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per half dozen USD', 'Price per dozen USD', 'Price per carton USD', 'Opening cartons', 'Opening pcs', 'Reorder at (pcs)', 'SKU', 'Barcode'];
 const IMPKEYS: Record<string, string[]> = {
   name: ['name', 'item', 'itemname', 'nom', 'article', 'designation', 'produit'], category: ['category', 'categorie', 'cat'],
   cartonCost: ['cartoncost', 'costcarton', 'costofcarton', 'costofonecarton', 'coutcarton', 'prixachatcarton'],
@@ -9,7 +9,7 @@ const IMPKEYS: Record<string, string[]> = {
   pc: ['priceperpc', 'pricepc', 'pcprice', 'priceperpiece', 'prixpiece', 'prixparpiece'], half: ['priceperhalfdozen', 'pricehalfdozen', 'halfdozenprice', 'priceper6', 'prixdemidouzaine', 'prixpardemidouzaine'], dzn: ['priceperdozen', 'pricedozen', 'dozenprice', 'prixdouzaine', 'prixpardouzaine'],
   ctn: ['pricepercarton', 'pricecarton', 'cartonprice', 'prixcarton', 'prixparcarton'], openCtn: ['openingcartons', 'cartons', 'stockcartons', 'openingstockcartons'],
   openPcs: ['openingpcs', 'loosepcs', 'stockpcs', 'openingstockpcs', 'openingloosepcs'], reorder: ['reorderat', 'reorder', 'reorderlevel', 'reorderatpcs', 'reorderwhenbelow'],
-  sku: ['sku', 'code', 'itemcode', 'ref', 'reference'],
+  sku: ['sku', 'code', 'itemcode', 'ref', 'reference'], barcode: ['barcode', 'ean', 'upc', 'gtin', 'codebarre', 'codebarres', 'codeabarres'],
 };
 export const hkey = (h: unknown) => String(h ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/usd$/, '').replace(/fc$/, '');
 export function inum(v: unknown): number {
@@ -107,7 +107,7 @@ export function zipStore(files: { name: string; data: string }[]): Blob {
 export function templateXlsx(): Blob {
   const X = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   const col = (i: number) => String.fromCharCode(65 + i);
-  const rows: (string | number)[][] = [IMPCOLS, ['Aloe vera gel 300 ml', 'Skin care', 60, 24, 4, 23, 45, 90, 5, 0, 24, ''], ['Argan oil shampoo 500 ml', 'Hair care', 72, 12, 9, 50, '', 100, 2, 6, 12, ''], ['Rose body mist 100 ml', 'Fragrance', 84, 36, 3.5, '', 38, '', 3, 0, 36, '']];
+  const rows: (string | number)[][] = [IMPCOLS, ['Aloe vera gel 300 ml', 'Skin care', 60, 24, 4, 23, 45, 90, 5, 0, 24, '', ''], ['Argan oil shampoo 500 ml', 'Hair care', 72, 12, 9, 50, '', 100, 2, 6, 12, '', ''], ['Rose body mist 100 ml', 'Fragrance', 84, 36, 3.5, '', 38, '', 3, 0, 36, '', '']];
   const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols>${IMPCOLS.map((_, i) => `<col min="${i + 1}" max="${i + 1}" width="${i === 0 ? 34 : i === 1 ? 16 : 19}" customWidth="1"/>`).join('')}</cols><sheetData>${rows.map((r, ri) => `<row r="${ri + 1}">${r.map((v, ci) => (v === '' ? '' : typeof v === 'number' ? `<c r="${col(ci)}${ri + 1}"><v>${v}</v></c>` : `<c r="${col(ci)}${ri + 1}" t="inlineStr"><is><t>${X(v)}</t></is></c>`)).join('')}</row>`).join('')}</sheetData></worksheet>`;
   return zipStore([
     { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
@@ -119,11 +119,11 @@ export function templateXlsx(): Blob {
 }
 
 export interface ImportRow {
-  n: number; status: 'ok' | 'bad' | 'skip'; msg: string; sku: string; qty: number;
+  n: number; status: 'ok' | 'bad' | 'skip'; msg: string; sku: string; barcode: string; qty: number;
   o: { name: string; category: string; carton_cost: number; per_carton: number; pc: number; half: number; dzn: number; ctn: number; open_cartons: number; open_pcs: number; reorder: number | null };
 }
-/** Turns sheet rows into checked import rows; names/codes already in the catalogue are skipped. */
-export function impParse(rows: Cell[][], existingNames: string[], existingSkus: string[]): ImportRow[] {
+/** Turns sheet rows into checked import rows; names, codes and barcodes already in the catalogue are skipped. */
+export function impParse(rows: Cell[][], existingNames: string[], existingSkus: string[], existingBarcodes: string[] = []): ImportRow[] {
   const hi = rows.findIndex((r) => r && r.some((c) => IMPKEYS.name.includes(hkey(c))));
   if (hi < 0) throw new Error('No header row found. The first row needs column names such as Name, Category, Carton cost USD. Download the template to see them.');
   const col: Record<string, number> = {};
@@ -132,23 +132,25 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
   const miss = Object.keys(label).filter((f) => col[f] === undefined);
   if (miss.length) throw new Error('Missing columns: ' + miss.map((f) => label[f]).join(', '));
   const g = (r: Cell[], f: string) => (col[f] === undefined ? '' : r[col[f]] ?? '');
-  const names = new Set(existingNames.map((n) => n.trim().toLowerCase())), skus = new Set(existingSkus.map((s) => s.toLowerCase()));
+  const names = new Set(existingNames.map((n) => n.trim().toLowerCase())), skus = new Set(existingSkus.map((s) => s.toLowerCase())), codes = new Set(existingBarcodes);
   const out: ImportRow[] = [];
   rows.slice(hi + 1).forEach((r, i) => {
     if (!r || !r.some((c) => String(c ?? '').trim() !== '')) return;
-    const name = String(g(r, 'name')).trim().replace(/\s+/g, ' ').slice(0, 60), sku = String(g(r, 'sku')).trim().slice(0, 20), dz = inum(g(r, 'dzn')), hz = inum(g(r, 'half')), ct = inum(g(r, 'ctn'));
+    const name = String(g(r, 'name')).trim().replace(/\s+/g, ' ').slice(0, 60), sku = String(g(r, 'sku')).trim().slice(0, 20), barcode = String(g(r, 'barcode')).replace(/\s+/g, ''), dz = inum(g(r, 'dzn')), hz = inum(g(r, 'half')), ct = inum(g(r, 'ctn'));
     const oc = inum(g(r, 'openCtn')), op = inum(g(r, 'openPcs')), ro = inum(g(r, 'reorder'));
     const o = { name, category: String(g(r, 'category')).trim().replace(/\s+/g, ' ').slice(0, 30) || 'Other', carton_cost: inum(g(r, 'cartonCost')), per_carton: inum(g(r, 'perCarton')), pc: (() => { const v = inum(g(r, 'pc')); return isNaN(v) ? 0 : v; })(), half: isNaN(hz) ? 0 : hz, dzn: isNaN(dz) ? 0 : dz, ctn: isNaN(ct) ? 0 : ct,
       open_cartons: isNaN(oc) ? 0 : oc, open_pcs: isNaN(op) ? 0 : op, reorder: isNaN(ro) ? null : ro };
-    const row: ImportRow = { n: hi + i + 2, o, sku, status: 'ok', msg: '', qty: 0 };
+    const row: ImportRow = { n: hi + i + 2, o, sku, barcode, status: 'ok', msg: '', qty: 0 };
     if (name && names.has(name.toLowerCase())) { row.status = 'skip'; row.msg = 'Name already exists'; }
     else if (sku && skus.has(sku.toLowerCase())) { row.status = 'skip'; row.msg = 'Code already exists'; }
+    else if (barcode && codes.has(barcode)) { row.status = 'skip'; row.msg = 'Barcode already exists'; }
+    else if (barcode && !/^[A-Za-z0-9-]{3,32}$/.test(barcode)) { row.status = 'bad'; row.msg = 'Barcode must be 3 to 32 letters or digits'; }
     else {
       const p = itemProblem({ ...o, is_bundle: false, set_cost: 0, set_price: 0, pcs: 0, piece: 0 });
       if (p) { row.status = 'bad'; row.msg = p; }
       else if (oc < 0 || op < 0 || ro < 0) { row.status = 'bad'; row.msg = 'Stock and reorder cannot be negative'; }
       else if ([oc, op, ro].some((x) => !isNaN(x) && x % 1)) { row.status = 'bad'; row.msg = 'Stock and reorder must be whole numbers'; }
-      else { row.qty = o.open_cartons * o.per_carton + o.open_pcs; if (row.o.reorder === null) row.o.reorder = o.per_carton; names.add(name.toLowerCase()); if (sku) skus.add(sku.toLowerCase()); }
+      else { row.qty = o.open_cartons * o.per_carton + o.open_pcs; if (row.o.reorder === null) row.o.reorder = o.per_carton; names.add(name.toLowerCase()); if (sku) skus.add(sku.toLowerCase()); if (barcode) codes.add(barcode); }
     }
     out.push(row);
   });

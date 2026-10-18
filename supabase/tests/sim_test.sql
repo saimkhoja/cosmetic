@@ -508,6 +508,51 @@ select public.receive_delivery((select delivery_id from stock_requests where id 
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('shop_lot')::int + 1, 'the shop receives the approved request like any delivery');
 reset role;
 
+-- ===== supermarket switches: customer name optional, barcodes =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok((select features from settings) = '{}'::jsonb, 'both switches are off on an existing installation');
+select t.put('scan', public.save_product('{"name":"Scan soap","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":" 6001234567890 "}')::text);
+select t.ok((select barcode from products where id = t.get('scan')::uuid) = '6001234567890', 'item saved with its barcode (spaces removed)');
+select t.fails($$select public.save_product('{"name":"Scan soap 2","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"6001234567890"}')$$, 'already used by Scan soap', 'a barcode belongs to one item');
+select t.fails($$select public.save_product('{"name":"Scan soap 3","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"60*1"}')$$, 'not valid', 'a barcode with symbols is refused');
+select t.ok((public.import_products('[{"row":2,"name":"Scan cream","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"6001234567890"},
+  {"row":3,"name":"Scan gel","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"6009999999999"}]')->>'imported')::int = 1, 'import skips a row whose barcode is already used');
+select t.ok((select barcode from products where name = 'Scan gel') = '6009999999999', 'import saves the barcode');
+select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,'barcode',''));
+select t.ok((select barcode from products where id = t.get('scan')::uuid) is null, 'a barcode can be removed');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails($$select public.save_settings('{"rate":2850,"vat":16,"features":{"customer_optional":true}}')$$, 'permission', 'only the Admin turns the switches on');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000050","device_id":"%s","customer":"","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion')),
+  'customer name', 'with the switch off the customer name is still needed');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":true,"barcode":true,"other":true}'::jsonb));
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.put('ord9', gen_random_uuid()::text);
+select t.ok((public.submit_order(jsonb_build_object('id', t.get('ord9'), 'customer', '', 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1))))->>'status') = 'ok', 'an order without a customer name is accepted');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('inv9', gen_random_uuid()::text);
+select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv9'), 'no', 'GOM-T2-000050', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', '  ',
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', (select app_price from (select (round(price_usd * 2850 / 10) * 10)::bigint app_price from products where id = t.get('lotion')::uuid) x)))))->>'status') = 'ok', 'a sale without a customer name is accepted');
+select t.ok((select customer from invoices where id = t.get('inv9')::uuid) = '', 'the invoice keeps an empty customer');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000051","device_id":"%s","customer":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev2'), repeat('x', 61), t.get('lotion')),
+  'too long', 'a customer name is still at most 60 characters');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false}'::jsonb, 'saving settings without the switches turns them off');
+reset role;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

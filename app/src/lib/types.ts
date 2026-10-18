@@ -1,12 +1,14 @@
 export type Role = 'admin' | 'whop' | 'shopadmin' | 'till';
 export interface Profile { id: string; username: string; name: string; role: Role; shop_id: string | null; active: boolean; must_change_password: boolean; created_at?: string }
 export interface Company { name?: string; address?: string; phone?: string; email?: string; rccm?: string; idnat?: string; nif?: string; footer?: string }
-export interface Settings { rate: number; vat: number; tz: string; company: Company }
+/** Switches the Admin turns on in Settings; both off by default. */
+export interface Features { customer_optional?: boolean; barcode?: boolean }
+export interface Settings { rate: number; vat: number; tz: string; company: Company; features?: Features }
 export interface Shop { id: string; code: string; name: string; address: string; active: boolean }
 export interface Product {
   id: string; sku: string; name: string; category: string; stock_unit: 'pcs' | 'set'; is_bundle: boolean;
   per_carton: number; pieces_per_set: number; price_usd: number; half_dozen_usd: number; dozen_usd: number; carton_usd: number; piece_usd: number;
-  reorder: number; wh_qty: number; active: boolean; archived_at?: string | null;
+  reorder: number; wh_qty: number; active: boolean; archived_at?: string | null; barcode?: string | null;
 }
 export interface Cost { product_id: string; carton_cost_usd: number; cost_usd: number }
 export interface StockRow { shop_id: string; product_id: string; qty: number; open_pieces: number }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
 import { ctnTxt, hotSort, pcValue, takeLocal, totals, unitsOf } from './units';
-import { itemProblem } from './items';
+import { custName, findByCode, itemProblem } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
 
@@ -84,4 +84,22 @@ describe('import', () => {
   });
   it('parses numbers written the French way', () => { expect(inum('1,80')).toBe(1.8); expect(inum('$1 500')).toBe(1500); });
   it('crc32 matches the standard value', () => expect(crc32(new TextEncoder().encode('123456789'))).toBe(0xcbf43926));
+});
+
+describe('supermarket', () => {
+  const list = [P({ id: 'a', sku: 'SK-101', barcode: '6001234567890' }), P({ id: 'b', sku: 'SK-102', barcode: null })];
+  it('finds an item by its barcode, then by its code', () => {
+    expect(findByCode(list, ' 6001234567890 ')?.id).toBe('a');
+    expect(findByCode(list, 'sk-102')?.id).toBe('b');
+    expect(findByCode(list, '600123')).toBeUndefined();
+    expect(findByCode(list, '')).toBeUndefined();
+  });
+  it('shows a sale without a name as walk-in', () => { expect(custName('')).toBe('Walk-in'); expect(custName('Mama Rose')).toBe('Mama Rose'); });
+  it('imports barcodes and skips those already used', () => {
+    const rows = [['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Barcode'],
+      ['Soap A', 'Bath', 24, 24, 1.5, 6001234567890], ['Soap B', 'Bath', 24, 24, 1.5, '6009 9999'], ['Soap C', 'Bath', 24, 24, 1.5, '6009 9999'], ['Soap D', 'Bath', 24, 24, 1.5, '60*1']];
+    const r = impParse(rows, [], [], ['6001234567890']);
+    expect(r.map((x) => x.status)).toEqual(['skip', 'ok', 'skip', 'bad']);
+    expect(r[1].barcode).toBe('60099999');
+  });
 });
