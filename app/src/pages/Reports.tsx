@@ -47,7 +47,7 @@ export default function Reports() {
           {isAdmin ? <Kpi i="chart" l="Gross profit, excl. VAT"><Dual2 b={fUSD(r.profit_usd ?? 0)} s={fCDF((r.profit_usd ?? 0) * (settings.data?.rate ?? 0))} /></Kpi> : <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r.total)} s="all sales are cash" /></Kpi>}
         </div>
         <div className="cols">
-          <div className="card"><h3><Icon n="chart" /> Sales by day (FC)</h3>{r.by_day.length ? <Bars arr={r.by_day.slice(-14).map((d) => ({ label: d.day.slice(8) + '/' + d.day.slice(5, 7), val: d.v, txt: shortCDF(d.v) }))} /> : <Empty i="chart" t="No sales in these dates" />}</div>
+          <div className="card"><h3><Icon n="chart" /> Sales by day (CDF)</h3>{r.by_day.length ? <Bars arr={r.by_day.slice(-14).map((d) => ({ label: d.day.slice(8) + '/' + d.day.slice(5, 7), val: d.v, txt: shortCDF(d.v) }))} /> : <Empty i="chart" t="No sales in these dates" />}</div>
           <div className="card"><h3><Icon n="box" /> Best sellers</h3><HList arr={r.top.slice(0, 8).map((x) => ({ name: x.name, val: x.val, txt: fCDF(x.val) }))} /></div>
           <div className="card"><h3><Icon n="users" /> By cashier</h3><HList arr={r.by_cashier.map((x) => ({ name: x.name, val: x.v, txt: fCDF(x.v) }))} /></div>
         </div>

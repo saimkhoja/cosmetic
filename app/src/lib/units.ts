@@ -32,7 +32,7 @@ export function ctnTxt(p: Pick<Product, 'is_bundle' | 'per_carton'>, q: number) 
 }
 
 export interface CartLine { pid: string; ui: number; qty: number }
-/** Totals of a sale: discount rounded to 10 FC, VAT included in the price. */
+/** Totals of a sale: discount rounded to 10 CDF, VAT included in the price. */
 export function totals(lines: { price: number; qty: number }[], dp: number, vatRate: number) {
   const gross = lines.reduce((s, l) => s + l.price * l.qty, 0);
   const disc = Math.round((gross * (dp || 0)) / 1000) * 10, total = gross - disc, vat = Math.round((total * vatRate) / (100 + vatRate));

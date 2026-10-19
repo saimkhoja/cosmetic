@@ -1,6 +1,6 @@
 // Money and date formatting, as on the approved demo.
 export const toCDF = (usd: number, rate: number) => Math.round((Number(usd) * Number(rate)) / 10) * 10;
-export const fCDF = (n: number) => Math.round(Number(n) || 0).toLocaleString('en-US').replace(/,/g, ' ') + ' FC';
+export const fCDF = (n: number) => Math.round(Number(n) || 0).toLocaleString('en-US').replace(/,/g, ' ') + ' CDF';
 export const fUSD = (n: number) => (n < 0 ? '-' : '') + '$' + Math.abs(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const ld = (t: string | number | Date) => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 export const today = () => ld(Date.now());

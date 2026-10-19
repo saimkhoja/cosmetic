@@ -257,6 +257,15 @@ main.posmain{padding:14px;max-width:none}
 .receipt .small{font-size:10.5px}
 .receipt .rlogo{display:inline-grid;place-items:center;width:46px;height:46px;border:2px solid #000;border-radius:11px;font-weight:900;margin-bottom:6px;font-family:var(--font);font-size:15px}
 .receipt.slip{font-size:12.5px}.receipt.slip td{padding:2px 0}.receipt.slip td:first-child{padding-right:10px}
+.receipt.inv .rbox{display:inline-block;border:1.5px solid #000;padding:3px 10px;margin:12px 0 2px;font-weight:700;font-size:14px}
+.receipt.inv .rl{margin:3px 0}
+.receipt.inv .ritems{margin-top:8px}.receipt.inv .ritems th{font-weight:400;text-align:left;border-bottom:1px solid #000;padding:2px 0}.receipt.inv .ritems th.r{text-align:right}
+.receipt.inv .ritems tbody tr:nth-child(odd) td{padding-top:4px}.receipt.inv .ritems td{padding-left:4px}.receipt.inv .ritems td:first-child{padding-left:0}
+.receipt.inv .ritems{border-bottom:3px double #000}
+.receipt.inv .rsum{margin-top:4px}.receipt.inv .rsum td{padding:2px 0 2px 6px}.receipt.inv .rsum td:first-child{padding-left:0;width:38%}
+.receipt.inv table,.receipt.inv th,.receipt.inv td{font-size:12px}.receipt.inv .rsum td{white-space:nowrap}
+.receipt.inv .rttc{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0}.receipt.inv .rttc b{font-size:13px;white-space:nowrap}.receipt.inv .rttc .rbox{margin:0;font-size:15px;min-width:42%;text-align:center}
+.receipt.inv .rnb{border-top:2px solid #000;margin-top:10px;padding-top:6px;font-size:11px}
 .receipt .rtotal{display:flex;justify-content:space-between;font-size:17px;font-weight:700;border:2px solid #000;padding:6px 8px;margin:8px 0}
 .doc{background:#fff;color:#000;padding:22px;border-radius:6px;font-size:13.5px}
 .doc .t th{background:#EEF2F9;color:#000}.doc .t td{border-color:#D8DEE9}

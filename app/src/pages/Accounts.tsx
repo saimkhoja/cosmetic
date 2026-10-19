@@ -1,6 +1,6 @@
 // Book keeping, like Tally: suppliers and their bills, vouchers (payment, receipt, contra, journal,
 // debit and credit notes), ledgers in groups, statements, day book, trial balance, profit and loss,
-// balance sheet and money owed to suppliers. Every entry is in USD or FC; reports are in USD.
+// balance sheet and money owed to suppliers. Every entry is in USD or CDF; reports are in USD.
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../lib/icons';
@@ -88,10 +88,10 @@ function SupplierModal({ s, products, onClose }: { s: Supplier | null; products:
       <div className="frow"><div className="field"><label>Address</label><input className="input" maxLength={120} value={f.address} onChange={set('address')} /></div><div className="field"><label>Tax number (NIF)</label><input className="input" maxLength={40} value={f.tax_no} onChange={set('tax_no')} /></div></div>
       <div className="frow three"><div className="field"><label>Credit days</label><input id="sdays" className="input" type="number" min="0" max="365" value={f.credit_days} onChange={set('credit_days')} /><span className="hint">Bills fall due this many days after the bill date.</span></div>
         <div className="field"><label>Credit limit (USD)</label><input className="input" type="number" min="0" value={f.credit_limit} placeholder="Optional" onChange={set('credit_limit')} /></div>
-        <div className="field"><label>Usually bills in</label><select className="input" value={f.currency} onChange={set('currency')}><option value="USD">USD</option><option value="FC">Francs (FC)</option></select></div></div>
+        <div className="field"><label>Usually bills in</label><select className="input" value={f.currency} onChange={set('currency')}><option value="USD">USD</option><option value="FC">Francs (CDF)</option></select></div></div>
       <div className="frow three"><div className="field"><label>Opening balance</label><input id="soa" className="input" type="number" min="0" step="0.01" value={f.oa} placeholder="0" onChange={set('oa')} /></div>
         <div className="field"><label>Side</label><select className="input" value={f.oside} onChange={set('oside')}><option value="Cr">Cr, we owe them</option><option value="Dr">Dr, they owe us (advance)</option></select></div>
-        <div className="field"><label>In</label><select className="input" value={f.ocur} onChange={set('ocur')}><option value="USD">USD</option><option value="FC">FC</option></select></div></div>
+        <div className="field"><label>In</label><select className="input" value={f.ocur} onChange={set('ocur')}><option value="USD">USD</option><option value="FC">CDF</option></select></div></div>
       <div className="field"><label>Items this supplier supplies</label><div className="search" style={{ maxWidth: 'none' }}><Icon n="search" /><input placeholder="Find items to add" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <div className="mchips" style={{ marginTop: 8 }}>{shown.map((p) => { const on = items.includes(p.id); return <label key={p.id} className="chip" style={on ? { background: 'var(--btn)', color: '#fff' } : undefined}><input type="checkbox" hidden checked={on} onChange={() => setItems(on ? items.filter((x) => x !== p.id) : [...items, p.id])} />{on ? '✓ ' : '+ '}{p.name}</label>; })}</div>
         <span className="hint">{items.length} item{items.length === 1 ? '' : 's'}. When the warehouse receives from this supplier, these items are listed first.</span></div>
@@ -129,7 +129,7 @@ export function BillModal({ grn, onClose }: { grn?: Grn; onClose: () => void }) 
         <div className="field"><label>Due date</label><input type="date" className="input" value={f.due || due} onChange={set('due')} /><span className="hint">{sup ? `${sup.credit_days} days credit` : ''}</span></div></div>
       <div className="frow three"><div className="field"><label>Amount before VAT</label><input id="bamt" className="input" type="number" min="0" step="0.01" value={f.amount} onChange={set('amount')} /></div>
         <div className="field"><label>VAT on the bill</label><input className="input" type="number" min="0" step="0.01" value={f.vat} placeholder="0" onChange={set('vat')} /></div>
-        <div className="field"><label>Currency</label><div style={{ display: 'flex', gap: 6 }}><select className="input" value={f.currency} onChange={set('currency')}><option value="USD">USD</option><option value="FC">FC</option></select>{f.currency === 'FC' ? <input className="input" type="number" min="1" value={f.rate} placeholder={String(settings.data?.rate ?? '')} onChange={set('rate')} aria-label="Rate" /> : null}</div></div></div>
+        <div className="field"><label>Currency</label><div style={{ display: 'flex', gap: 6 }}><select className="input" value={f.currency} onChange={set('currency')}><option value="USD">USD</option><option value="FC">CDF</option></select>{f.currency === 'FC' ? <input className="input" type="number" min="1" value={f.rate} placeholder={String(settings.data?.rate ?? '')} onChange={set('rate')} aria-label="Rate" /> : null}</div></div></div>
       {grn && amt > 0 ? <Note i={Math.abs(amtUsd - std) > 0.005 ? 'alert' : 'check'} warn={Math.abs(amtUsd - std) > 0.005}>Bill {fUSD(amtUsd)} vs item cost {fUSD(std)}: difference {fUSD(amtUsd - std)}.</Note> : null}
       <div className="field"><label>Narration (optional)</label><input className="input" maxLength={120} value={f.narration} onChange={set('narration')} /></div>
       <div className="lerr">{a.err}</div>
@@ -201,7 +201,7 @@ function VoucherModal({ type: t0, party, onClose }: { type: string; party?: Paya
         {lines.map((l, i) => <tr key={i}><td><select className="input" value={l.side} onChange={(e) => upd(i, { side: e.target.value as 'Dr' | 'Cr' })} aria-label="Side"><option>Dr</option><option>Cr</option></select></td>
           <td><select className="input vacc" value={l.account} onChange={(e) => upd(i, { account: e.target.value })} aria-label="Ledger"><option value="">Choose a ledger</option>{groupOptions(L)}</select></td>
           <td><input className="input vamt" type="number" min="0" step="0.01" value={l.amount} onChange={(e) => upd(i, { amount: e.target.value })} aria-label="Amount" /></td>
-          <td><select className="input" value={l.currency} onChange={(e) => upd(i, { currency: e.target.value as Cur })} aria-label="Currency"><option>USD</option><option>FC</option></select></td>
+          <td><select className="input" value={l.currency} onChange={(e) => upd(i, { currency: e.target.value as Cur })} aria-label="Currency"><option>USD</option><option value="FC">CDF</option></select></td>
           <td>{l.currency === 'FC' ? <input className="input" type="number" min="1" value={l.rate} onChange={(e) => upd(i, { rate: e.target.value })} aria-label="Rate" /> : <span className="code">-</span>}</td>
           <td className={`r ${l.side === 'Dr' ? 'dr' : 'cr'}`}>{fUSD(base(l))}</td>
           <td>{lines.length > 2 ? <button className="rbtn bad" title="Remove line" onClick={() => setLines(lines.filter((_, k) => k !== i))}><Icon n="x" /></button> : null}</td></tr>)}
@@ -219,7 +219,7 @@ function VoucherModal({ type: t0, party, onClose }: { type: string; party?: Paya
 }
 function groupOptions(L: Ledger[]) {
   const by = new Map<string, Ledger[]>(); L.forEach((l) => by.set(l.group_name, [...(by.get(l.group_name) ?? []), l]));
-  return [...by.entries()].map(([g, ls]) => <optgroup key={g} label={g}>{ls.map((l) => <option key={l.id} value={l.id}>{l.name}{l.currency === 'FC' ? ' (FC)' : ''}</option>)}</optgroup>);
+  return [...by.entries()].map(([g, ls]) => <optgroup key={g} label={g}>{ls.map((l) => <option key={l.id} value={l.id}>{l.name}{l.currency === 'FC' ? ' (CDF)' : ''}</option>)}</optgroup>);
 }
 
 function Vouchers() {
@@ -277,7 +277,7 @@ export function StatementView({ ledgers, loading }: { ledgers: Ledger[]; loading
       {!ledgers.length ? <div className="card"><Empty i="wallet" t={loading ? 'Loading' : 'No ledgers to show'} /></div> : !s ? <div className="card"><Empty i={st.error ? 'alert' : 'refresh'} t={st.error ? (st.error as Error).message : 'Loading the statement'} /></div> : <>
         <div className="kpis"><Kpi i="clock" l={withOpening ? 'Opening balance' : 'Opening balance (not included)'}><Dual2 b={balTxt(s.brought_forward)} s={`on ${s.from}`} /></Kpi><Kpi i="plus" l="Debits in the period"><Dual2 b={fUSD(s.total_dr)} s={`${s.lines.filter((l) => l.side === 'Dr').length} entries`} /></Kpi>
           <Kpi i="minus" l="Credits in the period"><Dual2 b={fUSD(s.total_cr)} s={`${s.lines.filter((l) => l.side === 'Cr').length} entries`} /></Kpi><Kpi i="wallet" l="Closing balance" tone="ok"><Dual2 b={balTxt(s.closing)} s={`on ${s.to}`} /></Kpi></div>
-        <div className="card p0"><div className="tw"><table className="t" id="sttable"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th className="r">FC</th><th className="r">Debit</th><th className="r">Credit</th><th className="r">Balance</th></tr></thead><tbody>
+        <div className="card p0"><div className="tw"><table className="t" id="sttable"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th className="r">CDF</th><th className="r">Debit</th><th className="r">Credit</th><th className="r">Balance</th></tr></thead><tbody>
           {withOpening ? <tr style={{ background: 'var(--bg)' }}><td>{s.from}</td><td /><td><b>Opening balance</b></td><td /><td className="r">{s.brought_forward > 0 ? fUSD(s.brought_forward) : ''}</td><td className="r">{s.brought_forward < 0 ? fUSD(-s.brought_forward) : ''}</td><td className="r"><b>{balTxt(s.brought_forward)}</b></td></tr> : null}
           {s.lines.map((l) => { run += l.side === 'Dr' ? l.base : -l.base; return <tr key={l.id}><td className="nw">{l.date}</td><td className="nw">{l.no}<div className="code">{VTYPES[l.type]}</div></td><td>{l.narration}{l.memo ? <div className="code">{l.memo}</div> : null}{l.bill_ref ? <div className="code">Bill {l.bill_ref}{l.due_date ? `, due ${l.due_date}` : ''}</div> : null}</td>
             <td className="r nw">{l.currency === 'FC' ? <>{fCDF(l.amount)}<div className="code">@ {l.rate}</div></> : null}</td><td className="r">{l.side === 'Dr' ? fUSD(l.base) : ''}</td><td className="r">{l.side === 'Cr' ? fUSD(l.base) : ''}</td><td className="r nw">{balTxt(run)}</td></tr>; })}
@@ -320,10 +320,10 @@ function LedgerModal({ l, onClose }: { l: Ledger | null; onClose: () => void }) 
     <Modal title={l ? 'Edit ledger' : 'New ledger'} icon="wallet" onClose={onClose} foot={<>{l && !l.system ? <button className="btn danger" disabled={b.busy} onClick={() => void del()}><Icon n="trash" /> Delete</button> : null}<span className="sp" /><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Save</button></>}>
       <div className="field"><label>Name</label><input id="lname" className="input" maxLength={60} value={f.name} onChange={set('name')} autoFocus placeholder="e.g. Rawbank USD account, Owner's capital, Generator" /></div>
       <div className="frow"><div className="field"><label>Group</label><select id="lgroup" className="input" value={f.group} disabled={!!l?.system} onChange={set('group')}>{(groups.data ?? []).filter((g) => g.code !== 'creditors').map((g) => <option key={g.code} value={g.code}>{g.name}</option>)}</select></div>
-        <div className="field"><label>Kept in</label><select className="input" value={f.currency} onChange={set('currency')}><option value="USD">USD</option><option value="FC">Francs (FC)</option></select></div></div>
+        <div className="field"><label>Kept in</label><select className="input" value={f.currency} onChange={set('currency')}><option value="USD">USD</option><option value="FC">Francs (CDF)</option></select></div></div>
       <div className="frow three"><div className="field"><label>Opening balance</label><input id="loa" className="input" type="number" min="0" step="0.01" value={f.oa} placeholder="0" onChange={set('oa')} /></div>
         <div className="field"><label>Side</label><select className="input" value={f.oside} onChange={set('oside')}><option value="Dr">Dr</option><option value="Cr">Cr</option></select></div>
-        <div className="field"><label>In</label><select className="input" value={f.ocur} onChange={set('ocur')}><option value="USD">USD</option><option value="FC">FC</option></select></div></div>
+        <div className="field"><label>In</label><select className="input" value={f.ocur} onChange={set('ocur')}><option value="USD">USD</option><option value="FC">CDF</option></select></div></div>
       {f.ocur === 'FC' ? <div className="field"><label>Rate for the opening balance</label><input className="input" type="number" min="1" value={f.orate} onChange={set('orate')} placeholder="today's rate" /></div> : null}
       <Note i="doc">Opening balances are what each account held when the books started: cash in hand, bank, capital, loans. They show in statements and reports only when you choose to include them.</Note>
       {l && !l.system ? <label className="switch"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /><span>Active</span></label> : null}
