@@ -9,11 +9,11 @@ const P = (o: Partial<Product>): Product => ({ id: 'p', sku: 'SK-1', name: 'X', 
   price_usd: 1.5, half_dozen_usd: 0, dozen_usd: 16, carton_usd: 30, piece_usd: 0, reorder: 0, wh_qty: 0, active: true, ...o });
 
 describe('money', () => {
-  it('rounds shop prices to the nearest 10 FC like the demo', () => {
+  it('rounds shop prices to the nearest 10 CDF like the demo', () => {
     expect(toCDF(1.5, 2850)).toBe(4280);
     expect(toCDF(16, 2850)).toBe(45600);
     expect(toCDF(30, 2850)).toBe(85500);
-    expect(fCDF(1234567)).toBe('1 234 567 FC');
+    expect(fCDF(1234567)).toBe('1 234 567 CDF');
   });
   it('computes discount and included VAT as the server does', () => {
     const t = totals([{ price: 85500, qty: 1 }, { price: 4000, qty: 1 }], 10, 16);

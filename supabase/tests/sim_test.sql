@@ -531,7 +531,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":true,"barcode":true,"other":true}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
@@ -550,7 +550,35 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false}'::jsonb, 'saving settings without the switches turns them off');
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false}'::jsonb, 'saving settings without the switches turns them off');
+reset role;
+
+-- ===== till operators sell directly when the Admin turns it on =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000060","device_id":"%s","customer":"A","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion')),
+  'permission', 'with the switch off the till operator cannot sell');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"till_sells":true}'::jsonb));
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.put('lot_price', (select (round(price_usd * 2850 / 10) * 10)::bigint::text from products where id = t.get('lotion')::uuid));
+select t.put('inv10', gen_random_uuid()::text);
+select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv10'), 'no', 'GOM-T1-000060', 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Maman Rose',
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', t.get('lot_price')::bigint))))->>'status') = 'ok', 'the till operator sells directly when the switch is on');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000061","device_id":"%s","customer":"A","disc_pct":10,"rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":%s}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion'), t.get('lot_price')),
+  'discount', 'a till operator gives no discount');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000062","device_id":"%s","customer":"A","order_id":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":%s}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('ord2'), t.get('lotion'), t.get('lot_price')),
+  'approves orders', 'a till operator does not approve orders');
+reset role;
+select t.ok((select cashier_name from invoices where id = t.get('inv10')::uuid) = 'Grace Mbuyi', 'the invoice names the till operator as the cashier');
+select t.ok(exists (select 1 from audit_log where action like 'Invoice GOM-T1-000060 for Maman Rose, cash, % CDF'), 'the activity log writes amounts in CDF');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
 reset role;
 
 -- ===== admin sees everything; disabled users are shut out =====

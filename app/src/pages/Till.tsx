@@ -41,6 +41,9 @@ export async function refreshSnapshot(shopId: string): Promise<Snapshot> {
   return snap;
 }
 
+/** The shop admin always sells; a till operator only when the Admin turned on "Till operators sell directly". */
+const canSell = (isAdmin: boolean, s: Snapshot | null | undefined) => isAdmin || !!s?.settings.features?.till_sells;
+
 // one registration at a time per shop, so a double start never makes two tills
 const inflight = new Map<string, Promise<Device>>();
 function registerOnce(shopId: string, known: string | null): Promise<Device> {
@@ -76,17 +79,17 @@ export default function Till() {
     if (known) setDev(known);
     if (!navigator.onLine) {
       if (!local) setProblem('This till has not been connected yet. Connect to the internet once to load the items and register the till.');
-      else if (!known && isAdmin) setProblem('Connect to the internet once to register this till.');
+      else if (!known && canSell(isAdmin, local)) setProblem('Connect to the internet once to register this till.');
       return;
     }
     try {
       const fresh = await refreshSnapshot(shopId); setSnap(fresh);
-      if (isAdmin) { const d = await registerOnce(shopId, known?.id ?? null); setDev(d); }
+      if (canSell(isAdmin, fresh)) { const d = await registerOnce(shopId, known?.id ?? null); setDev(d); }
       setProblem('');
     } catch (e) {
       if (!isNetworkError(e)) setProblem((e as Error).message);
       else if (!local) setProblem('This till has not been connected yet. Connect to the internet once to load the items and register the till.');
-      else if (!known && isAdmin) setProblem('Connect to the internet once to register this till.');
+      else if (!known && canSell(isAdmin, local)) setProblem('Connect to the internet once to register this till.');
     }
   }, [shopId, isAdmin]);
   useEffect(() => {
@@ -99,7 +102,7 @@ export default function Till() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, loadOutbox, shopId]);
   // switches from Settings: walk-in sales without a name, and barcode scanning
-  const optCust = !!snap?.settings.features?.customer_optional, codes = !!snap?.settings.features?.barcode, ready = !!customer || optCust;
+  const optCust = !!snap?.settings.features?.customer_optional, codes = !!snap?.settings.features?.barcode, ready = !!customer || optCust, sells = canSell(isAdmin, snap);
   useEffect(() => { if (!customer) setTimeout(() => (optCust ? scan : custIn).current?.focus(), 50); }, [customer, optCust]);
 
   const byId = useMemo(() => new Map((snap?.products ?? []).map((p) => [p.id, p])), [snap]);
@@ -203,7 +206,7 @@ export default function Till() {
   if (!snap) return <div className="card"><Empty i={problem ? 'wifioff' : 'refresh'} t={problem || 'Loading the till'} tall /></div>;
   const st = (p: Product) => snap.stock[p.id] ?? { qty: 0, open_pieces: 0 };
   const myUnsent = outbox.filter((e) => e.kind === 'order');
-  const myOrders = isAdmin ? [] : (orders.data ?? []).slice(0, 8);
+  const myOrders = sells ? [] : (orders.data ?? []).slice(0, 8);
 
   const pos = (
     <div className="pos"><section className="pos-left">
@@ -227,7 +230,7 @@ export default function Till() {
         : <Empty i="search" t={snap.products.length ? 'No items found. Try another word or another category.' : 'No items yet. The Admin adds them in Inventory.'} />}</div>
     </section>
     <section className="cart" id="cart">
-      <div className="cart-h"><b><Icon n="cart" /> {isAdmin ? 'Current sale' : 'New order'}</b><span className="chip">{T.count} {T.count === 1 ? 'item' : 'items'}</span>{cart.length || customer ? <button className="iconbtn dark" onClick={resetSale} title="Clear" aria-label="Clear sale"><Icon n="trash" /></button> : null}</div>
+      <div className="cart-h"><b><Icon n="cart" /> {sells ? 'Current sale' : 'New order'}</b><span className="chip">{T.count} {T.count === 1 ? 'item' : 'items'}</span>{cart.length || customer ? <button className="iconbtn dark" onClick={resetSale} title="Clear" aria-label="Clear sale"><Icon n="trash" /></button> : null}</div>
       <div className="lines">{priced.length ? priced.map((l, i) => { const short = !l.u.piece && st(l.p).qty - cartBase(l.pid) < 0; return (
         <div key={l.pid + ':' + l.ui} className={`line ${flash && i === 0 ? 'flash' : ''}`}><div><div className="ln">{l.p.name}</div><div className="lp"><Icon n="lock" /> {fCDF(l.price)} <button className="uchip" onClick={() => setPick({ pid: l.pid, idx: i })} title="Change unit">{unitLabel(l.u)} <Icon n="edit" /></button>{short ? <> <span className="chip warn">on order</span></> : null}</div></div><div className="lt">{fCDF(l.price * l.qty)}</div>
           <div className="qty"><button onClick={() => chg(i, -1)} aria-label="One less"><Icon n="minus" /></button><b>{l.qty}</b><button onClick={() => chg(i, 1)} aria-label="One more"><Icon n="plus" /></button></div><button className="rm" onClick={() => chg(i, -999)} aria-label="Remove item"><Icon n="x" /></button></div>); })
@@ -235,13 +238,13 @@ export default function Till() {
       <div className="totals"><div className="row"><span>Subtotal</span><span>{fCDF(T.gross)}</span></div>
         {T.disc ? <div className="row"><span>Invoice discount {dp}%</span><span>- {fCDF(T.disc)}</span></div> : null}
         <div className="row muted"><span>Includes VAT {vat}%</span><span>{fCDF(T.vat)}</span></div>
-        <div className="grand"><span>{isAdmin ? 'To pay' : 'Order total'}</span><b>{fCDF(T.total)}</b></div>
+        <div className="grand"><span>{sells ? 'To pay' : 'Order total'}</span><b>{fCDF(T.total)}</b></div>
         {cart.length ? (isAdmin ? <button className="btn ghost full disc-btn" onClick={() => setDisc(true)}><Icon n="tag" /> {dp ? `Invoice discount ${dp}%, change` : 'Discount on this invoice'}</button> : null) : null}
-        <div className="paybtns one">{isAdmin
+        <div className="paybtns one">{sells
           ? <button className="paybtn cash" onClick={() => void pay()} disabled={!cart.length || !ready}><Icon n="cash" /> Take cash and print</button>
           : <button className="paybtn" onClick={() => void sendOrder()} disabled={!cart.length || !ready}><Icon n="check" /> Send to shop admin for approval</button>}</div>
-        {isAdmin && last ? <div className="row muted" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13.5 }}><span className="chip ok"><Icon n="check" /> Last sale</span><span style={{ flex: 1 }}><b>{last.no}</b>, <span style={{ whiteSpace: 'nowrap' }}>{fCDF(last.total)}</span></span><button className="btn sm" onClick={() => setView(last)}><Icon n="eye" /> View</button></div> : null}
-        {!isAdmin && (myUnsent.length || myOrders.length) ? <div className="myorders"><div className="code" style={{ margin: '10px 0 4px', fontWeight: 800 }}>My orders today</div>
+        {sells && last ? <div className="row muted" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13.5 }}><span className="chip ok"><Icon n="check" /> Last sale</span><span style={{ flex: 1 }}><b>{last.no}</b>, <span style={{ whiteSpace: 'nowrap' }}>{fCDF(last.total)}</span></span><button className="btn sm" onClick={() => setView(last)}><Icon n="eye" /> View</button></div> : null}
+        {!sells && (myUnsent.length || myOrders.length) ? <div className="myorders"><div className="code" style={{ margin: '10px 0 4px', fontWeight: 800 }}>My orders today</div>
           {myUnsent.map((e) => <div key={e.id} className="morow"><span>{e.kind === 'order' ? custName(e.payload.customer) : ''}</span><span className="chip warn">{e.error ? 'Not accepted: ' + e.error : 'Not sent yet'}</span></div>)}
           {myOrders.filter((o) => !myUnsent.some((e) => e.id === o.id)).map((o) => <div key={o.id} className="morow"><span>{custName(o.customer)} <span className="code">{orderRef(o.id)}, {tm(o.created_at)}</span></span>
             {o.status === 'pending' ? <span className="chip">Waiting for approval</span> : o.status === 'approved' ? <span className="chip ok">Approved</span> : <span className="chip bad" title={o.reason ?? ''}>Rejected{o.reason ? ': ' + o.reason : ''}</span>}</div>)}
