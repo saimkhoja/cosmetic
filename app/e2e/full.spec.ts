@@ -414,16 +414,23 @@ test('a full day in SIM', async ({ browser }) => {
   expect((await prints(shop)).at(-1)).not.toContain('Customer:');
   // ---- the till operator sells directly once the Admin allows it
   await admin.getByRole('link', { name: 'Settings' }).click();
-  await admin.check('#s-till_sells');
+  await admin.check('#s-till_sells'); await admin.check('#s-cash_change');
   await admin.getByRole('button', { name: 'Save settings' }).click();
   await expect(admin.getByText('Settings saved')).toBeVisible();
   await till.goto('/till');
   await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
   await expect(till.locator('.line', { hasText: 'Shea body lotion' })).toBeVisible();
   await expect(till.getByRole('button', { name: 'Send to shop admin for approval' })).toHaveCount(0);
+  await expect(till.getByRole('button', { name: 'Take cash and print' })).toBeDisabled();       // the cash received comes first
+  await till.fill('#cashin', '100');
+  await expect(till.locator('#cashchange')).toContainText('Not enough cash');
+  await till.fill('#cashin', '20000');
+  await expect(till.locator('#cashchange')).toContainText('Change to give');
+  await expect(till.locator('#cashchange')).toContainText('5 750 CDF');                          // 20 000 - 14 250
   await till.getByRole('button', { name: 'Take cash and print' }).click();
-  await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done/)).toBeVisible();
-  expect((await prints(till)).at(-1)).toContain('Grace Mbuyi');
+  await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done, 14 250 CDF\. Change 5 750 CDF/)).toBeVisible();
+  const cashRcpt = (await prints(till)).at(-1)!;
+  expect(cashRcpt).toContain('Grace Mbuyi'); expect(cashRcpt).toMatch(/Cash received\s*20,000\.00/); expect(cashRcpt).toMatch(/Change\s*5,750\.00/);
 
   // ---- the Admin sees the activity; disabling the till ends its access
   await admin.getByRole('link', { name: 'Activity' }).click();

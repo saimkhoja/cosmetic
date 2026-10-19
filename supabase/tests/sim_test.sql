@@ -531,7 +531,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":true,"barcode":true,"other":true}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
@@ -550,7 +550,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false}'::jsonb, 'saving settings without the switches turns them off');
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false}'::jsonb, 'saving settings without the switches turns them off');
 reset role;
 
 -- ===== till operators sell directly when the Admin turns it on =====
@@ -576,6 +576,21 @@ select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-00
 reset role;
 select t.ok((select cashier_name from invoices where id = t.get('inv10')::uuid) = 'Grace Mbuyi', 'the invoice names the till operator as the cashier');
 select t.ok(exists (select 1 from audit_log where action like 'Invoice GOM-T1-000060 for Maman Rose, cash, % CDF'), 'the activity log writes amounts in CDF');
+-- cash received and change (the switch only changes the till screen and the receipt)
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"till_sells":true,"cash_change":true}'::jsonb));
+select t.ok((select (features->>'cash_change')::boolean from settings), 'the Admin turns on the cash received switch');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.put('inv11', gen_random_uuid()::text);
+select public.submit_invoice(jsonb_build_object('id', t.get('inv11'), 'no', 'GOM-T1-000063', 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Maman Rose', 'tendered', t.get('lot_price')::bigint + 440,
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', t.get('lot_price')::bigint))));
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000064","device_id":"%s","customer":"A","tendered":10,"rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":%s}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion'), t.get('lot_price')),
+  'less than the total', 'cash received below the total is refused');
+reset role;
+select t.ok((select tendered - total || '/' || change from invoices where id = t.get('inv11')::uuid) = '440/440', 'the invoice keeps the cash received and the change');
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));

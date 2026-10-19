@@ -231,6 +231,10 @@ main.posmain{padding:14px;max-width:none}
 .paybtn:disabled{opacity:.4;cursor:not-allowed}
 .paybtn.cash{background:#067647}
 .disc-btn{margin-bottom:10px}
+.cashin{margin:0 0 10px}.cashin .field{margin-bottom:8px}.cashin .input{font-size:20px;font-weight:800}
+.cnotes{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.cnotes button{flex:1 1 auto;min-height:40px;border-radius:10px;border:1.5px solid var(--line);background:var(--card);color:var(--text);font-weight:800;font-size:13.5px;padding:0 8px}
+.cnotes button.on{background:var(--btn);color:#fff;border-color:var(--btn)}
+.cashin .row{font-size:16px!important;font-weight:800!important}.cashin .row b{font-size:20px}.cashin .row.bad{color:var(--bad)}
 .paytotal{background:var(--top);color:#fff;border-radius:16px;padding:16px;text-align:center;margin-bottom:16px}
 .paytotal small{display:block;opacity:.85;font-weight:700}
 .paytotal b{font-size:40px;font-weight:900;letter-spacing:-.02em}

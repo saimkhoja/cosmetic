@@ -59,3 +59,8 @@ export function hotSort<T extends Pick<Product, 'id' | 'name'>>(list: T[], ranks
 export function hotSet(ranks?: Rank[] | null) {
   return new Set((ranks ?? []).filter((x) => x.in_season && Number(x.sold_30) > 0).sort((a, b) => Number(b.sold_30) - Number(a.sold_30)).slice(0, 12).map((x) => x.product_id));
 }
+/** Quick amounts for the cash received: the exact total, then the next round 1 000, 5 000 and 10 000 CDF above it. */
+export function cashNotes(total: number) {
+  const up = (n: number) => Math.ceil(total / n) * n;
+  return [...new Set([total, up(1000), up(5000), up(10000)])].filter((n) => n >= total && n > 0);
+}

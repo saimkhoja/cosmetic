@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
-import { ctnTxt, hotSort, pcValue, takeLocal, totals, unitsOf } from './units';
+import { cashNotes, ctnTxt, hotSort, pcValue, takeLocal, totals, unitsOf } from './units';
 import { custName, findByCode, itemProblem } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
@@ -101,5 +101,11 @@ describe('supermarket', () => {
     const r = impParse(rows, [], [], ['6001234567890']);
     expect(r.map((x) => x.status)).toEqual(['skip', 'ok', 'skip', 'bad']);
     expect(r[1].barcode).toBe('60099999');
+  });
+});
+describe('cash received', () => {
+  it('offers the exact total and the next round notes', () => {
+    expect(cashNotes(12550)).toEqual([12550, 13000, 15000, 20000]);
+    expect(cashNotes(5000)).toEqual([5000, 10000]);
   });
 });
