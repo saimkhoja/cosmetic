@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { rpc, rows, supabase } from '../lib/supabase';
-import { cartPriced, hotSet, hotSort, takeLocal, totals, unitLabel, unitNote, unitsOf, type CartLine } from '../lib/units';
+import { cartPriced, cashNotes, hotSet, hotSort, takeLocal, totals, unitLabel, unitNote, unitsOf, type CartLine } from '../lib/units';
 import { catIcon, custName, findByCode } from '../lib/items';
 import { fCDF, tm, toCDF, today } from '../lib/format';
 import { orderRef, orderSlipHTML, printHTML, receiptHTML, saleCopies } from '../lib/print';
@@ -66,6 +66,7 @@ export default function Till() {
   const [customer, setCustomer] = useState(''), [custDraft, setCustDraft] = useState(''), [editing, setEditing] = useState<SaleOrder | null>(null), [tickets, setTickets] = useState(false);
   const [pick, setPick] = useState<{ pid: string; idx: number } | null>(null), [check, setCheck] = useState(false), [disc, setDisc] = useState(false), [reject, setReject] = useState<SaleOrder | null>(null);
   const [last, setLast] = useState<Invoice | null>(null), [view, setView] = useState<Invoice | null>(null), [outbox, setOutbox] = useState<OutboxEntry[]>([]), [flash, setFlash] = useState(false);
+  const [cash, setCash] = useState(''), [cashFor, setCashFor] = useState<{ total: number; go: (tendered: number) => Promise<boolean>; cancel: () => void } | null>(null);
   const busy = useRef(false), scan = useRef<HTMLInputElement>(null), custIn = useRef<HTMLInputElement>(null);
   const startOfDay = useMemo(() => new Date(today() + 'T00:00:00').toISOString(), []);
   const orders = useOrders(isAdmin ? 'pending' : 'all', isAdmin ? undefined : startOfDay);
@@ -102,7 +103,7 @@ export default function Till() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, loadOutbox, shopId]);
   // switches from Settings: walk-in sales without a name, and barcode scanning
-  const optCust = !!snap?.settings.features?.customer_optional, codes = !!snap?.settings.features?.barcode, ready = !!customer || optCust, sells = canSell(isAdmin, snap);
+  const optCust = !!snap?.settings.features?.customer_optional, codes = !!snap?.settings.features?.barcode, ready = !!customer || optCust, sells = canSell(isAdmin, snap), cashIn = !!snap?.settings.features?.cash_change;
   useEffect(() => { if (!customer) setTimeout(() => (optCust ? scan : custIn).current?.focus(), 50); }, [customer, optCust]);
 
   const byId = useMemo(() => new Map((snap?.products ?? []).map((p) => [p.id, p])), [snap]);
@@ -123,7 +124,7 @@ export default function Till() {
   const orderTotal = (o: SaleOrder) => o.items.reduce((s, it) => { const p = byId.get(it.product_id); if (!p) return s; const u = unitsOf(p).find((x) => (it.piece ? !!x.piece : !x.piece && x.mult === it.mult)); return s + (u ? toCDF(u.usd, rate) * it.qty : 0); }, 0);
 
   const startCustomer = () => { const c = custDraft.trim().replace(/\s+/g, ' ').slice(0, 60); if (!c) { if (optCust) scan.current?.focus(); else toast('Type the customer name, then press Enter', 'warn'); return; } setCustomer(c); setCustDraft(''); setTimeout(() => scan.current?.focus(), 50); };
-  const resetSale = () => { setCart([]); setDp(0); setCustomer(''); };
+  const resetSale = () => { setCart([]); setDp(0); setCustomer(''); setCash(''); };
   const add = (pid: string, ui?: number) => {
     if (!ready) { toast('Type the customer name first', 'warn'); custIn.current?.focus(); return; }
     const p = byId.get(pid); if (!p) return;
@@ -173,34 +174,43 @@ export default function Till() {
 
   // shop admin: a sale is saved on the device, printed, then sent to the server (works offline too).
   // Approving an order is the same: the invoice prints here and the stock goes down.
-  const sell = async (lines: CartLine[], disc: number, cust: string, order: SaleOrder | null) => {
+  // with "Enter the cash received" on, tendered is what the customer handed over; otherwise the exact total
+  const sell = async (lines: CartLine[], disc: number, cust: string, order: SaleOrder | null, tendered?: number) => {
     if (busy.current || !snap || (!cust && !optCust)) return false;
     if (!dev) { toast('Connect to the internet once to register this till', 'bad'); return false; }
     const pr = cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate);
     if (!pr.length) return false;
     busy.current = true;
     try {
-      const S = totals(pr, disc, vat);
+      const S = totals(pr, disc, vat), tend = tendered ?? S.total;
+      if (tend < S.total) { toast(`Cash received is less than the total, ${fCDF(S.total)}`, 'warn'); return false; }
       const no = await nextInvoiceNo(dev), id = crypto.randomUUID(), t = new Date().toISOString();
       const items = pr.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
-      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: disc, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: S.total, change: 0, printed: 2, items, edits: [], synced: false,
+      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: disc, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, printed: 2, items, edits: [], synced: false,
         customer: cust, order_id: order?.id ?? null, prepared_by_name: order?.created_by_name ?? null };
-      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, disc_pct: disc, tendered: S.total, customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, mult, piece, qty, price }) => ({ product_id, mult, piece, qty, price })) } });
+      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, disc_pct: disc, tendered: tend, customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, mult, piece, qty, price }) => ({ product_id, mult, piece, qty, price })) } });
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
-      printHTML(saleCopies(inv, snap.settings.company, snap.shop));
+      printHTML(saleCopies(inv, snap.settings.company, snap.shop, cashIn));
       setLast(inv);
-      toast(order ? `Order ${orderRef(order.id)} for ${custName(cust)} approved as ${no}, ${fCDF(S.total)}. Printing the invoice.` : `Sale ${no} for ${custName(cust)} done, ${fCDF(S.total)}. Printing.`);
+      toast(order ? `Order ${orderRef(order.id)} for ${custName(cust)} approved as ${no}, ${fCDF(S.total)}.${inv.change > 0 ? ` Change ${fCDF(inv.change)}.` : ''} Printing the invoice.` : `Sale ${no} for ${custName(cust)} done, ${fCDF(S.total)}.${inv.change > 0 ? ` Change ${fCDF(inv.change)}.` : ''} Printing.`);
       void syncOutbox();
       return true;
     } finally { busy.current = false; }
   };
-  const pay = async () => { if (await sell(cart, dp, customer, null)) resetSale(); };
+  const received = Math.round(Number(cash) || 0), short = cashIn && received < T.total;
+  const pay = async () => { if (short) return; if (await sell(cart, dp, customer, null, cashIn ? received : undefined)) resetSale(); };
+  // approving an order: with the switch on, the cash received is asked first
+  const sellOrder = async (lines: CartLine[], d: number, o: SaleOrder) => {
+    if (!cashIn) return sell(lines, d, o.customer, o);
+    const total = totals(cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate), d, vat).total;
+    return new Promise<boolean>((done) => setCashFor({ total, go: async (t) => { const ok = await sell(lines, d, o.customer, o, t); if (ok) done(true); return ok; }, cancel: () => done(false) }));
+  };
   const approve = async (o: SaleOrder) => {
     const { lines, missing } = orderLines(o);
     if (missing.length) { toast(`Open the order with Edit: ${missing.join(', ')} can no longer be sold this way`, 'warn'); setEditing(o); return; }
-    await sell(lines, 0, o.customer, o);
+    await sellOrder(lines, 0, o);
   };
 
   if (!snap) return <div className="card"><Empty i={problem ? 'wifioff' : 'refresh'} t={problem || 'Loading the till'} tall /></div>;
@@ -240,8 +250,9 @@ export default function Till() {
         <div className="row muted"><span>Includes VAT {vat}%</span><span>{fCDF(T.vat)}</span></div>
         <div className="grand"><span>{sells ? 'To pay' : 'Order total'}</span><b>{fCDF(T.total)}</b></div>
         {cart.length ? (isAdmin ? <button className="btn ghost full disc-btn" onClick={() => setDisc(true)}><Icon n="tag" /> {dp ? `Invoice discount ${dp}%, change` : 'Discount on this invoice'}</button> : null) : null}
+        {sells && cashIn && cart.length ? <CashIn total={T.total} value={cash} onChange={setCash} onEnter={() => void pay()} /> : null}
         <div className="paybtns one">{sells
-          ? <button className="paybtn cash" onClick={() => void pay()} disabled={!cart.length || !ready}><Icon n="cash" /> Take cash and print</button>
+          ? <button className="paybtn cash" onClick={() => void pay()} disabled={!cart.length || !ready || short}><Icon n="cash" /> Take cash and print</button>
           : <button className="paybtn" onClick={() => void sendOrder()} disabled={!cart.length || !ready}><Icon n="check" /> Send to shop admin for approval</button>}</div>
         {sells && last ? <div className="row muted" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13.5 }}><span className="chip ok"><Icon n="check" /> Last sale</span><span style={{ flex: 1 }}><b>{last.no}</b>, <span style={{ whiteSpace: 'nowrap' }}>{fCDF(last.total)}</span></span><button className="btn sm" onClick={() => setView(last)}><Icon n="eye" /> View</button></div> : null}
         {!sells && (myUnsent.length || myOrders.length) ? <div className="myorders"><div className="code" style={{ margin: '10px 0 4px', fontWeight: 800 }}>My orders today</div>
@@ -286,9 +297,10 @@ export default function Till() {
       {check ? <PriceCheck products={snap.products} stock={snap.stock} rate={rate} onClose={() => setCheck(false)} /> : null}
       {disc ? <DiscModal v={dp} onApply={(v) => { setDp(v); setDisc(false); }} onClose={() => setDisc(false)} /> : null}
       {reject ? <RejectModal o={reject} onClose={() => setReject(null)} onDone={() => { if (editing?.id === reject.id) setEditing(null); setReject(null); void orders.refetch(); }} /> : null}
-      {editing ? <OrderEditor o={editing} init={orderLines(editing)} byId={byId} snap={snap} onClose={() => setEditing(null)} onReject={() => { setReject(editing); }} onApprove={async (lines, d) => { if (await sell(lines, d, editing.customer, editing)) setEditing(null); }} /> : null}
+      {editing ? <OrderEditor o={editing} init={orderLines(editing)} byId={byId} snap={snap} onClose={() => setEditing(null)} onReject={() => { setReject(editing); }} onApprove={async (lines, d) => { if (await sellOrder(lines, d, editing)) setEditing(null); }} /> : null}
+      {cashFor ? <CashModal total={cashFor.total} onClose={() => { cashFor.cancel(); setCashFor(null); }} onPay={async (t) => { if (await cashFor.go(t)) setCashFor(null); }} /> : null}
       {tickets ? <TicketsModal products={hotSort(snap.products, snap.ranks)} rate={rate} shopName={snap.shop.name} onClose={() => setTickets(false)} /> : null}
-      {view ? <Modal title={'Invoice ' + view.no} icon="receipt" onClose={() => setView(null)} foot={<button className="btn" onClick={() => setView(null)}>Close</button>}><div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, snap.settings.company, snap.shop, { copy: 'client' }) }} /></Modal> : null}
+      {view ? <Modal title={'Invoice ' + view.no} icon="receipt" onClose={() => setView(null)} foot={<button className="btn" onClick={() => setView(null)}>Close</button>}><div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, snap.settings.company, snap.shop, { copy: 'client', cash: cashIn }) }} /></Modal> : null}
     </>
   );
 }
@@ -314,6 +326,27 @@ function PriceCheck({ products, stock, rate, onClose }: { products: Product[]; s
       {list.length ? <div className="tw"><table className="t"><thead><tr><th>Item</th><th>Unit</th><th className="r">Price</th><th className="r">In shop</th></tr></thead><tbody>
         {list.flatMap((p) => unitsOf(p).map((u, i) => { const s = stock[p.id]?.qty ?? 0; return <tr key={p.id + i}><td>{i === 0 ? <><b>{p.name}</b>{p.is_bundle ? <div className="code">mixed set</div> : null}</> : null}</td><td><span className="uchip">{unitLabel(u)}</span>{u.piece ? <span className="code"> last price</span> : null}</td><td className="r"><b>{fCDF(toCDF(u.usd, rate))}</b></td><td className="r">{i === 0 ? (s < 0 ? Math.abs(s) + ' on order' : s) : ''}</td></tr>; }))}
       </tbody></table></div> : <Empty i="search" t="No item matches" />}
+    </Modal>
+  );
+}
+/** Cash received from the customer, quick amounts and the change to give. */
+function CashIn({ total, value, onChange, onEnter, autoFocus }: { total: number; value: string; onChange: (v: string) => void; onEnter: () => void; autoFocus?: boolean }) {
+  const got = Math.round(Number(value) || 0), change = got - total;
+  return (
+    <div className="cashin">
+      <div className="field"><label htmlFor="cashin">Cash received (CDF)</label><input id="cashin" className="input" type="number" min="0" step="10" inputMode="numeric" autoComplete="off" value={value} autoFocus={autoFocus}
+        onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onEnter(); } }} placeholder={String(total)} /></div>
+      <div className="cnotes">{cashNotes(total).map((n) => <button key={n} type="button" className={got === n ? 'on' : ''} onClick={() => onChange(String(n))}>{n === total ? 'Exact' : fCDF(n)}</button>)}</div>
+      <div id="cashchange" className={`row ${value && change < 0 ? 'bad' : ''}`}><span>{value && change < 0 ? 'Not enough cash' : 'Change to give'}</span><b>{value ? fCDF(Math.abs(change)) : '-'}</b></div>
+    </div>
+  );
+}
+function CashModal({ total, onClose, onPay }: { total: number; onClose: () => void; onPay: (tendered: number) => Promise<void> }) {
+  const [v, setV] = useState(''), [busy, setBusy] = useState(false), got = Math.round(Number(v) || 0);
+  const go = () => { if (got < total || busy) return; setBusy(true); void onPay(got).finally(() => setBusy(false)); };
+  return (
+    <Modal title={`Cash for ${fCDF(total)}`} icon="cash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={got < total || busy} onClick={go}><Icon n="cash" /> Take cash and print</button></>}>
+      <CashIn total={total} value={v} onChange={setV} onEnter={go} autoFocus />
     </Modal>
   );
 }

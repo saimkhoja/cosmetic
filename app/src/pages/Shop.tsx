@@ -81,7 +81,7 @@ export function Invoices() {
   const pending = list.filter((i) => !i.synced).length, edited = list.filter((i) => i.edits?.length).length;
   const dup = async (i: Invoice) => {
     if (!shop || !settings.data) return;
-    try { if (i.synced) await rpc('record_reprint', { p_id: i.id }); printHTML(receiptHTML(i, settings.data.company, shop, { copy: 'client', dup: true })); await refresh('invoices', 'audit'); }
+    try { if (i.synced) await rpc('record_reprint', { p_id: i.id }); printHTML(receiptHTML(i, settings.data.company, shop, { copy: 'client', dup: true, cash: !!settings.data.features?.cash_change })); await refresh('invoices', 'audit'); }
     catch (e) { toast((e as Error).message, 'bad'); }
   };
   return (
@@ -103,7 +103,7 @@ export function Invoices() {
           <td><div className="act"><button title="View invoice" onClick={() => setView(i)}><Icon n="eye" /></button>{i.synced ? <button title="Edit invoice" onClick={() => setEdit(i)}><Icon n="edit" /></button> : null}<button title="Print duplicate" onClick={() => void dup(i)}><Icon n="printer" /></button>{i.synced ? <button title="Delete invoice" onClick={() => setDel(i)}><Icon n="trash" /></button> : null}</div></td></tr>)}
       </tbody></table></div> : <Empty i="receipt" t={inv.isLoading ? 'Loading' : 'No invoices for this period'} />}</div>
       {view && shop && settings.data ? <Modal title={'Invoice ' + view.no} icon="receipt" onClose={() => setView(null)} foot={<><button className="btn" onClick={() => setView(null)}>Close</button>{view.synced ? <button className="btn ghost" onClick={() => { setEdit(view); setView(null); }}><Icon n="edit" /> Edit invoice</button> : null}<button className="btn primary" onClick={() => void dup(view)}><Icon n="printer" /> Print duplicate</button></>}>
-        <div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, settings.data.company, shop, { copy: 'client', dup: true }) }} />
+        <div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, settings.data.company, shop, { copy: 'client', dup: true, cash: !!settings.data.features?.cash_change }) }} />
         {view.edits?.length ? <Note i="edit" warn>Edited {view.edits.length} time{view.edits.length > 1 ? 's' : ''}. Last change by {view.edits.at(-1)!.by_name} on {dt(view.edits.at(-1)!.at)}: {view.edits.at(-1)!.reason}</Note> : null}
         {!view.synced ? <Note i="clock" warn>Saved on this device. It will be sent to the server when the internet is available; it can be edited after that.</Note> : null}
       </Modal> : null}

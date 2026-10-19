@@ -19,7 +19,7 @@ const rTime = (t: string) => new Date(t).toLocaleTimeString('en-US', { hour: 'nu
 const NB = 'N.B. Vérifiez vos marchandises avant de sortir du magasin. Les marchandises vendues ne sont ni reprises ni échangées.';
 
 /** Customer invoice in the layout of the shop's paper receipts: company block, boxed invoice number, item lines, boxed total. */
-export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 'client' | 'shop'; dup?: boolean } = {}) {
+export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 'client' | 'shop'; dup?: boolean; cash?: boolean } = {}) {
   const ed = inv.edits && inv.edits.length ? inv.edits[inv.edits.length - 1] : null;
   const tot = (a: string, b: string) => `<tr><td></td><td>${a}</td><td class="r">${b}</td></tr>`;
   const rccm = c.rccm ? (/^rccm/i.test(c.rccm) ? c.rccm : 'RCCM ' + c.rccm) : '';
@@ -32,12 +32,13 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   <tbody>${inv.items.map((it) => `<tr><td colspan="5">${esc(it.name.toUpperCase())}</td></tr><tr><td>${esc((it.piece ? 'piece' : it.unit).toUpperCase())}</td><td class="r">${it.qty}</td><td class="r">${n0(it.price)}</td><td class="r">${inv.disc_pct}</td><td class="r">${n0(it.line)}</td></tr>`).join('')}</tbody></table>
   <table class="rsum"><tr><td class="small"><b>Total Items</b>&nbsp; ${sum(inv.items, (i) => i.qty)}</td><td>Total H.T</td><td class="r">${n2(inv.ht)}</td></tr>${tot(`TVA${inv.vat_rate ? ' ' + inv.vat_rate + '%' : ''}`, n2(inv.vat))}${tot('Remise', n2(inv.disc))}</table>
   <div class="rttc"><b>Total T.T.C - CDF</b><span class="rbox">${n2(inv.total)}</span></div>
+  ${opt.cash || inv.tendered > inv.total ? `<table class="rsum rcash"><tr><td></td><td>Cash received</td><td class="r">${n2(inv.tendered)}</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${n2(inv.change)}</b></td></tr></table>` : ''}
   <div class="rl">Sales Person&nbsp;&nbsp; ${esc(inv.cashier_name)}</div>${inv.prepared_by_name ? `<div class="rl small">Prepared by&nbsp;&nbsp; ${esc(inv.prepared_by_name)}</div>` : ''}
   ${ed ? `<div class="small">Modifiée le ${dt(ed.at)} par ${esc(ed.by_name)}</div>` : ''}
   <div class="rnb">${c.footer ? `<div class="c">${esc(c.footer)}</div>` : ''}${NB}</div></div>`;
 }
-export const saleCopies = (inv: Invoice, c: Company, shop: Shop) =>
-  receiptHTML(inv, c, shop, { copy: 'client' }) + '<div class="pagebreak"></div>' + receiptHTML(inv, c, shop, { copy: 'shop' });
+export const saleCopies = (inv: Invoice, c: Company, shop: Shop, cash = false) =>
+  receiptHTML(inv, c, shop, { copy: 'client', cash }) + '<div class="pagebreak"></div>' + receiptHTML(inv, c, shop, { copy: 'shop', cash });
 
 export function deliveryNoteHTML(d: Delivery, shop: Shop, c: Company, products: Map<string, Product>, showUSD: boolean) {
   const r = d.rate, cdf = (u: number) => Math.round((u * r) / 10) * 10, ed = d.delivery_edits?.length ? [...d.delivery_edits].sort((a, b) => a.at.localeCompare(b.at)).at(-1)! : null;
