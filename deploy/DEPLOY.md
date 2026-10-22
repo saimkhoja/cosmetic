@@ -166,14 +166,29 @@ Each client has **their own Supabase project and their own website**, built from
    - **Enter the cash received**: under "To pay" the cashier types the amount the customer gives (or taps Exact or a round note); the till shows the change to give and won't print until the cash covers the total. The receipt prints "Cash received" and "Change".
    - **Barcode scanning**: a Barcode field in the item form and a `Barcode` column in the Excel template. At the till a USB scanner (it works as a keyboard, no driver needed) scans into the search box: the item goes into the sale as 1 pc, and the unit can be changed in the cart. Price check finds barcodes too.
 
-**Updating every client.** Every Vercel project redeploys by itself when `main` changes. A new migration file has to be run on **each** client's Supabase project (section 1, only the new files), at the same time; back up that client's database first (section 7). The app keeps working on a project that has not run the newest file yet, but the new features stay off there.
+**Updating every client.** Every Vercel project redeploys by itself when `main` changes. A new migration file has to be run on **each** client's Supabase project (section 1, only the new files), at the same time; back up that client's database first (section 8). The app keeps working on a project that has not run the newest file yet, but the new features stay off there.
 
-## 7. Backups and exporting data
+## 7. Going live: clearing the test data
+
+When a client has finished setting up and testing and starts selling for real, `supabase/scripts/reset_go_live.sql` clears the test data.
+
+- **It clears:** invoices, orders, deliveries, goods in, returns, stock requests, upkeep, supplier bills, payments, every voucher, all stock (store and shops), the opening balances, and the registered tills.
+- **It keeps:** items with their prices, cost prices and barcodes, categories, suppliers, ledger names, shops, logins and passwords, settings and the activity log.
+
+It is not a migration and never runs on its own.
+
+1. **Back up** the database (section 8).
+2. On every till, check that the pill at the top shows **nothing waiting to send**.
+3. Supabase → **SQL Editor** → paste the whole file → **Run**. The result at the end must show 0 invoices, 0 vouchers and 0 stock, plus the number of items, logins, shops and suppliers kept.
+4. On **every till PC**, clear SIM's site data once: in Chrome, click the icon left of the address → **Site settings** → **Delete data**. Then sign in again **while online**. The till registers again as T1, T2… and invoices restart at `000001`.
+5. Enter the real starting stock through **Goods in** (or the stock count button in Inventory), and the opening balances (cash, bank, capital, what is owed to each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
+
+## 8. Backups and exporting data
 
 - Supabase Pro takes daily backups (Dashboard → Database → Backups).
 - For your own copy at any time: `supabase db dump --data-only -f sim-backup.sql` from your computer.
 
-## 8. Checking the build yourself
+## 9. Checking the build yourself
 
 ```bash
 supabase/tests/run.sh                    # database rules and functions (needs Docker)
