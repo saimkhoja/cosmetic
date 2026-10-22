@@ -78,7 +78,7 @@ export function Setup() {
       <div className="frow">{fld('company', 'Company name')}{fld('phone', 'Phone')}</div>
       <div className="frow">{fld('address', 'Head office address')}{fld('rccm', 'RCCM number')}</div>
       <div className="frow">{fld('idnat', 'ID NAT')}{fld('nif', 'NIF (tax number)')}</div>
-      <div className="frow">{fld('rate', '1 USD in Congolese Francs', 'number')}{fld('vat', 'VAT (TVA) %', 'number')}</div>
+      <div className="frow">{fld('rate', 'Sales rate: 1 USD in Congolese Francs', 'number')}{fld('vat', 'VAT (TVA) %', 'number')}</div>
       <h3 style={{ marginTop: 8 }}><Icon n="store" /> Shops</h3>
       {shops.map((s, i) => (
         <div className="frow three" key={i}>

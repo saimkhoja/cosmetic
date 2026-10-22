@@ -4,7 +4,7 @@ import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useAudit, useCosts, useLedgers, useProducts, useRefresh, useReport, useSettings, useShops, useStock, useUpkeep, useUsers } from '../data/queries';
 import { invoke, rpc } from '../lib/supabase';
-import { dt, fCDF, fUSD, sum, today } from '../lib/format';
+import { bookRate, dt, fCDF, fUSD, sum, today } from '../lib/format';
 import { UPCATS } from '../lib/items';
 import { Dual, Dual2, Empty, Head, HList, Kpi, Modal, Note, Tile, useAction, useToast } from '../components/ui';
 import { R } from '../components/Layout';
@@ -18,7 +18,7 @@ export function AdminHome() {
   const products = useProducts(), costs = useCosts(true), settings = useSettings(), upkeep = useUpkeep(), stock = useStock(), shops = useShops();
   const rep = useReport(today(), today(), null);
   const [send, setSend] = useState<{ pid?: string; sid?: string } | null>(null);
-  const rate = settings.data?.rate ?? 1, P = (products.data ?? []).filter((p) => p.active);
+  const rate = settings.data?.rate ?? 1, book = bookRate(settings.data), P = (products.data ?? []).filter((p) => p.active);
   const cost = new Map((costs.data ?? []).map((c) => [c.product_id, c.cost_usd]));
   const m = today().slice(0, 7), upM = sum((upkeep.data ?? []).filter((u) => u.date.startsWith(m)), (u) => u.amount_usd);
   const low = P.filter((p) => p.wh_qty <= p.reorder);
@@ -26,11 +26,11 @@ export function AdminHome() {
   const sl = (stock.data ?? []).filter((r) => r.qty <= 5 && byId.has(r.product_id)).sort((a, b) => a.qty - b.qty);
   return (
     <>
-      <Head t="Admin dashboard" s={`Exchange rate today: 1 USD = ${fCDF(rate)}`} />
+      <Head t="Admin dashboard" s={`Sales rate: 1 USD = ${fCDF(rate)} · Internal rate: 1 USD = ${fCDF(book)}`} />
       <div className="kpis">
-        <Kpi i="box" l="Store stock at cost"><Dual usd={sum(P, (p) => (cost.get(p.id) ?? 0) * p.wh_qty)} rate={rate} /></Kpi>
+        <Kpi i="box" l="Store stock at cost"><Dual usd={sum(P, (p) => (cost.get(p.id) ?? 0) * p.wh_qty)} rate={book} /></Kpi>
         <Kpi i="tag" l="Same stock at selling price"><Dual usd={sum(P, (p) => pcValue(p) * p.wh_qty)} rate={rate} /></Kpi>
-        <Kpi i="wallet" l="Upkeep this month" tone="warn"><Dual usd={upM} rate={rate} /></Kpi>
+        <Kpi i="wallet" l="Upkeep this month" tone="warn"><Dual usd={upM} rate={book} /></Kpi>
         <Kpi i="chart" l="All shops, sales today" tone="ok"><Dual2 b={fUSD(rep.data?.total_usd ?? 0)} s={`${fCDF(rep.data?.total ?? 0)} from ${rep.data?.n ?? 0} invoices`} /></Kpi>
       </div>
       <div className="tiles">
@@ -50,7 +50,7 @@ export function Upkeep() {
   const upkeep = useUpkeep(), settings = useSettings(), ledgers = useLedgers(), refresh = useRefresh(), toast = useToast(), a = useAction();
   const [f, setF] = useState({ d: today(), c: UPCATS[0], desc: '', amt: '', cur: 'USD', from: '' });
   const payFrom = (ledgers.data ?? []).filter((l) => l.active && (l.group_code === 'cash' || l.group_code === 'bank'));
-  const rate = settings.data?.rate ?? 1, m = today().slice(0, 7), list = upkeep.data ?? [], month = list.filter((u) => u.date.startsWith(m));
+  const rate = bookRate(settings.data), m = today().slice(0, 7), list = upkeep.data ?? [], month = list.filter((u) => u.date.startsWith(m));
   const byCat = UPCATS.map((c) => ({ name: c, val: sum(month.filter((u) => u.category === c), (u) => u.amount_usd) })).filter((x) => x.val > 0).map((x) => ({ ...x, txt: fUSD(x.val) }));
   const save = () => a.run(async () => { await rpc('add_upkeep', { p_date: f.d, p_category: f.c, p_desc: f.desc, p_amount: Number(f.amt), p_currency: f.cur, p_from: f.from || null }); await refresh('upkeep', 'audit'); setF({ ...f, desc: '', amt: '' }); toast('Expense saved and booked as a payment'); });
   return (
@@ -133,23 +133,25 @@ export function SettingsPage() {
   const settings = useSettings(), shops = useShops(), refresh = useRefresh(), toast = useToast(), a = useAction(), b = useAction();
   const s = settings.data;
   const [f, setF] = useState<Record<string, string> | null>(null);
-  const v = f ?? (s ? { rate: String(s.rate), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
+  const v = f ?? (s ? { rate: String(s.rate), book_rate: String(bookRate(s)), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
   const [shop, setShop] = useState({ name: '', code: '', address: '' });
   if (!v) return <Empty i="refresh" t="Loading" tall />;
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...v, [k]: e.target.value });
   const fld = (k: string, l: string) => <div className="field"><label htmlFor={'s-' + k}>{l}</label><input id={'s-' + k} className="input" maxLength={80} value={v[k]} onChange={set(k)} /></div>;
   const sw = (k: string, l: string) => <label className="switch"><input type="checkbox" id={'s-' + k} checked={!!v[k]} onChange={(e) => setF({ ...v, [k]: e.target.checked ? '1' : '' })} /><span>{l}</span></label>;
   const save = () => a.run(async () => {
-    await rpc('save_settings', { p: { rate: Number(v.rate), vat: Number(v.vat), features: { customer_optional: !!v.customer_optional, barcode: !!v.barcode, till_sells: !!v.till_sells, cash_change: !!v.cash_change }, company: { name: v.name, phone: v.phone, address: v.address, email: v.email, rccm: v.rccm, idnat: v.idnat, nif: v.nif, footer: v.footer } } });
+    await rpc('save_settings', { p: { rate: Number(v.rate), book_rate: Number(v.book_rate), vat: Number(v.vat), features: { customer_optional: !!v.customer_optional, barcode: !!v.barcode, till_sells: !!v.till_sells, cash_change: !!v.cash_change }, company: { name: v.name, phone: v.phone, address: v.address, email: v.email, rccm: v.rccm, idnat: v.idnat, nif: v.nif, footer: v.footer } } });
     await refresh('settings', 'audit'); setF(null); toast('Settings saved');
   });
   const addShop = () => b.run(async () => { await rpc('save_shop', { p: shop }); await refresh('shops', 'stock', 'audit'); setShop({ name: '', code: '', address: '' }); toast('Shop added'); });
   return (
     <>
-      <Head t="Settings" s="Company details appear on every customer invoice. The exchange rate sets every shop price in Francs." />
+      <Head t="Settings" s="Company details appear on every customer invoice. The sales rate sets every shop price in Francs; the internal rate is for suppliers, expenses and cash moves." />
       <div className="cols"><div className="card"><h3><Icon n="exchange" /> Currency and tax</h3>
-        <div className="frow"><div className="field"><label htmlFor="srate">1 USD in Congolese Francs</label><input id="srate" type="number" min="1" className="input" value={v.rate} onChange={set('rate')} /></div><div className="field"><label>VAT (TVA) %</label><input type="number" min="0" max="30" className="input" value={v.vat} onChange={set('vat')} /></div></div>
-        <Note>Shop price = selling price in USD × rate, rounded to the nearest 10 CDF. Changing the rate reprices every shop at once; past invoices keep the rate of their sale. Customer invoices show Francs only.</Note></div>
+        <div className="frow"><div className="field"><label htmlFor="srate">Sales rate (taux de vente): 1 USD in CDF</label><input id="srate" type="number" min="1" className="input" value={v.rate} onChange={set('rate')} /><span className="hint">Items, tickets, tills and invoices</span></div>
+          <div className="field"><label htmlFor="sbook">Internal rate (taux interne): 1 USD in CDF</label><input id="sbook" type="number" min="1" className="input" value={v.book_rate} onChange={set('book_rate')} /><span className="hint">Suppliers, expenses, cash taken from the shops</span></div></div>
+        <div className="frow"><div className="field"><label>VAT (TVA) %</label><input type="number" min="0" max="30" className="input" value={v.vat} onChange={set('vat')} /></div></div>
+        <Note>Shop price = selling price in USD × sales rate, rounded to the nearest 10 CDF. Changing the sales rate reprices every shop at once; past invoices keep the rate of their sale. Supplier bills, payments, expenses and vouchers in Francs use the internal rate unless you type another rate on the entry.</Note></div>
         <div className="card"><h3><Icon n="store" /> Shops</h3><table className="t"><tbody>{(shops.data ?? []).map((x) => <tr key={x.id}><td><b>{x.name}</b><div className="code">{x.code}, {x.address}</div></td></tr>)}</tbody></table>
           <div className="frow" style={{ marginTop: 12 }}><div className="field"><label>New shop name</label><input className="input" maxLength={40} value={shop.name} onChange={(e) => setShop({ ...shop, name: e.target.value })} /></div><div className="field"><label>Short code (3 letters)</label><input className="input" maxLength={3} style={{ textTransform: 'uppercase' }} value={shop.code} onChange={(e) => setShop({ ...shop, code: e.target.value.toUpperCase() })} /></div></div>
           <div className="field"><label>Address</label><input className="input" maxLength={80} value={shop.address} onChange={(e) => setShop({ ...shop, address: e.target.value })} /></div><div className="lerr">{b.err}</div><button className="btn ghost full" disabled={b.busy} onClick={() => void addShop()}><Icon n="plus" /> Add shop</button></div></div>

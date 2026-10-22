@@ -432,6 +432,25 @@ test('a full day in SIM', async ({ browser }) => {
   const cashRcpt = (await prints(till)).at(-1)!;
   expect(cashRcpt).toContain('Grace Mbuyi'); expect(cashRcpt).toMatch(/Cash received\s*20,000\.00/); expect(cashRcpt).toMatch(/Change\s*5,750\.00/);
 
+  // ---- two rates: the internal rate for expenses, the sales rate for item prices (changed from the Items page)
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await expect(admin.locator('#sbook')).toHaveValue('2850');
+  await admin.fill('#sbook', '2950');
+  await admin.getByRole('button', { name: 'Save settings' }).click();
+  await expect(admin.getByText('Settings saved').first()).toBeVisible();
+  await admin.getByRole('link', { name: 'Upkeep' }).click();
+  const amt = admin.locator('.field', { hasText: 'Amount' });
+  await amt.locator('input').fill('29500'); await amt.locator('select').selectOption('FC');
+  await expect(amt).toContainText('= $10.00');                                          // 29 500 / 2 950, the internal rate
+  await admin.getByRole('link', { name: 'Inventory' }).click();
+  await expect(admin.locator('#salesrate')).toContainText('2 850 CDF');
+  await admin.click('#salesrate'); await admin.fill('#srnew', '3000');
+  await admin.getByRole('button', { name: 'Save rate' }).click();
+  await expect(admin.getByText('Sales rate is now 1 USD = 3 000 CDF')).toBeVisible();
+  await expect(admin.locator('tr', { hasText: 'Shea body lotion' })).toContainText('15 000 CDF');   // $5 a pc at 3 000
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await expect(admin.locator('#srate')).toHaveValue('3000'); await expect(admin.locator('#sbook')).toHaveValue('2950');
+
   // ---- the Admin sees the activity; disabling the till ends its access
   await admin.getByRole('link', { name: 'Activity' }).click();
   await expect(admin.getByText(/Invoice GOM-T1-000001 edited/)).toBeVisible();

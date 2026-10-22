@@ -7,7 +7,7 @@ import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useGrns, useLedgers, useProducts, useRefresh, useSettings, useSuppliers } from '../data/queries';
 import { rows, rpc, supabase } from '../lib/supabase';
-import { dt, esc, fCDF, fUSD, ld, sum, today } from '../lib/format';
+import { bookRate, dt, esc, fCDF, fUSD, ld, sum, today } from '../lib/format';
 import { balTxt, bookHTML, printHTML, statementHTML } from '../lib/print';
 import { Dual2, Empty, Head, Kpi, Modal, Note, useAction, useToast } from '../components/ui';
 import type { AccountGroup, Cur, DayBookEntry, Grn, Ledger, Payable, Statement, Supplier } from '../lib/types';
@@ -108,7 +108,7 @@ export function BillModal({ grn, onClose }: { grn?: Grn; onClose: () => void }) 
   const sup0 = grn ? suppliers.data?.find((s) => s.id === grn.supplier_id) : undefined;
   const [f, setF] = useState({ supplier: grn?.supplier_id ?? '', account: '', bill_no: '', bill_date: today(), due: '', amount: '', vat: '', currency: (sup0?.currency ?? 'USD') as Cur, rate: '', narration: '' });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
-  const sup = suppliers.data?.find((s) => s.id === f.supplier), rate = Number(f.rate) || settings.data?.rate || 1;
+  const sup = suppliers.data?.find((s) => s.id === f.supplier), rate = Number(f.rate) || bookRate(settings.data);
   const std = grn ? sum(grn.grn_items, (i) => i.qty * Number(i.std_cost_usd ?? 0)) : 0;
   const amt = Number(f.amount) || 0, amtUsd = f.currency === 'FC' ? amt / rate : amt;
   const due = f.due || (sup && f.bill_date ? ld(new Date(f.bill_date + 'T12:00:00').getTime() + sup.credit_days * 864e5) : '');
@@ -129,7 +129,7 @@ export function BillModal({ grn, onClose }: { grn?: Grn; onClose: () => void }) 
         <div className="field"><label>Due date</label><input type="date" className="input" value={f.due || due} onChange={set('due')} /><span className="hint">{sup ? `${sup.credit_days} days credit` : ''}</span></div></div>
       <div className="frow three"><div className="field"><label>Amount before VAT</label><input id="bamt" className="input" type="number" min="0" step="0.01" value={f.amount} onChange={set('amount')} /></div>
         <div className="field"><label>VAT on the bill</label><input className="input" type="number" min="0" step="0.01" value={f.vat} placeholder="0" onChange={set('vat')} /></div>
-        <div className="field"><label>Currency</label><div style={{ display: 'flex', gap: 6 }}><select className="input" value={f.currency} onChange={set('currency')}><option value="USD">USD</option><option value="FC">CDF</option></select>{f.currency === 'FC' ? <input className="input" type="number" min="1" value={f.rate} placeholder={String(settings.data?.rate ?? '')} onChange={set('rate')} aria-label="Rate" /> : null}</div></div></div>
+        <div className="field"><label>Currency</label><div style={{ display: 'flex', gap: 6 }}><select className="input" value={f.currency} onChange={set('currency')}><option value="USD">USD</option><option value="FC">CDF</option></select>{f.currency === 'FC' ? <input className="input" type="number" min="1" value={f.rate} placeholder={String(bookRate(settings.data))} onChange={set('rate')} aria-label="Rate" /> : null}</div></div></div>
       {grn && amt > 0 ? <Note i={Math.abs(amtUsd - std) > 0.005 ? 'alert' : 'check'} warn={Math.abs(amtUsd - std) > 0.005}>Bill {fUSD(amtUsd)} vs item cost {fUSD(std)}: difference {fUSD(amtUsd - std)}.</Note> : null}
       <div className="field"><label>Narration (optional)</label><input className="input" maxLength={120} value={f.narration} onChange={set('narration')} /></div>
       <div className="lerr">{a.err}</div>
@@ -166,7 +166,7 @@ function Bills() {
 type VLine = { account: string; side: 'Dr' | 'Cr'; amount: string; currency: Cur; rate: string; memo: string };
 function VoucherModal({ type: t0, party, onClose }: { type: string; party?: Payable; onClose: () => void }) {
   const ledgers = useLedgers(), settings = useSettings(), pay = usePayables(), refresh = useRefresh(), toast = useToast(), a = useAction();
-  const L = (ledgers.data ?? []).filter((l) => l.active), rate0 = String(settings.data?.rate ?? '');
+  const L = (ledgers.data ?? []).filter((l) => l.active), rate0 = String(bookRate(settings.data));
   const cash = L.find((l) => l.code === 'CASH_HO');
   const supAcc = party ? (ledgers.data ?? []).find((l) => l.supplier_id === party.id) : undefined;
   const blank = (side: 'Dr' | 'Cr', account = ''): VLine => ({ account, side, amount: '', currency: (L.find((l) => l.id === account)?.currency ?? 'USD'), rate: rate0, memo: '' });
@@ -324,7 +324,7 @@ function LedgerModal({ l, onClose }: { l: Ledger | null; onClose: () => void }) 
       <div className="frow three"><div className="field"><label>Opening balance</label><input id="loa" className="input" type="number" min="0" step="0.01" value={f.oa} placeholder="0" onChange={set('oa')} /></div>
         <div className="field"><label>Side</label><select className="input" value={f.oside} onChange={set('oside')}><option value="Dr">Dr</option><option value="Cr">Cr</option></select></div>
         <div className="field"><label>In</label><select className="input" value={f.ocur} onChange={set('ocur')}><option value="USD">USD</option><option value="FC">CDF</option></select></div></div>
-      {f.ocur === 'FC' ? <div className="field"><label>Rate for the opening balance</label><input className="input" type="number" min="1" value={f.orate} onChange={set('orate')} placeholder="today's rate" /></div> : null}
+      {f.ocur === 'FC' ? <div className="field"><label>Rate for the opening balance</label><input className="input" type="number" min="1" value={f.orate} onChange={set('orate')} placeholder="the internal rate" /></div> : null}
       <Note i="doc">Opening balances are what each account held when the books started: cash in hand, bank, capital, loans. They show in statements and reports only when you choose to include them.</Note>
       {l && !l.system ? <label className="switch"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /><span>Active</span></label> : null}
       <div className="lerr">{a.err || b.err}</div>

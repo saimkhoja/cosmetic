@@ -596,6 +596,31 @@ select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
 reset role;
 
+-- ===== two rates: sales rate for prices and tills, internal rate for suppliers, expenses and vouchers =====
+select t.ok((select book_rate = rate from settings), 'the internal rate starts equal to the sales rate');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings(jsonb_build_object('rate', 2850, 'book_rate', 2900, 'vat', 16, 'company', (select company from settings)));
+select t.ok((select rate || '/' || book_rate from settings) = '2850.00/2900.00', 'settings keep a sales rate and an internal rate');
+select public.save_rate('book', 2950);
+select t.ok((select rate || '/' || book_rate from settings) = '2850.00/2950.00', 'the internal rate changes on its own');
+select t.fails($$select public.save_rate('other', 3000)$$, 'Unknown rate', 'only the sales or the internal rate');
+select t.fails($$select public.save_rate('sales', 0)$$, 'valid exchange rate', 'a rate must be above zero');
+select public.add_upkeep(current_date, 'Transport', 'Fuel paid in Francs', 29500, 'FC', null);
+select t.ok((select amount_usd from upkeep where description = 'Fuel paid in Francs') = 10.00, 'an expense in Francs converts at the internal rate (29 500 / 2 950)');
+select public.enter_bill(jsonb_build_object('supplier_id', t.get('sup'), 'account_id', t.acc('EXP_TRANSPORT'), 'bill_no', 'TR-RATE', 'amount', 5900, 'currency', 'FC'));
+select t.ok((select l.rate from voucher_lines l join vouchers v on v.id = l.voucher_id where l.bill_ref = 'TR-RATE' limit 1) = 2950, 'a supplier bill in Francs uses the internal rate');
+select public.save_rate('sales', 2860);
+select t.ok((select rate || '/' || book_rate from settings) = '2860.00/2950.00', 'the sales rate changes on its own');
+select t.ok(exists (select 1 from audit_log where action = 'Sales rate changed 2850.00 to 2860')
+  and exists (select 1 from audit_log where action = 'Internal rate changed 2900.00 to 2950'), 'each rate change is logged');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails($$select public.save_rate('sales', 3000)$$, 'permission', 'only the Admin changes a rate');
+reset role;
+update settings set rate = 2850, book_rate = 2850;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
