@@ -531,7 +531,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":true,"barcode":true,"other":true}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
@@ -550,7 +550,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false}'::jsonb, 'saving settings without the switches turns them off');
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false}'::jsonb, 'saving settings without the switches turns them off');
 reset role;
 
 -- ===== till operators sell directly when the Admin turns it on =====
@@ -595,6 +595,42 @@ set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
 reset role;
+
+-- ===== payment in USD (switch, off by default) =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('lp', (select (round(price_usd * 2850 / 10) * 10)::bigint::text from products where id = t.get('lotion')::uuid));
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000070","device_id":"%s","customer":"A","paid_usd":20,"rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":%s}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion'), t.get('lp')),
+  'not turned on', 'with the switch off a payment in USD is refused');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"usd_pay":true}'::jsonb));
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('usd1', gen_random_uuid()::text);
+select public.submit_invoice(jsonb_build_object('id', t.get('usd1'), 'no', 'GOM-T2-000070', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Dollar customer',
+  'paid_usd', 20, 'paid_cdf', 0, 'change_usd', 5, 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', t.get('lp')::bigint))));
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000071","device_id":"%s","customer":"A","paid_usd":1,"paid_cdf":100,"rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":%s}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion'), t.get('lp')),
+  'less than the total', 'dollars and Francs below the total are refused');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000072","device_id":"%s","customer":"A","paid_usd":20,"change_usd":21,"rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":%s}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion'), t.get('lp')),
+  'more than the dollars received', 'more dollars back than received is refused');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000073","device_id":"%s","customer":"A","paid_usd":20,"change_usd":1.5,"rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":%s}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion'), t.get('lp')),
+  'whole dollars', 'dollars given back are whole dollars');
+reset role;
+select t.ok((select tendered = 57000 and change = 57000 - total and change_usd = 5 and change_cdf = 57000 - total - 14250 and paid_usd = 20 and paid_cdf = 0
+  from invoices where id = t.get('usd1')::uuid), 'the invoice keeps $20 received, $5 back and the rest of the change in Francs');
+select t.ok((select string_agg(a.currency || ':' || l.side || ':' || l.amount, ',' order by a.currency desc) from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+  where v.source_id = t.get('usd1')::uuid and a.group_code = 'cash')
+  = 'USD:Dr:15.00,FC:' || (case when (select total from invoices where id = t.get('usd1')::uuid) >= 42750 then 'Dr:' else 'Cr:' end) || abs((select total from invoices where id = t.get('usd1')::uuid) - 42750) || '.00',
+  'the books put the $15 kept in Cash USD and the Francs change out of the shop cash');
+select t.ok(t.unbalanced() = 0, 'every voucher still balances');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((select (s->>'collected_usd')::numeric from jsonb_array_elements(public.sales_report(current_date, current_date)->'slips') s) = 15, 'the day end slip shows the dollars collected');
+reset role;
+update settings set features = '{}'::jsonb;
 
 -- ===== two rates: sales rate for prices and tills, internal rate for suppliers, expenses and vouchers =====
 select t.ok((select book_rate = rate from settings), 'the internal rate starts equal to the sales rate');

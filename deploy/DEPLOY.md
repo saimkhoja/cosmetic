@@ -33,8 +33,9 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    11. `supabase/migrations/20261019000001_till_sells.sql` (a third switch: till operators sell directly, without the shop admin's approval; the activity log writes amounts in CDF)
    12. `supabase/migrations/20261020000001_cash_change.sql` (a fourth switch: the cashier enters the cash received; the till shows the change and the receipt prints both)
    13. `supabase/migrations/20261022000001_two_rates.sql` (two exchange rates: the sales rate for prices, tickets and tills, and the internal rate for suppliers, expenses and vouchers; the internal rate starts equal to today's rate)
+   14. `supabase/migrations/20261023000001_usd_payment.sql` (a fifth switch: the till accepts payment in USD, CDF or both; change in CDF or whole dollars plus CDF; the day end slip shows Collected USD)
 
-   **Already running SIM?** Run only the files you have not run yet, in order (for example only 13). Run it **before** the new app goes live. They keep your data:
+   **Already running SIM?** Run only the files you have not run yet, in order (for example only 14). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
@@ -165,6 +166,7 @@ Each client has **their own Supabase project and their own website**, built from
    - **Customer name optional**: walk-in sales and orders without typing a name. The invoice then has no Client line, and lists show "Walk-in".
    - **Till operators sell directly**: the till operator takes the cash and prints the invoice without the shop admin approving an order. Only the shop admin gives discounts; the invoice names the till operator as the Sales Person.
    - **Enter the cash received**: under "To pay" the cashier types the amount the customer gives (or taps Exact or a round note); the till shows the change to give and won't print until the cash covers the total. The receipt prints "Cash received" and "Change".
+   - **Accept payment in USD (and CDF)**: the till shows what is due in USD at the sales rate; the cashier enters the dollars and/or Francs received (or taps a note), sees what is still due or the change, and can give whole dollars back with the rest in CDF. The receipt shows Paid USD, Paid CDF, the rate and the change; the dollars go to the shop's "Cash USD" ledger and the day end slip shows Collected USD and Collected CDF.
    - **Barcode scanning**: a Barcode field in the item form and a `Barcode` column in the Excel template. At the till a USB scanner (it works as a keyboard, no driver needed) scans into the search box: the item goes into the sale as 1 pc, and the unit can be changed in the cart. Price check finds barcodes too.
 
 **Updating every client.** Every Vercel project redeploys by itself when `main` changes. A new migration file has to be run on **each** client's Supabase project (section 1, only the new files), at the same time; back up that client's database first (section 8). The app keeps working on a project that has not run the newest file yet, but the new features stay off there.

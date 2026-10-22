@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
-import { cashNotes, ctnTxt, hotSort, pcValue, takeLocal, totals, unitsOf } from './units';
+import { cashNotes, ctnTxt, hotSort, payment, pcValue, takeLocal, totals, unitsOf, usdNotes } from './units';
 import { custName, findByCode, itemProblem } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
@@ -108,4 +108,25 @@ describe('cash received', () => {
     expect(cashNotes(12550)).toEqual([12550, 13000, 15000, 20000]);
     expect(cashNotes(5000)).toEqual([5000, 10000]);
   });
+});
+describe('payment in USD and CDF', () => {
+  it('converts dollars at the sale rate and gives change in Francs', () => {
+    const p = payment(40000, 2850, 20, '', false);
+    expect([p.value, p.change, p.short, p.changeUsd, p.changeCdf, p.maxDollars]).toEqual([57000, 17000, 0, 0, 17000, 5]);
+    expect(p.pay).toEqual({ tendered: 57000, paid_usd: 20, paid_cdf: 0, change_usd: 0 });
+  });
+  it('gives whole dollars back and the rest in Francs', () => {
+    const p = payment(40000, 2850, 20, 0, true);
+    expect([p.changeUsd, p.changeCdf, p.pay.change_usd]).toEqual([5, 2750, 5]);
+  });
+  it('mixes dollars and Francs, and says what is still due', () => {
+    expect(payment(40000, 2850, 10, 11500).change).toBe(0);
+    expect(payment(40000, 2850, 10, 5000).short).toBe(6500);
+    expect(payment(40000, 2850, 0, 0).due).toBe(14.04);
+  });
+  it('never gives back more dollars than were received', () => {
+    expect(payment(1000, 2850, 0, 20000, true).changeUsd).toBe(0);
+    expect(payment(1000, 2850, 2, 20000, true).changeUsd).toBe(2);
+  });
+  it('offers the USD notes that cover what is due', () => { expect(usdNotes(14.04)).toEqual([20, 50, 100]); expect(usdNotes(0.4)).toEqual([1, 5, 10]); });
 });

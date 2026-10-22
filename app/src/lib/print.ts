@@ -32,7 +32,8 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   <tbody>${inv.items.map((it) => `<tr><td colspan="5">${esc(it.name.toUpperCase())}</td></tr><tr><td>${esc((it.piece ? 'piece' : it.unit).toUpperCase())}</td><td class="r">${it.qty}</td><td class="r">${n0(it.price)}</td><td class="r">${inv.disc_pct}</td><td class="r">${n0(it.line)}</td></tr>`).join('')}</tbody></table>
   <table class="rsum"><tr><td class="small"><b>Total Items</b>&nbsp; ${sum(inv.items, (i) => i.qty)}</td><td>Total H.T</td><td class="r">${n2(inv.ht)}</td></tr>${tot(`TVA${inv.vat_rate ? ' ' + inv.vat_rate + '%' : ''}`, n2(inv.vat))}${tot('Remise', n2(inv.disc))}</table>
   <div class="rttc"><b>Total T.T.C - CDF</b><span class="rbox">${n2(inv.total)}</span></div>
-  ${opt.cash || inv.tendered > inv.total ? `<table class="rsum rcash"><tr><td></td><td>Cash received</td><td class="r">${n2(inv.tendered)}</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${n2(inv.change)}</b></td></tr></table>` : ''}
+  ${inv.paid_usd ? `<table class="rsum rcash"><tr><td></td><td>Paid USD</td><td class="r">${n2(inv.paid_usd)}</td></tr><tr><td></td><td class="small">= CDF</td><td class="r small">${n2(Math.round(inv.paid_usd * inv.rate))}</td></tr>${inv.paid_cdf ? `<tr><td></td><td>Paid CDF</td><td class="r">${n2(inv.paid_cdf)}</td></tr>` : ''}<tr><td></td><td class="small">Rate</td><td class="r small">1 USD = ${n0(inv.rate)} CDF</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${inv.change_usd ? `$${inv.change_usd} + ${n2(inv.change_cdf ?? 0)} CDF` : n2(inv.change)}</b></td></tr></table>`
+    : opt.cash || inv.tendered > inv.total ? `<table class="rsum rcash"><tr><td></td><td>Cash received</td><td class="r">${n2(inv.tendered)}</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${n2(inv.change)}</b></td></tr></table>` : ''}
   <div class="rl">Sales Person&nbsp;&nbsp; ${esc(inv.cashier_name)}</div>${inv.prepared_by_name ? `<div class="rl small">Prepared by&nbsp;&nbsp; ${esc(inv.prepared_by_name)}</div>` : ''}
   ${ed ? `<div class="small">Modifiée le ${dt(ed.at)} par ${esc(ed.by_name)}</div>` : ''}
   <div class="rnb">${c.footer ? `<div class="c">${esc(c.footer)}</div>` : ''}${NB}</div></div>`;
@@ -52,20 +53,21 @@ export function deliveryNoteHTML(d: Delivery, shop: Shop, c: Company, products: 
   <div style="display:flex;justify-content:space-between;margin-top:26px;gap:20px"><div>Sent by: ${esc(d.created_by_name)}<br><br>Signature ____________</div><div>Received by (shop):${d.status === 'received' ? ` ${esc(d.received_by_name)}, ${dt(d.received_at!)}${d.received_note ? `<br>Note: ${esc(d.received_note)}` : ''}` : ''}<br><br>Signature ____________</div></div></div>`;
 }
 
-export interface Slip { shop_name: string; n: number; value_fc: number; value_usd: number; collected: number; returned: number }
-/** Day end slip in the shop's shift end format. Payments are CDF only, so USD lines are 0. */
+export interface Slip { shop_name: string; n: number; value_fc: number; value_usd: number; collected: number; returned: number; collected_usd?: number; collected_cdf?: number }
+/** Day end slip in the shop's shift end format. Collected USD is what was paid in dollars (when USD payment is on); returns are in CDF. */
 export function shiftSlipHTML(s: Slip, user: string, day: string, rate: number) {
   const d = new Date(), isToday = day === today();
   const ddmm = day.slice(8, 10) + '-' + day.slice(5, 7) + '-' + day.slice(0, 4);
   const when = isToday ? `${ddmm} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}` : ddmm;
   const u3 = (n: number) => (Math.round(n * 1000) / 1000).toFixed(3), fc = (n: number) => String(Math.round(n));
   const row = (a: string, b: string | number) => `<tr><td style="white-space:nowrap">${a}</td><td style="white-space:nowrap">: ${b}</td></tr>`;
+  const cu = Number(s.collected_usd ?? 0), cc = Number(s.collected_cdf ?? s.collected);
   const hr = '<tr><td colspan="2"><hr></td></tr>', bold = (a: string, b: string) => row(a, b).replace('<tr>', '<tr style="font-weight:700;font-size:13.5px">');
   return `<div class="receipt slip"><div class="c" style="font-size:19px;font-weight:700;letter-spacing:.04em;margin:4px 0 6px">Shift End Report</div><table>${hr}
   ${row('Date', when)}${row('User', esc(user))}${row('Shop', esc(s.shop_name))}${row('TAUX', fc(rate))}${hr}
   ${row('Total Invoice', s.n)}${row('Invoice Value USD', u3(s.value_usd))}${row('Invoice Value CDF', fc(s.value_fc))}${hr}
-  ${row('Collected USD', u3(0))}${row('Collected CDF', fc(s.collected))}${row('Return USD', u3(0))}${row('Return CDF', fc(s.returned))}${hr}
-  ${bold('Balance USD', u3(0))}${bold('Balance CDF', fc(s.collected - s.returned))}</table></div>`;
+  ${row('Collected USD', u3(cu))}${row('Collected CDF', fc(cc))}${row('Return USD', u3(0))}${row('Return CDF', fc(s.returned))}${hr}
+  ${bold('Balance USD', u3(cu))}${bold('Balance CDF', fc(cc - s.returned))}</table></div>`;
 }
 
 export interface Report {

@@ -431,6 +431,21 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done, 14 250 CDF\. Change 5 750 CDF/)).toBeVisible();
   const cashRcpt = (await prints(till)).at(-1)!;
   expect(cashRcpt).toContain('Grace Mbuyi'); expect(cashRcpt).toMatch(/Cash received\s*20,000\.00/); expect(cashRcpt).toMatch(/Change\s*5,750\.00/);
+  // ---- payment in USD: $20 for 14 250 CDF at 2 850, change given as whole dollars
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await admin.check('#s-usd_pay');
+  await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
+  await till.goto('/till');
+  await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
+  await expect(till.locator('#usddue')).toHaveText('$5.00');                                     // 14 250 / 2 850
+  await till.fill('#cashusd', '20');
+  await expect(till.locator('#cashchange')).toContainText('42 750 CDF');                         // 57 000 - 14 250
+  await till.click('#dollarsback');
+  await expect(till.locator('#cashchange')).toContainText('$15 + 0 CDF');
+  await till.getByRole('button', { name: 'Take cash and print' }).click();
+  await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done, 14 250 CDF\. Change \$15 \+ 0 CDF/)).toBeVisible();
+  const usdRcpt = (await prints(till)).at(-1)!;
+  expect(usdRcpt).toMatch(/Paid USD\s*20\.00/); expect(usdRcpt).toMatch(/Change\s*\$15 \+ 0\.00/); expect(usdRcpt).toContain('1 USD = 2850 CDF');
 
   // ---- two rates: the internal rate for expenses, the sales rate for item prices (changed from the Items page)
   await admin.getByRole('link', { name: 'Settings' }).click();

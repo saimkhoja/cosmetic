@@ -22,7 +22,7 @@ export default function Reports() {
     if (single) {
       // day end report: one slip per shop (all shops plus a total for the Admin)
       const slips = r.slips.map((s) => shiftSlipHTML(s, profile!.username, from, settings.data?.rate ?? 0));
-      if (r.slips.length > 1) slips.push(shiftSlipHTML({ shop_name: 'All shops', n: r.n, value_fc: r.total, value_usd: r.total_usd, collected: r.slips.reduce((a, s) => a + s.collected, 0), returned: r.slips.reduce((a, s) => a + s.returned, 0) }, profile!.username, from, settings.data?.rate ?? 0));
+      if (r.slips.length > 1) slips.push(shiftSlipHTML({ shop_name: 'All shops', n: r.n, value_fc: r.total, value_usd: r.total_usd, collected: r.slips.reduce((a, s) => a + s.collected, 0), returned: r.slips.reduce((a, s) => a + s.returned, 0), collected_usd: r.slips.reduce((a, s) => a + Number(s.collected_usd ?? 0), 0), collected_cdf: r.slips.reduce((a, s) => a + Number(s.collected_cdf ?? s.collected), 0) }, profile!.username, from, settings.data?.rate ?? 0));
       const html = slips.join('<div class="pagebreak"></div>');
       setDoc({ title: 'Day end report', html, slip: true }); setTimeout(() => printHTML(html), 400);
     } else {
