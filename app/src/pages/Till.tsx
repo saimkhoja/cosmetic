@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { rpc, rows, supabase } from '../lib/supabase';
-import { cartPriced, cashNotes, hotSet, hotSort, takeLocal, totals, unitLabel, unitNote, unitsOf, type CartLine } from '../lib/units';
+import { cartPriced, cashNotes, hotSet, hotSort, payment, takeLocal, totals, unitLabel, unitNote, unitsOf, usdNotes, type CartLine, type PayIn } from '../lib/units';
 import { catIcon, custName, findByCode } from '../lib/items';
-import { fCDF, tm, toCDF, today } from '../lib/format';
+import { fCDF, fUSD, tm, toCDF, today } from '../lib/format';
 import { orderRef, orderSlipHTML, printHTML, receiptHTML, saleCopies } from '../lib/print';
 import { Empty, Modal, Note, useAction, useToast } from '../components/ui';
 import { TicketsModal } from '../components/Tickets';
@@ -66,7 +66,7 @@ export default function Till() {
   const [customer, setCustomer] = useState(''), [custDraft, setCustDraft] = useState(''), [editing, setEditing] = useState<SaleOrder | null>(null), [tickets, setTickets] = useState(false);
   const [pick, setPick] = useState<{ pid: string; idx: number } | null>(null), [check, setCheck] = useState(false), [disc, setDisc] = useState(false), [reject, setReject] = useState<SaleOrder | null>(null);
   const [last, setLast] = useState<Invoice | null>(null), [view, setView] = useState<Invoice | null>(null), [outbox, setOutbox] = useState<OutboxEntry[]>([]), [flash, setFlash] = useState(false);
-  const [cash, setCash] = useState(''), [cashFor, setCashFor] = useState<{ total: number; go: (tendered: number) => Promise<boolean>; cancel: () => void } | null>(null);
+  const [cash, setCash] = useState(''), [cashUsd, setCashUsd] = useState(''), [back, setBack] = useState(false), [cashFor, setCashFor] = useState<{ total: number; go: (pay: PayIn) => Promise<boolean>; cancel: () => void } | null>(null);
   const busy = useRef(false), scan = useRef<HTMLInputElement>(null), custIn = useRef<HTMLInputElement>(null);
   const startOfDay = useMemo(() => new Date(today() + 'T00:00:00').toISOString(), []);
   const orders = useOrders(isAdmin ? 'pending' : 'all', isAdmin ? undefined : startOfDay);
@@ -103,7 +103,7 @@ export default function Till() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, loadOutbox, shopId]);
   // switches from Settings: walk-in sales without a name, and barcode scanning
-  const optCust = !!snap?.settings.features?.customer_optional, codes = !!snap?.settings.features?.barcode, ready = !!customer || optCust, sells = canSell(isAdmin, snap), cashIn = !!snap?.settings.features?.cash_change;
+  const optCust = !!snap?.settings.features?.customer_optional, codes = !!snap?.settings.features?.barcode, ready = !!customer || optCust, sells = canSell(isAdmin, snap), cashIn = !!snap?.settings.features?.cash_change, usdPay = !!snap?.settings.features?.usd_pay, cashStep = cashIn || usdPay;
   useEffect(() => { if (!customer) setTimeout(() => (optCust ? scan : custIn).current?.focus(), 50); }, [customer, optCust]);
 
   const byId = useMemo(() => new Map((snap?.products ?? []).map((p) => [p.id, p])), [snap]);
@@ -124,7 +124,7 @@ export default function Till() {
   const orderTotal = (o: SaleOrder) => o.items.reduce((s, it) => { const p = byId.get(it.product_id); if (!p) return s; const u = unitsOf(p).find((x) => (it.piece ? !!x.piece : !x.piece && x.mult === it.mult)); return s + (u ? toCDF(u.usd, rate) * it.qty : 0); }, 0);
 
   const startCustomer = () => { const c = custDraft.trim().replace(/\s+/g, ' ').slice(0, 60); if (!c) { if (optCust) scan.current?.focus(); else toast('Type the customer name, then press Enter', 'warn'); return; } setCustomer(c); setCustDraft(''); setTimeout(() => scan.current?.focus(), 50); };
-  const resetSale = () => { setCart([]); setDp(0); setCustomer(''); setCash(''); };
+  const resetSale = () => { setCart([]); setDp(0); setCustomer(''); setCash(''); setCashUsd(''); setBack(false); };
   const add = (pid: string, ui?: number) => {
     if (!ready) { toast('Type the customer name first', 'warn'); custIn.current?.focus(); return; }
     const p = byId.get(pid); if (!p) return;
@@ -174,36 +174,36 @@ export default function Till() {
 
   // shop admin: a sale is saved on the device, printed, then sent to the server (works offline too).
   // Approving an order is the same: the invoice prints here and the stock goes down.
-  // with "Enter the cash received" on, tendered is what the customer handed over; otherwise the exact total
-  const sell = async (lines: CartLine[], disc: number, cust: string, order: SaleOrder | null, tendered?: number) => {
+  // with the cash step on, pay is what the customer handed over (Francs and maybe dollars); otherwise the exact total in Francs
+  const sell = async (lines: CartLine[], disc: number, cust: string, order: SaleOrder | null, pay?: PayIn) => {
     if (busy.current || !snap || (!cust && !optCust)) return false;
     if (!dev) { toast('Connect to the internet once to register this till', 'bad'); return false; }
     const pr = cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate);
     if (!pr.length) return false;
     busy.current = true;
     try {
-      const S = totals(pr, disc, vat), tend = tendered ?? S.total;
+      const S = totals(pr, disc, vat), tend = pay?.tendered ?? S.total, usd = pay && pay.paid_usd > 0 ? pay : null;
       if (tend < S.total) { toast(`Cash received is less than the total, ${fCDF(S.total)}`, 'warn'); return false; }
       const no = await nextInvoiceNo(dev), id = crypto.randomUUID(), t = new Date().toISOString();
       const items = pr.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
-      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: disc, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, printed: 2, items, edits: [], synced: false,
+      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: disc, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, paid_usd: usd?.paid_usd ?? 0, paid_cdf: usd ? usd.paid_cdf : tend, change_usd: usd?.change_usd ?? 0, change_cdf: tend - S.total - Math.round((usd?.change_usd ?? 0) * rate), printed: 2, items, edits: [], synced: false,
         customer: cust, order_id: order?.id ?? null, prepared_by_name: order?.created_by_name ?? null };
-      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, disc_pct: disc, tendered: tend, customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, mult, piece, qty, price }) => ({ product_id, mult, piece, qty, price })) } });
+      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, disc_pct: disc, tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, mult, piece, qty, price }) => ({ product_id, mult, piece, qty, price })) } });
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
-      printHTML(saleCopies(inv, snap.settings.company, snap.shop, cashIn));
+      printHTML(saleCopies(inv, snap.settings.company, snap.shop, cashStep));
       setLast(inv);
-      toast(order ? `Order ${orderRef(order.id)} for ${custName(cust)} approved as ${no}, ${fCDF(S.total)}.${inv.change > 0 ? ` Change ${fCDF(inv.change)}.` : ''} Printing the invoice.` : `Sale ${no} for ${custName(cust)} done, ${fCDF(S.total)}.${inv.change > 0 ? ` Change ${fCDF(inv.change)}.` : ''} Printing.`);
+      toast(order ? `Order ${orderRef(order.id)} for ${custName(cust)} approved as ${no}, ${fCDF(S.total)}.${inv.change > 0 ? ` Change ${changeText(inv)}.` : ''} Printing the invoice.` : `Sale ${no} for ${custName(cust)} done, ${fCDF(S.total)}.${inv.change > 0 ? ` Change ${changeText(inv)}.` : ''} Printing.`);
       void syncOutbox();
       return true;
     } finally { busy.current = false; }
   };
-  const received = Math.round(Number(cash) || 0), short = cashIn && received < T.total;
-  const pay = async () => { if (short) return; if (await sell(cart, dp, customer, null, cashIn ? received : undefined)) resetSale(); };
+  const P = payment(T.total, rate, usdPay ? cashUsd : 0, cash, back), short = cashStep && P.short > 0;
+  const pay = async () => { if (short) return; if (await sell(cart, dp, customer, null, cashStep ? P.pay : undefined)) resetSale(); };
   // approving an order: with the switch on, the cash received is asked first
   const sellOrder = async (lines: CartLine[], d: number, o: SaleOrder) => {
-    if (!cashIn) return sell(lines, d, o.customer, o);
+    if (!cashStep) return sell(lines, d, o.customer, o);
     const total = totals(cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate), d, vat).total;
     return new Promise<boolean>((done) => setCashFor({ total, go: async (t) => { const ok = await sell(lines, d, o.customer, o, t); if (ok) done(true); return ok; }, cancel: () => done(false) }));
   };
@@ -250,7 +250,9 @@ export default function Till() {
         <div className="row muted"><span>Includes VAT {vat}%</span><span>{fCDF(T.vat)}</span></div>
         <div className="grand"><span>{sells ? 'To pay' : 'Order total'}</span><b>{fCDF(T.total)}</b></div>
         {cart.length ? (isAdmin ? <button className="btn ghost full disc-btn" onClick={() => setDisc(true)}><Icon n="tag" /> {dp ? `Invoice discount ${dp}%, change` : 'Discount on this invoice'}</button> : null) : null}
-        {sells && cashIn && cart.length ? <CashIn total={T.total} value={cash} onChange={setCash} onEnter={() => void pay()} /> : null}
+        {sells && cashStep && cart.length ? (usdPay
+          ? <UsdCashIn total={T.total} rate={rate} usd={cashUsd} cdf={cash} back={back} onUsd={setCashUsd} onCdf={setCash} onBack={setBack} onEnter={() => void pay()} />
+          : <CashIn total={T.total} value={cash} onChange={setCash} onEnter={() => void pay()} />) : null}
         <div className="paybtns one">{sells
           ? <button className="paybtn cash" onClick={() => void pay()} disabled={!cart.length || !ready || short}><Icon n="cash" /> Take cash and print</button>
           : <button className="paybtn" onClick={() => void sendOrder()} disabled={!cart.length || !ready}><Icon n="check" /> Send to shop admin for approval</button>}</div>
@@ -298,9 +300,9 @@ export default function Till() {
       {disc ? <DiscModal v={dp} onApply={(v) => { setDp(v); setDisc(false); }} onClose={() => setDisc(false)} /> : null}
       {reject ? <RejectModal o={reject} onClose={() => setReject(null)} onDone={() => { if (editing?.id === reject.id) setEditing(null); setReject(null); void orders.refetch(); }} /> : null}
       {editing ? <OrderEditor o={editing} init={orderLines(editing)} byId={byId} snap={snap} onClose={() => setEditing(null)} onReject={() => { setReject(editing); }} onApprove={async (lines, d) => { if (await sellOrder(lines, d, editing)) setEditing(null); }} /> : null}
-      {cashFor ? <CashModal total={cashFor.total} onClose={() => { cashFor.cancel(); setCashFor(null); }} onPay={async (t) => { if (await cashFor.go(t)) setCashFor(null); }} /> : null}
+      {cashFor ? <CashModal total={cashFor.total} rate={rate} usdPay={usdPay} onClose={() => { cashFor.cancel(); setCashFor(null); }} onPay={async (p) => { if (await cashFor.go(p)) setCashFor(null); }} /> : null}
       {tickets ? <TicketsModal products={hotSort(snap.products, snap.ranks)} rate={rate} shopName={snap.shop.name} onClose={() => setTickets(false)} /> : null}
-      {view ? <Modal title={'Invoice ' + view.no} icon="receipt" onClose={() => setView(null)} foot={<button className="btn" onClick={() => setView(null)}>Close</button>}><div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, snap.settings.company, snap.shop, { copy: 'client', cash: cashIn }) }} /></Modal> : null}
+      {view ? <Modal title={'Invoice ' + view.no} icon="receipt" onClose={() => setView(null)} foot={<button className="btn" onClick={() => setView(null)}>Close</button>}><div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, snap.settings.company, snap.shop, { copy: 'client', cash: cashStep }) }} /></Modal> : null}
     </>
   );
 }
@@ -341,15 +343,38 @@ function CashIn({ total, value, onChange, onEnter, autoFocus }: { total: number;
     </div>
   );
 }
-function CashModal({ total, onClose, onPay }: { total: number; onClose: () => void; onPay: (tendered: number) => Promise<void> }) {
-  const [v, setV] = useState(''), [busy, setBusy] = useState(false), got = Math.round(Number(v) || 0);
-  const go = () => { if (got < total || busy) return; setBusy(true); void onPay(got).finally(() => setBusy(false)); };
+/** Dollars and Francs received, what is still due or the change, and the choice to give whole dollars back. */
+function UsdCashIn({ total, rate, usd, cdf, back, onUsd, onCdf, onBack, onEnter, autoFocus }: { total: number; rate: number; usd: string; cdf: string; back: boolean; onUsd: (v: string) => void; onCdf: (v: string) => void; onBack: (b: boolean) => void; onEnter: () => void; autoFocus?: boolean }) {
+  const P = payment(total, rate, usd, cdf, back), any = !!usd || !!cdf;
+  const enter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); onEnter(); } };
   return (
-    <Modal title={`Cash for ${fCDF(total)}`} icon="cash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={got < total || busy} onClick={go}><Icon n="cash" /> Take cash and print</button></>}>
-      <CashIn total={total} value={v} onChange={setV} onEnter={go} autoFocus />
+    <div className="cashin">
+      <div className="row muted"><span>Due in USD (1 USD = {fCDF(rate)})</span><b id="usddue">{fUSD(P.due)}</b></div>
+      <div className="frow">
+        <div className="field"><label htmlFor="cashusd">USD received</label><input id="cashusd" className="input" type="number" min="0" step="1" inputMode="decimal" autoComplete="off" value={usd} autoFocus={autoFocus} onChange={(e) => onUsd(e.target.value)} onKeyDown={enter} placeholder="0" /></div>
+        <div className="field"><label htmlFor="cashin">CDF received</label><input id="cashin" className="input" type="number" min="0" step="10" inputMode="numeric" autoComplete="off" value={cdf} onChange={(e) => onCdf(e.target.value)} onKeyDown={enter} placeholder="0" /></div>
+      </div>
+      <div className="cnotes">{usdNotes(P.due).map((n) => <button key={'u' + n} type="button" className={P.usd === n && !cdf ? 'on' : ''} onClick={() => { onUsd(String(n)); onCdf(''); }}>${n}</button>)}
+        <button type="button" className={!usd && P.cdf === total ? 'on' : ''} onClick={() => { onUsd(''); onCdf(String(total)); }}>Exact CDF</button></div>
+      <div id="cashchange" className={`row ${any && P.short ? 'bad' : ''}`}><span>{any && P.short ? 'Still to pay' : 'Change to give'}</span>
+        <b>{!any ? '-' : P.short ? `${fCDF(P.short)} (≈ ${fUSD(Math.ceil((P.short / rate) * 100) / 100)})` : P.changeUsd ? `$${P.changeUsd} + ${fCDF(P.changeCdf)}` : fCDF(P.change)}</b></div>
+      {P.maxDollars > 0 ? <button id="dollarsback" type="button" className={`btn sm full ${back ? 'primary' : 'ghost'}`} onClick={() => onBack(!back)}>
+        {back ? `Giving $${P.maxDollars} + ${fCDF(P.change - Math.round(P.maxDollars * rate))}: tap for all in CDF` : `Give dollars back: $${P.maxDollars} + ${fCDF(P.change - Math.round(P.maxDollars * rate))}`}</button> : null}
+    </div>
+  );
+}
+function CashModal({ total, rate, usdPay, onClose, onPay }: { total: number; rate: number; usdPay: boolean; onClose: () => void; onPay: (pay: PayIn) => Promise<void> }) {
+  const [v, setV] = useState(''), [u, setU] = useState(''), [back, setBack] = useState(false), [busy, setBusy] = useState(false);
+  const P = payment(total, rate, usdPay ? u : 0, v, back);
+  const go = () => { if (P.short || busy) return; setBusy(true); void onPay(P.pay).finally(() => setBusy(false)); };
+  return (
+    <Modal title={`Cash for ${fCDF(total)}`} icon="cash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={P.short > 0 || busy} onClick={go}><Icon n="cash" /> Take cash and print</button></>}>
+      {usdPay ? <UsdCashIn total={total} rate={rate} usd={u} cdf={v} back={back} onUsd={setU} onCdf={setV} onBack={setBack} onEnter={go} autoFocus /> : <CashIn total={total} value={v} onChange={setV} onEnter={go} autoFocus />}
     </Modal>
   );
 }
+/** The change as given: Francs, or whole dollars plus Francs. */
+const changeText = (inv: Invoice) => (inv.change_usd ? `$${inv.change_usd} + ${fCDF(inv.change_cdf ?? 0)}` : fCDF(inv.change));
 function DiscModal({ v, onApply, onClose }: { v: number; onApply: (v: number) => void; onClose: () => void }) {
   const [x, setX] = useState(String(v)), [err, setErr] = useState('');
   const apply = (n: number) => { if (n < 0 || n > 30 || n % 1) { setErr('Discount must be between 0% and 30%'); return; } onApply(n); };

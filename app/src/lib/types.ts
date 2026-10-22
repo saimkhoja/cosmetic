@@ -2,7 +2,7 @@ export type Role = 'admin' | 'whop' | 'shopadmin' | 'till';
 export interface Profile { id: string; username: string; name: string; role: Role; shop_id: string | null; active: boolean; must_change_password: boolean; created_at?: string }
 export interface Company { name?: string; address?: string; phone?: string; email?: string; rccm?: string; idnat?: string; nif?: string; footer?: string }
 /** Switches the Admin turns on in Settings; both off by default. */
-export interface Features { customer_optional?: boolean; barcode?: boolean; till_sells?: boolean; cash_change?: boolean }
+export interface Features { customer_optional?: boolean; barcode?: boolean; till_sells?: boolean; cash_change?: boolean; usd_pay?: boolean }
 /** rate: the sales rate (prices, tickets, tills). book_rate: the internal rate (suppliers, expenses, vouchers). */
 export interface Settings { rate: number; book_rate?: number; vat: number; tz: string; company: Company; features?: Features }
 export interface Shop { id: string; code: string; name: string; address: string; active: boolean }
@@ -20,6 +20,7 @@ export interface Invoice {
   gross: number; disc_pct: number; disc: number; total: number; vat: number; ht: number; tendered: number; change: number;
   printed: number; till_printed_at?: string | null; items: InvoiceItem[]; edits?: InvoiceEdit[]; synced?: boolean;
   customer?: string; prepared_by_name?: string | null; order_id?: string | null;
+  paid_usd?: number; paid_cdf?: number; change_usd?: number; change_cdf?: number;
 }
 export interface DeliveryItem { product_id: string; qty: number; price_usd: number; received_qty?: number | null }
 export interface DeliveryEdit { at: string; by_name: string; reason: string }
