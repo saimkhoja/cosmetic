@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useReport, useSettings, useShops } from '../data/queries';
-import { dt, fCDF, fUSD, ld, shortCDF, today } from '../lib/format';
+import { bookRate, dt, fCDF, fUSD, ld, shortCDF, today } from '../lib/format';
 import { printHTML, reportHTML, shiftSlipHTML } from '../lib/print';
 import { Bars, Dual2, Empty, Head, HList, Kpi, Modal } from '../components/ui';
 
@@ -44,7 +44,7 @@ export default function Reports() {
           <Kpi i="receipt" l="Sales, VAT included" tone="ok"><Dual2 b={fCDF(r.total)} s={`${r.n} invoices${isAdmin ? ', ' + fUSD(r.total_usd) : ''}`} /></Kpi>
           <Kpi i="cart" l="Items sold"><Dual2 b={r.items} s={`${r.n ? fCDF(r.total / r.n) : fCDF(0)} average sale`} /></Kpi>
           <Kpi i="tag" l="Discounts given" tone="warn"><Dual2 b={fCDF(r.disc)} s={`VAT in the period ${fCDF(r.vat)}`} /></Kpi>
-          {isAdmin ? <Kpi i="chart" l="Gross profit, excl. VAT"><Dual2 b={fUSD(r.profit_usd ?? 0)} s={fCDF((r.profit_usd ?? 0) * (settings.data?.rate ?? 0))} /></Kpi> : <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r.total)} s="all sales are cash" /></Kpi>}
+          {isAdmin ? <Kpi i="chart" l="Gross profit, excl. VAT"><Dual2 b={fUSD(r.profit_usd ?? 0)} s={fCDF((r.profit_usd ?? 0) * bookRate(settings.data))} /></Kpi> : <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r.total)} s="all sales are cash" /></Kpi>}
         </div>
         <div className="cols">
           <div className="card"><h3><Icon n="chart" /> Sales by day (CDF)</h3>{r.by_day.length ? <Bars arr={r.by_day.slice(-14).map((d) => ({ label: d.day.slice(8) + '/' + d.day.slice(5, 7), val: d.v, txt: shortCDF(d.v) }))} /> : <Empty i="chart" t="No sales in these dates" />}</div>

@@ -44,7 +44,12 @@ There are no demo accounts. The first visit to a new installation shows a **setu
 
 ## Currency
 
-All cost and selling prices are stored in USD. Francs are shown as CDF everywhere. The shop price in Francs is USD × the rate in Settings, rounded to the nearest 10 CDF, so changing the rate reprices every shop at once. Each invoice keeps its Franc prices and the rate of its sale, so past invoices never change. Payments at the till are in Francs only. Reports convert Francs back to USD with each invoice's own rate.
+All cost and selling prices are stored in USD. Francs are shown as CDF everywhere. There are two rates, each editable at any time:
+
+- **Sales rate (taux de vente)**, in Settings or with the *Sales rate* button on the Items page: the shop price in Francs is USD × this rate, rounded to the nearest 10 CDF, so changing it reprices every shop, ticket and till at once. Each invoice keeps its Franc prices and the rate of its sale, so past invoices never change, and the sales it collects are booked at that rate.
+- **Internal rate (taux interne)**, in Settings: the default for supplier bills and payments, expenses (upkeep), vouchers such as cash taken from the shops, and opening balances in Francs. Any entry can still be given its own rate.
+
+Payments at the till are in Francs only. Reports convert Francs back to USD with each invoice's own rate.
 
 ## Repository
 

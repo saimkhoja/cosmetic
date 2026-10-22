@@ -3,7 +3,8 @@ export interface Profile { id: string; username: string; name: string; role: Rol
 export interface Company { name?: string; address?: string; phone?: string; email?: string; rccm?: string; idnat?: string; nif?: string; footer?: string }
 /** Switches the Admin turns on in Settings; both off by default. */
 export interface Features { customer_optional?: boolean; barcode?: boolean; till_sells?: boolean; cash_change?: boolean }
-export interface Settings { rate: number; vat: number; tz: string; company: Company; features?: Features }
+/** rate: the sales rate (prices, tickets, tills). book_rate: the internal rate (suppliers, expenses, vouchers). */
+export interface Settings { rate: number; book_rate?: number; vat: number; tz: string; company: Company; features?: Features }
 export interface Shop { id: string; code: string; name: string; address: string; active: boolean }
 export interface Product {
   id: string; sku: string; name: string; category: string; stock_unit: 'pcs' | 'set'; is_bundle: boolean;

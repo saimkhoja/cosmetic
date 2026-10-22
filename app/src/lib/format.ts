@@ -9,3 +9,5 @@ export const tm = (t: string | number) => new Date(t).toLocaleTimeString('en-GB'
 export const shortCDF = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(Math.round(n)));
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 export const sum = <T,>(a: T[], f: (x: T) => number) => a.reduce((s, x) => s + f(x), 0);
+/** The internal rate (suppliers, expenses, vouchers); an installation without it uses the sales rate. */
+export const bookRate = (s?: { rate?: number; book_rate?: number } | null) => Number(s?.book_rate || s?.rate || 1);

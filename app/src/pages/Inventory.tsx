@@ -6,7 +6,7 @@ import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSet, hotSort, pcValue, unitLabel, unitsOf } from '../lib/units';
 import { itemProblem, MONTHS, type ItemInput } from '../lib/items';
 import { ReceiveGoodsModal } from './Stores';
-import { fCDF, fUSD, toCDF } from '../lib/format';
+import { bookRate, fCDF, fUSD, toCDF } from '../lib/format';
 import { Dual, Empty, Head, Modal, Note, num, useAction, useToast } from '../components/ui';
 import { IMPCOLS, impParse, readCSV, readXlsx, saveBlob, templateXlsx, type ImportRow } from '../lib/xlsx';
 import type { Category, Cost, Product } from '../lib/types';
@@ -21,7 +21,7 @@ export default function Inventory() {
   const products = useProducts(), costs = useCosts(isAdmin), settings = useSettings(), ranks = useRanks(null), refresh = useRefresh(), toast = useToast();
   const [q, setQ] = useState(''), [edit, setEdit] = useState<Product | 'new' | null>(null), [recv, setRecv] = useState<Product | 'any' | null>(null), [imp, setImp] = useState(false);
   const [cats, setCats] = useState(false), [archived, setArchived] = useState(false), [count, setCount] = useState<Product | null>(null);
-  const rate = settings.data?.rate ?? 1;
+  const rate = settings.data?.rate ?? 1, book = bookRate(settings.data), [rateEdit, setRateEdit] = useState(false);
   const costOf = useMemo(() => new Map((costs.data ?? []).map((c) => [c.product_id, c])), [costs.data]);
   const live = (products.data ?? []).filter((p) => p.active), gone = (products.data ?? []).filter((p) => !p.active);
   const hot = hotSet(ranks.data);
@@ -37,7 +37,7 @@ export default function Inventory() {
   return (
     <>
       <Head t="Inventory" s={isAdmin ? 'Selling prices, sets and piece prices are set here only. Shops see them in Francs and cannot change them.' : 'Item names, units and quantities. Prices are set by the Admin.'}
-        a={<>{isAdmin ? <><button className="btn ghost" onClick={() => setCats(true)}><Icon n="grid" /> Categories</button><button className="btn ghost" onClick={() => setImp(true)}><Icon n="download" /> Import from Excel</button></> : null}
+        a={<>{isAdmin ? <><button id="salesrate" className="btn ghost" onClick={() => setRateEdit(true)} title="Change the sales rate: it sets every shop and ticket price in Francs"><Icon n="exchange" /> Sales rate: 1 USD = {fCDF(rate)}</button><button className="btn ghost" onClick={() => setCats(true)}><Icon n="grid" /> Categories</button><button className="btn ghost" onClick={() => setImp(true)}><Icon n="download" /> Import from Excel</button></> : null}
           <button className={`btn ${isAdmin ? 'ghost' : 'primary'}`} onClick={() => setRecv('any')}><Icon n="truck" /> Receive from supplier</button>
           {isAdmin ? <button className="btn primary" onClick={() => setEdit('new')}><Icon n="plus" /> Add new item</button> : null}</>} />
       <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Search by name, code or category" value={q} onChange={(e) => setQ(e.target.value)} /></div><span className="chip">{live.length} items</span>
@@ -50,7 +50,7 @@ export default function Inventory() {
               <tr key={p.id}>
                 <td><b>{p.name}</b>{hot.has(p.id) ? <> <span className="chip hot">Hot</span></> : null}<div className="code">{p.sku}{p.barcode ? ` · ${p.barcode}` : ''}{p.is_bundle ? ` · mixed set of ${p.pieces_per_set}` : p.per_carton > 1 ? ` · ${p.per_carton} pcs per carton` : ''}</div></td><td>{p.category}</td>
                 <td className="r"><QtyCell p={p} q={p.wh_qty} cls={p.wh_qty <= p.reorder ? 'bad' : 'ok'} /></td>
-                {isAdmin ? <td>{c ? (p.is_bundle ? <><Dual usd={c.cost_usd} rate={rate} /><div className="code">per set</div></> : <><Dual usd={c.carton_cost_usd} rate={rate} /><div className="code">per carton, {fUSD(c.cost_usd)} per pc</div></>) : '-'}</td> : null}
+                {isAdmin ? <td>{c ? (p.is_bundle ? <><Dual usd={c.cost_usd} rate={book} /><div className="code">per set</div></> : <><Dual usd={c.carton_cost_usd} rate={book} /><div className="code">per carton, {fUSD(c.cost_usd)} per pc</div></>) : '-'}</td> : null}
                 <td>{unitsOf(p).map((u, k) => <div key={k} style={{ whiteSpace: 'nowrap' }}><span className="uchip">{unitLabel(u)}</span> <b>{fCDF(toCDF(u.usd, rate))}</b>{isAdmin ? <span className="code"> {fUSD(u.usd)}</span> : null}</div>)}</td>
                 {isAdmin ? <td className="r"><b>{c && pcValue(p) > 0 ? Math.round(((pcValue(p) - c.cost_usd) / pcValue(p)) * 100) : 0}%</b><div className="code">per {p.is_bundle ? 'set' : 'pc'}</div></td> : null}
                 <td><div className="act">{!p.active ? <button title="Restore this item" onClick={() => void restore(p)}><Icon n="refresh" /></button>
@@ -63,6 +63,7 @@ export default function Inventory() {
       {recv ? <ReceiveGoodsModal pid={recv === 'any' ? undefined : recv.id} onClose={() => setRecv(null)} /> : null}
       {cats ? <CategoriesModal products={live} onClose={() => setCats(false)} /> : null}
       {count ? <CountModal p={count} onClose={() => setCount(null)} /> : null}
+      {rateEdit ? <SalesRateModal rate={rate} onClose={() => setRateEdit(false)} /> : null}
       {imp ? <ImportModal products={products.data ?? []} rate={rate} onClose={() => setImp(false)} /> : null}
     </>
   );
@@ -123,6 +124,24 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
           <div className="field"><label>{f.is_bundle ? 'Opening stock, sets' : 'Opening stock, loose pcs'}</label><input id="iq" className="input" type="number" min="0" step="1" value={f.ql} onChange={set('ql')} /><span className="hint">Stock already in the store, booked at cost as opening stock.</span></div></div>}
       <div className="field"><label>Reorder when the store has less than ({f.is_bundle ? 'sets' : 'pcs'})</label><input id="ir" className="input" type="number" min="0" value={f.reorder} onChange={set('reorder')} /></div>
       <div id="ierr" className="lerr">{a.err}</div>
+    </Modal>
+  );
+}
+
+/** The sales rate (taux de vente) can be changed here at any time; every shop and ticket price follows. */
+function SalesRateModal({ rate, onClose }: { rate: number; onClose: () => void }) {
+  const refresh = useRefresh(), toast = useToast(), a = useAction(), [v, setV] = useState(String(rate)), n = Number(v);
+  const save = () => a.run(async () => {
+    if (!(n > 0)) throw new Error('Enter a valid exchange rate');
+    await rpc('save_rate', { p_kind: 'sales', p_rate: n });
+    await refresh('settings', 'audit'); toast(`Sales rate is now 1 USD = ${fCDF(n)}`); onClose();
+  });
+  return (
+    <Modal title="Sales rate (taux de vente)" icon="exchange" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Save rate</button></>}>
+      <div className="field"><label htmlFor="srnew">1 USD in Congolese Francs</label><input id="srnew" className="input" type="number" min="1" value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save(); }} autoFocus /></div>
+      <Note i="tag">Every shop price, ticket and till follows this rate from the next sale (tills update when they are online). Past invoices keep the rate of their sale. Suppliers and expenses use the internal rate in Settings.</Note>
+      {n > 0 && n !== rate ? <p className="code">Example: an item at $1.00 sells at {fCDF(toCDF(1, n))} instead of {fCDF(toCDF(1, rate))}.</p> : null}
+      <div className="lerr">{a.err}</div>
     </Modal>
   );
 }

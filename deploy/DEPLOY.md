@@ -32,8 +32,9 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    10. `supabase/migrations/20261018000001_supermarket.sql` (two switches in Settings, both off until the Admin turns them on: the customer name optional, and barcode scanning)
    11. `supabase/migrations/20261019000001_till_sells.sql` (a third switch: till operators sell directly, without the shop admin's approval; the activity log writes amounts in CDF)
    12. `supabase/migrations/20261020000001_cash_change.sql` (a fourth switch: the cashier enters the cash received; the till shows the change and the receipt prints both)
+   13. `supabase/migrations/20261022000001_two_rates.sql` (two exchange rates: the sales rate for prices, tickets and tills, and the internal rate for suppliers, expenses and vouchers; the internal rate starts equal to today's rate)
 
-   **Already running SIM?** Run only the files you have not run yet, in order (for example only 12). Run it **before** the new app goes live. They keep your data:
+   **Already running SIM?** Run only the files you have not run yet, in order (for example only 13). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
