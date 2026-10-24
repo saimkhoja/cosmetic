@@ -41,6 +41,13 @@ export interface Supplier {
   currency: 'USD' | 'FC'; notes: string; active: boolean; account_id: string; supplier_items?: { product_id: string }[];
 }
 export interface Grn { id: string; no: string; supplier_id: string; ref: string; note: string; status: 'awaiting_bill' | 'billed'; bill_voucher_id: string | null; received_by_name: string; received_at: string; grn_items: { product_id: string; qty: number; std_cost_usd?: number }[] }
+/** Goods sent back to a supplier, or billed but not received. Values come separately, for the Admin only. */
+export interface SupplierReturn {
+  id: string; no: string; supplier_id: string; kind: 'return' | 'short'; grn_id: string | null; reason: string; note: string; status: 'open' | 'settled' | 'cancelled';
+  voucher_id: string | null; bill_id: string | null; created_by_name: string; created_at: string; settled_by_name: string | null; settled_at: string | null; cancel_reason: string | null;
+  supplier_return_items: { product_id: string; qty: number }[];
+}
+export interface SupplierReturnValue { id: string; value_usd: number; amount_usd: number; bill_no: string | null }
 export interface ShopReturn {
   id: string; no: string; shop_id: string; reason: string; status: 'pending' | 'received' | 'cancelled'; created_by_name: string; created_at: string;
   received_by_name: string | null; received_at: string | null; received_note: string | null; return_items: { product_id: string; qty: number; received_qty: number | null }[];

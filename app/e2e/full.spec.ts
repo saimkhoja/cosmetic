@@ -391,6 +391,44 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(last.nth(1)).toHaveText(/\$[\d,.]+/);                 // Total | Dr | Cr
   expect(await last.nth(1).innerText()).toBe(await last.nth(2).innerText());
 
+  // ---- returns to the supplier: the warehouse sends 6 pcs back, the Admin settles against the bill
+  await op.getByRole('link', { name: 'Goods in' }).click();
+  await op.click('#rtsbtn');
+  await op.selectOption('#rsup', { label: 'Beauté Import SARL' }); await op.selectOption('#rreason2', 'Damaged');
+  const rrow = op.locator('.modal tr', { hasText: 'Shea body lotion' });
+  await rrow.locator('select').selectOption('pcs'); await rrow.locator('input').fill('6');
+  await op.getByRole('button', { name: 'Send back and print' }).click();
+  await expect(op.getByText(/RTS-0001: 6 units sent back to Beauté Import SARL/)).toBeVisible();
+  const rnote = (await prints(op)).at(-1)!;
+  expect(rnote).toContain('Return to supplier'); expect(rnote).toContain('RTS-0001'); expect(rnote).toContain('Damaged');
+  await expect(op.locator('#rtslist tr', { hasText: 'RTS-0001' })).toContainText('Open');
+  await expect(op.locator('#rtslist')).not.toContainText('$');                                  // no costs for the warehouse
+  await admin.getByRole('link', { name: 'Goods in' }).click();
+  await admin.locator('#rtslist tr', { hasText: 'RTS-0001' }).getByRole('button', { name: 'Settle' }).click();
+  await admin.fill('#ramt', '10'); await admin.selectOption('#rbill', { index: 1 });
+  await admin.locator('.modal').getByRole('button', { name: 'Settle', exact: true }).click();
+  await expect(admin.getByText('RTS-0001 settled with Beauté Import SARL')).toBeVisible();
+  await expect(admin.locator('#rtslist tr', { hasText: 'RTS-0001' })).toContainText('Settled');
+  await admin.getByRole('link', { name: 'Accounts' }).click();
+  await admin.getByRole('button', { name: 'Bills & payables' }).click();
+  await expect(admin.locator('tr', { hasText: 'F-1001' })).toContainText('$50.00');             // 60 - 10 credited
+  // ---- a bill that charges for more than arrived: the difference is claimed from the supplier
+  await op.getByRole('link', { name: 'Goods in' }).click();
+  await op.getByRole('button', { name: 'Receive from supplier' }).click();
+  await op.selectOption('#gsup', { label: 'Beauté Import SARL' });
+  const grow = op.locator('.modal tr', { hasText: 'Shea body lotion' });
+  await grow.locator('select').selectOption('pcs'); await grow.locator('input').fill('10');
+  await op.getByRole('button', { name: 'Add to store stock' }).click();
+  await expect(op.getByText('GRN-0002 saved: 10 units added')).toBeVisible();
+  await admin.getByRole('link', { name: 'Goods in' }).click(); await admin.reload();          // the list refreshes every 30 s; reload to see it now
+  await admin.locator('tr', { hasText: 'GRN-0002' }).getByRole('button', { name: 'Enter bill' }).click();
+  await admin.fill('#bno', 'F-1002'); await admin.fill('#bamt', '40');
+  await admin.getByLabel('Billed Shea body lotion 400 ml').fill('12');
+  await expect(admin.locator('.modal')).toContainText('Billed but not received: 2 Shea body lotion');
+  await admin.getByRole('button', { name: 'Save bill' }).click();
+  await expect(admin.getByText(/Bill F-1002 entered.*RTS-0002: billed but not received/)).toBeVisible();
+  await expect(admin.locator('#rtslist tr', { hasText: 'RTS-0002' })).toContainText('Billed, not received');
+
   // ---- supermarket switches: walk-in sales without a name and barcode scanning
   await admin.getByRole('link', { name: 'Settings' }).click();
   await admin.check('#s-customer_optional'); await admin.check('#s-barcode');

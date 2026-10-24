@@ -596,6 +596,57 @@ select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
 reset role;
 
+-- ===== returns to the supplier and goods billed but not received =====
+create function t.sup_owes() returns numeric language sql security definer as $$
+  select coalesce(sum(case when l.side = 'Cr' then l.base else -l.base end), 0) from voucher_lines l join vouchers v on v.id = l.voucher_id
+  where v.status = 'posted' and l.account_id = (select account_id from suppliers where name = 'Beauty Import SARL') $$;
+grant execute on function t.sup_owes() to authenticated;
+select t.put('owes0', t.sup_owes()::text);
+select t.put('wh_lot', (select wh_qty::text from products where id = t.get('lotion')::uuid));
+select t.put('cost_lot', (select cost_usd::text from product_costs where product_id = t.get('lotion')::uuid));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000b');
+select t.fails(format($$select public.create_supplier_return('{"supplier_id":"%s","reason":"Damaged","lines":[{"product_id":"%s","qty":100000}]}')$$, t.get('sup'), t.get('lotion')), 'Not enough in the store', 'cannot send back more than the store has');
+select t.fails(format($$select public.create_supplier_return('{"supplier_id":"%s","reason":"","lines":[{"product_id":"%s","qty":1}]}')$$, t.get('sup'), t.get('lotion')), 'why the goods go back', 'a return needs a reason');
+select t.put('rts1', public.create_supplier_return(jsonb_build_object('supplier_id', t.get('sup'), 'reason', 'Damaged', 'note', 'Broken caps',
+  'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 2))))->>'id');
+select t.ok((select no from supplier_returns where id = t.get('rts1')::uuid) = 'RTS-0001', 'the warehouse sends goods back to the supplier');
+select t.fails(format($$select public.settle_supplier_return('{"id":"%s"}')$$, t.get('rts1')), 'permission', 'the warehouse does not settle with the supplier');
+reset role;
+select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = t.get('wh_lot')::int - 2, 'the goods leave the central store at once');
+select t.ok(t.sup_owes() = t.get('owes0')::numeric - round(2 * t.get('cost_lot')::numeric, 2), 'what we owe the supplier drops at item cost');
+select t.ok((select type from vouchers where id = (select voucher_id from supplier_returns where id = t.get('rts1')::uuid)) = 'debit_note', 'a return is a debit note');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails(format($$select public.create_supplier_return('{"supplier_id":"%s","reason":"Damaged","lines":[{"product_id":"%s","qty":1}]}')$$, t.get('sup'), t.get('lotion')), 'permission', 'a shop admin does not return goods to suppliers');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.fails(format($$select public.cancel_voucher('%s', 'mistake here')$$, (select voucher_id from supplier_returns where id = t.get('rts1')::uuid)), 'Returns to supplier', 'its debit note is cancelled from the return, not from the books');
+-- a bill for 5 pcs when the warehouse received 3: 2 become a claim set against the bill
+select t.put('grn9', public.receive_goods(jsonb_build_object('supplier_id', t.get('sup'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 3))))->>'id');
+select t.put('b9', public.enter_bill(jsonb_build_object('grn_id', t.get('grn9'), 'bill_no', 'F-900', 'amount', round(5 * t.get('cost_lot')::numeric, 2), 'currency', 'USD',
+  'billed', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 5))))::text);
+select t.ok((t.get('b9')::jsonb->>'claim') is not null, 'goods billed but not received become a claim');
+select t.ok((select kind || ':' || i.qty || ':' || value_usd from supplier_returns r join supplier_return_items i on i.return_id = r.id where r.no = t.get('b9')::jsonb->>'claim')
+  = 'short:2:' || round(2 * t.get('cost_lot')::numeric, 2), 'the claim is for the 2 pcs missing, at item cost');
+select t.ok(round(t.outstanding((t.get('b9')::jsonb->>'voucher_id')::uuid), 2) = round(3 * t.get('cost_lot')::numeric, 2), 'the bill only stays owed for what arrived');
+-- the Admin settles the return at what the supplier credits, against that bill
+select public.settle_supplier_return(jsonb_build_object('id', t.get('rts1'), 'amount_usd', 1.50, 'bill_id', (t.get('b9')::jsonb->>'voucher_id')));
+select t.ok((select status || ':' || amount_usd from supplier_returns where id = t.get('rts1')::uuid) = 'settled:1.50', 'the Admin settles the return at the credited amount');
+select t.ok(round(t.outstanding((t.get('b9')::jsonb->>'voucher_id')::uuid), 2) = round(3 * t.get('cost_lot')::numeric - 1.50, 2), 'the settled return is set against the bill');
+select t.ok(t.unbalanced() = 0, 'returns and claims keep every voucher balanced');
+select t.fails(format($$select public.cancel_voucher('%s', 'wrong bill')$$, t.get('b9')::jsonb->>'voucher_id'), 'cancel that first', 'a bill with a return set against it is not cancelled');
+select public.cancel_supplier_return(t.get('rts1')::uuid, 'Supplier refused it');
+select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = t.get('wh_lot')::int + 3, 'a cancelled return puts the goods back (and the 3 received are in)');
+select public.cancel_voucher((t.get('b9')::jsonb->>'voucher_id')::uuid, 'wrong bill');
+select t.ok((select status from supplier_returns where no = t.get('b9')::jsonb->>'claim') = 'cancelled', 'cancelling the bill cancels its claim');
+select t.ok(t.sup_owes() = t.get('owes0')::numeric, 'after cancelling, the supplier is owed exactly as before');
+-- a bill without billed quantities posts as before
+select t.put('b10', public.enter_bill(jsonb_build_object('grn_id', t.get('grn9'), 'bill_no', 'F-901', 'amount', 1, 'currency', 'USD'))::text);
+select t.ok((t.get('b10')::jsonb->>'claim') is null, 'no billed quantities, no claim');
+reset role;
+
 -- ===== payment in USD (switch, off by default) =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');

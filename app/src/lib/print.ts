@@ -41,6 +41,15 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
 export const saleCopies = (inv: Invoice, c: Company, shop: Shop, cash = false) =>
   receiptHTML(inv, c, shop, { copy: 'client', cash }) + '<div class="pagebreak"></div>' + receiptHTML(inv, c, shop, { copy: 'shop', cash });
 
+/** Return note for goods sent back to a supplier: the driver signs it. No prices (the warehouse prints it). */
+export function supplierReturnNoteHTML(r: { no: string; kind: string; reason: string; note: string; created_at: string; created_by_name: string; supplier_return_items: { product_id: string; qty: number }[] }, supplier: string, c: Company, products: Map<string, Product>) {
+  return `<div class="doc"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2>${esc(c.name)}</h2><div>Central store, ${esc(c.address)}</div><div>RCCM ${esc(c.rccm)}, NIF ${esc(c.nif)}</div></div><div style="text-align:right"><h2>${r.kind === 'short' ? 'Claim: billed, not received' : 'Return to supplier'}</h2><div><b>${esc(r.no)}</b></div><div>${dt(r.created_at)}</div></div></div>
+  <hr style="border:0;border-top:1px solid #ccc;margin:14px 0"><div><b>Supplier:</b> ${esc(supplier)}</div><div><b>Reason:</b> ${esc(r.reason)}${r.note ? `, ${esc(r.note)}` : ''}</div>
+  <div class="tw" style="margin-top:12px"><table class="t"><thead><tr><th>Item</th><th>Code</th><th class="r">Quantity</th></tr></thead><tbody>${r.supplier_return_items.map((i) => { const p = products.get(i.product_id); return `<tr><td>${esc(p?.name)}</td><td>${esc(p?.sku)}</td><td class="r">${i.qty} ${esc(p?.stock_unit)}${p && ctnTxt(p, i.qty) ? `<br><small>${ctnTxt(p, i.qty)}</small>` : ''}</td></tr>`; }).join('')}
+  <tr><td colspan="2"><b>Total</b></td><td class="r"><b>${sum(r.supplier_return_items, (i) => i.qty)}</b></td></tr></tbody></table></div>
+  <div style="display:flex;justify-content:space-between;margin-top:26px;gap:20px"><div>Sent by: ${esc(r.created_by_name)}<br><br>Signature ____________</div><div>Taken by (supplier):<br><br>Name and signature ____________</div></div></div>`;
+}
+
 export function deliveryNoteHTML(d: Delivery, shop: Shop, c: Company, products: Map<string, Product>, showUSD: boolean) {
   const r = d.rate, cdf = (u: number) => Math.round((u * r) / 10) * 10, ed = d.delivery_edits?.length ? [...d.delivery_edits].sort((a, b) => a.at.localeCompare(b.at)).at(-1)! : null;
   const total = sum(d.delivery_items, (i) => i.price_usd * i.qty), totalCDF = sum(d.delivery_items, (i) => cdf(i.price_usd) * i.qty);

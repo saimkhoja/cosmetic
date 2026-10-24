@@ -2,7 +2,7 @@
 -- Run it ONCE, by hand, in the Supabase SQL Editor of the installation that goes live. It is not a
 -- migration and never runs on its own.
 --
--- Clears:  invoices, orders, deliveries, goods in, returns, stock requests, upkeep, supplier bills,
+-- Clears:  invoices, orders, deliveries, goods in, returns (from shops and to suppliers), stock requests, upkeep, supplier bills,
 --          payments and every voucher; the stock in the central store and in every shop; the opening
 --          balances of the ledgers and suppliers; the registered tills (they register again as T1, T2...
 --          and invoice numbers restart at 000001). Voucher, delivery, goods in, return and request
@@ -24,6 +24,7 @@ truncate table
   public.stock_request_items, public.stock_requests,
   public.return_items, public.shop_returns,
   public.grn_items, public.grns, public.purchases, public.upkeep,
+  public.supplier_return_items, public.supplier_returns,
   public.bill_allocations, public.voucher_lines, public.vouchers,
   public.devices;
 
@@ -40,6 +41,7 @@ alter sequence public.delivery_seq restart;
 alter sequence public.grn_seq restart;
 alter sequence public.return_seq restart;
 alter sequence public.stock_request_seq restart;
+alter sequence public.supplier_return_seq restart;
 
 insert into public.audit_log (username, action)
 values ('system', 'Data reset for go-live: sales, stock and books cleared; items, logins and settings kept');
