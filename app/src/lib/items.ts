@@ -16,12 +16,13 @@ export function itemProblem(o: ItemInput): string | null {
     return null;
   }
   if (!(o.carton_cost >= 0)) return 'Enter the cost of one carton';
-  if (!(o.per_carton >= 2) || o.per_carton % 1) return 'Enter how many pcs are in one carton (2 or more)';
-  const pc = o.pc || 0;
+  if (!(o.per_carton >= 1) || o.per_carton % 1) return 'Enter how many pcs are in one carton (1 or more)';
+  // one pc per carton: the carton price is the price per pc, as on the server
+  const pc = o.pc || (o.per_carton === 1 ? o.ctn || 0 : 0);
   if (pc < 0 || (o.dzn || 0) < 0 || (o.half || 0) < 0 || (o.ctn || 0) < 0) return 'Prices cannot be negative';
   // a carton of 12 (or 6) is the dozen (or half dozen): that price is the carton price, as on the server
   const cpc = o.carton_cost / o.per_carton, dzn = o.per_carton === 12 ? 0 : o.dzn || 0, half = o.per_carton === 6 ? 0 : o.half || 0;
-  const ctn = o.ctn || (o.per_carton === 12 ? o.dzn || 0 : o.per_carton === 6 ? o.half || 0 : 0);
+  const ctn = o.per_carton === 1 ? 0 : o.ctn || (o.per_carton === 12 ? o.dzn || 0 : o.per_carton === 6 ? o.half || 0 : 0);
   if (!pc && !half && !dzn && !ctn) return 'Enter at least one selling price: per pc, half dozen, dozen or carton';
   if (pc > 0 && pc < cpc - 1e-9) return `Price per pc is below the cost of one pc (${fUSD(cpc)})`;
   if (half > 0 && half < cpc * 6 - 1e-9) return `Price per half dozen is below the cost of 6 pcs (${fUSD(cpc * 6)})`;

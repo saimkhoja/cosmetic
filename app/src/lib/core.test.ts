@@ -68,6 +68,12 @@ describe('item validation', () => {
     expect(itemProblem({ ...base, pc: 0 })).toBeNull();
     expect(itemProblem({ ...base, pc: 0, dzn: 0, ctn: 0 })).toMatch(/at least one selling price/);
   });
+  it('takes one pc per carton, priced per pc or per carton', () => {
+    const one = { ...base, carton_cost: 2, per_carton: 1, pc: 0, dzn: 0, ctn: 3 };
+    expect(itemProblem(one)).toBeNull();
+    expect(itemProblem({ ...one, ctn: 1.5 })).toMatch(/pc is below/);
+    expect(itemProblem({ ...one, per_carton: 0 })).toMatch(/1 or more/);
+  });
 });
 
 describe('import', () => {

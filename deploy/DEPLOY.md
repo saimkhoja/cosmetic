@@ -35,8 +35,9 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    13. `supabase/migrations/20261022000001_two_rates.sql` (two exchange rates: the sales rate for prices, tickets and tills, and the internal rate for suppliers, expenses and vouchers; the internal rate starts equal to today's rate)
    14. `supabase/migrations/20261023000001_usd_payment.sql` (a fifth switch: the till accepts payment in USD, CDF or both; change in CDF or whole dollars plus CDF; the day end slip shows Collected USD)
    15. `supabase/migrations/20261024000001_supplier_returns.sql` (returns to suppliers, and claims for goods a bill charges for but the warehouse did not receive)
+   16. `supabase/migrations/20261025000001_one_per_carton.sql` (an item can come one pc per carton: pcs in one carton takes 1 or more)
 
-   **Already running SIM?** Run only the files you have not run yet, in order (for example only 15). Run it **before** the new app goes live. They keep your data:
+   **Already running SIM?** Run only the files you have not run yet, in order (for example only 16). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
