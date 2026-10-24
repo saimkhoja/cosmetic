@@ -11,6 +11,7 @@ import { bookRate, dt, esc, fCDF, fUSD, ld, sum, today } from '../lib/format';
 import { balTxt, bookHTML, printHTML, statementHTML } from '../lib/print';
 import { Dual2, Empty, Head, Kpi, Modal, Note, useAction, useToast } from '../components/ui';
 import type { AccountGroup, Cur, DayBookEntry, Grn, Ledger, Payable, Statement, Supplier } from '../lib/types';
+import { SupplierReturnsList } from './Stores';
 
 const VTYPES: Record<string, string> = {
   payment: 'Payment', receipt: 'Receipt', contra: 'Contra', journal: 'Journal', debit_note: 'Debit note', credit_note: 'Credit note',
@@ -18,7 +19,7 @@ const VTYPES: Record<string, string> = {
 };
 const usd2 = (n: number) => Math.round(n * 100) / 100;
 const useGroups = () => useQuery({ queryKey: ['groups'], queryFn: async () => rows<AccountGroup>(await supabase.from('account_groups').select('*').order('sort')) });
-const usePayables = (enabled = true) => useQuery({ queryKey: ['books', 'payables'], enabled, queryFn: () => rpc<Payable[]>('payables', { p_as_of: today() }) });
+export const usePayables = (enabled = true) => useQuery({ queryKey: ['books', 'payables'], enabled, queryFn: () => rpc<Payable[]>('payables', { p_as_of: today() }) });
 const monthStart = () => today().slice(0, 8) + '01';
 function useDoc() {
   const { profile } = useAuth(), settings = useSettings();
@@ -113,15 +114,24 @@ export function BillModal({ grn, onClose }: { grn?: Grn; onClose: () => void }) 
   const amt = Number(f.amount) || 0, amtUsd = f.currency === 'FC' ? amt / rate : amt;
   const due = f.due || (sup && f.bill_date ? ld(new Date(f.bill_date + 'T12:00:00').getTime() + sup.credit_days * 864e5) : '');
   const byId = new Map((products.data ?? []).map((p) => [p.id, p]));
+  // billed quantity per item (defaults to what arrived); billed but not received becomes a claim against the supplier
+  const [billed, setBilled] = useState<Record<string, string>>({});
+  const bq = (i: { product_id: string; qty: number }) => { const v = billed[i.product_id]; return v === undefined || v === '' ? i.qty : Math.max(0, parseInt(v) || 0); };
+  const missing = (grn?.grn_items ?? []).filter((i) => bq(i) > i.qty), claim = sum(missing, (i) => (bq(i) - i.qty) * Number(i.std_cost_usd ?? 0));
   const save = () => a.run(async () => {
-    await rpc('enter_bill', { p: { grn_id: grn?.id ?? null, supplier_id: f.supplier, account_id: grn ? null : f.account || null, bill_no: f.bill_no, bill_date: f.bill_date, due_date: f.due || null,
-      amount: amt, vat: Number(f.vat) || 0, currency: f.currency, rate, narration: f.narration } });
-    await refresh('grns', 'suppliers', 'audit'); toast(`Bill ${f.bill_no} entered, due ${due}`); onClose();
+    const r = await rpc<{ claim: string | null }>('enter_bill', { p: { grn_id: grn?.id ?? null, supplier_id: f.supplier, account_id: grn ? null : f.account || null, bill_no: f.bill_no, bill_date: f.bill_date, due_date: f.due || null,
+      amount: amt, vat: Number(f.vat) || 0, currency: f.currency, rate, narration: f.narration, ...(missing.length ? { billed: grn!.grn_items.map((i) => ({ product_id: i.product_id, qty: bq(i) })) } : {}) } });
+    await refresh('grns', 'suppliers', 'sreturns', 'audit'); toast(`Bill ${f.bill_no} entered, due ${due}${r?.claim ? `. ${r.claim}: billed but not received, claimed from the supplier` : ''}`); onClose();
   });
   const charge = (ledgers.data ?? []).filter((l) => l.active && ['direxp', 'indexp', 'fixed', 'stock', 'advances'].includes(l.group_code) && !l.shop_id);
   return (
     <Modal title={grn ? `Enter the bill for ${grn.no}` : 'Enter a supplier bill'} icon="receipt" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Save bill</button></>}>
-      {grn ? <Note i="truck">{sup0?.name}: {grn.grn_items.map((i) => `${i.qty} ${byId.get(i.product_id)?.name ?? ''}`).join(', ')}. At item cost these goods are <b>{fUSD(std)}</b>; a different bill amount goes to Purchase price difference.</Note>
+      {grn ? <><Note i="truck">{sup0?.name}: at item cost the goods received are <b>{fUSD(std)}</b>; a different bill amount goes to Purchase price difference. If the bill charges for more than arrived, enter the billed quantity.</Note>
+        <div className="tw" style={{ marginBottom: 12 }}><table className="t" id="billedtbl"><thead><tr><th>Item</th><th className="r">Received</th><th style={{ width: 130 }}>Billed</th></tr></thead><tbody>
+          {grn.grn_items.map((i) => { const p = byId.get(i.product_id); return <tr key={i.product_id}><td><b>{p?.name}</b><div className="code">{p?.sku}</div></td><td className="r">{i.qty} {p?.stock_unit}</td>
+            <td><input className="input" type="number" min="0" inputMode="numeric" style={{ minHeight: 38 }} value={billed[i.product_id] ?? ''} placeholder={String(i.qty)} onChange={(e) => setBilled({ ...billed, [i.product_id]: e.target.value })} aria-label={`Billed ${p?.name}`} /></td></tr>; })}
+        </tbody></table></div>
+        {missing.length ? <Note i="alert" warn>Billed but not received: {missing.map((i) => `${bq(i) - i.qty} ${byId.get(i.product_id)?.name ?? ''}`).join(', ')}. A claim of <b>{fUSD(claim)}</b> (at item cost) is set against this bill, so you only owe for what arrived.</Note> : null}</>
         : <div className="frow"><div className="field"><label>Supplier</label><select className="input" value={f.supplier} onChange={(e) => { const s = suppliers.data?.find((x) => x.id === e.target.value); setF({ ...f, supplier: e.target.value, currency: s?.currency ?? f.currency }); }}><option value="">Choose</option>{(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           <div className="field"><label>For (charged to)</label><select className="input" value={f.account} onChange={set('account')}><option value="">Choose a ledger</option>{charge.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.group_name})</option>)}</select><span className="hint">Goods for the store come in through Goods in; use this for transport, services, equipment.</span></div></div>}
       <div className="frow three"><div className="field"><label>Supplier's bill no.</label><input id="bno" className="input" maxLength={40} value={f.bill_no} onChange={set('bill_no')} autoFocus /></div>
@@ -151,6 +161,7 @@ function Bills() {
       <div className="card p0"><div style={{ padding: '16px 16px 0' }}><h3><Icon n="truck" /> Goods received, bill not entered ({waiting.length})</h3></div>
         {waiting.length ? <div className="tw"><table className="t"><tbody>{waiting.map((g) => <tr key={g.id}><td><b>{g.no}</b><div className="code">{dt(g.received_at)}, {g.received_by_name}</div></td><td>{suppliers.data?.find((s) => s.id === g.supplier_id)?.name}{g.ref ? <div className="code">{g.ref}</div> : null}</td><td className="r">{fUSD(sum(g.grn_items, (i) => i.qty * Number(i.std_cost_usd ?? 0)))}<div className="code">at item cost</div></td><td><button className="btn primary sm" onClick={() => setBill(g)}><Icon n="receipt" /> Enter bill</button></td></tr>)}</tbody></table></div> : <Empty i="check" t="Every goods receipt has its bill" />}</div>
       <div className="kpis">{['Not yet due', '1 to 30 days late', '31 to 60 days late', '61 to 90 days late', 'Over 90 days late'].map((l, k) => <Kpi key={l} i={k ? 'alert' : 'clock'} l={l} tone={k === 0 ? '' : k === 1 ? 'warn' : 'bad'}><Dual2 b={fUSD(tot[k])} s="still to pay" /></Kpi>)}</div>
+      <SupplierReturnsList openOnly />
       <div className="card p0"><div style={{ padding: '16px 16px 0' }}><h3><Icon n="wallet" /> Money owed to suppliers, bill by bill</h3></div>
         {P.length ? <div className="tw"><table className="t"><thead><tr><th>Supplier / bill</th><th>Bill date</th><th>Due</th><th className="r">Bill</th><th className="r">Still to pay</th><th /></tr></thead><tbody>
           {P.map((p) => [<tr key={p.id} style={{ background: 'var(--bg)' }}><td colSpan={4}><b>{p.name}</b> <span className="code">{p.credit_days} days credit{p.phone ? ', ' + p.phone : ''}</span></td><td className="r"><b>{balTxt(-p.balance)}</b></td><td><button className="btn sm" onClick={() => setPayTo(p)}><Icon n="cash" /> Pay</button></td></tr>,

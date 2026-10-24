@@ -3,14 +3,15 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useGrns, useLedgers, useProducts, useRefresh, useReturns, useShops, useStock, useSuppliers } from '../data/queries';
+import { useGrns, useLedgers, useProducts, useRefresh, useReturns, useSettings, useShops, useStock, useSupplierReturns, useSupplierReturnValues, useSuppliers } from '../data/queries';
 import { rpc } from '../lib/supabase';
 import { ctnTxt } from '../lib/units';
-import { dt, sum } from '../lib/format';
+import { dt, fUSD, sum } from '../lib/format';
+import { printHTML, supplierReturnNoteHTML } from '../lib/print';
 import { Empty, Head, Modal, Note, useAction, useToast } from '../components/ui';
 import { QtyCell } from './Inventory';
-import { BillModal, StatementView } from './Accounts';
-import type { Grn, Product, ShopReturn } from '../lib/types';
+import { BillModal, StatementView, usePayables } from './Accounts';
+import type { Grn, Product, ShopReturn, SupplierReturn } from '../lib/types';
 
 export type Line = { n: string; u: 'ctn' | 'pcs' };
 export const per = (p: Product) => (!p.is_bundle && p.per_carton > 1 ? p.per_carton : 0);
@@ -61,16 +62,111 @@ export function ReceiveGoodsModal({ pid, onClose }: { pid?: string; onClose: () 
   );
 }
 
+const RTS_REASONS = ['Damaged', 'Expired', 'Wrong item', 'Not ordered', 'Other'];
+/** The warehouse (or Admin) sends goods back to a supplier: they leave the store at once and a return note prints. */
+export function ReturnToSupplierModal({ onClose }: { onClose: () => void }) {
+  const products = useProducts(), suppliers = useSuppliers(), settings = useSettings(), refresh = useRefresh(), toast = useToast(), a = useAction();
+  const [sup, setSup] = useState(''), [reason, setReason] = useState(''), [note, setNote] = useState(''), [q, setQ] = useState('');
+  const { pcsOf, cell } = useQtyLines();
+  const all = (products.data ?? []).filter((p) => p.active), byId = new Map(all.map((p) => [p.id, p]));
+  const s = suppliers.data?.find((x) => x.id === sup), theirs = new Set((s?.supplier_items ?? []).map((i) => i.product_id));
+  const ql = q.trim().toLowerCase(), chosen = all.filter((p) => pcsOf(p) > 0), over = chosen.filter((p) => pcsOf(p) > p.wh_qty);
+  const list = all.filter((p) => pcsOf(p) > 0 || (ql ? (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql) : (!s || theirs.has(p.id) || !theirs.size) && p.wh_qty > 0))
+    .sort((x, y) => Number(pcsOf(y) > 0) - Number(pcsOf(x) > 0) || Number(theirs.has(y.id)) - Number(theirs.has(x.id)) || x.name.localeCompare(y.name)).slice(0, 150);
+  const save = () => a.run(async () => {
+    if (!sup) throw new Error('Choose the supplier first');
+    if (!reason) throw new Error('Choose why the goods go back');
+    if (!chosen.length) throw new Error('Enter a quantity for at least one item');
+    const lines = chosen.map((p) => ({ product_id: p.id, qty: pcsOf(p) }));
+    const r = await rpc<{ id: string; no: string }>('create_supplier_return', { p: { supplier_id: sup, reason, note, lines } });
+    printHTML(supplierReturnNoteHTML({ no: r.no, kind: 'return', reason, note, created_at: new Date().toISOString(), created_by_name: '', supplier_return_items: lines }, s?.name ?? '', settings.data?.company ?? {}, byId));
+    await refresh('products', 'sreturns', 'audit'); toast(`${r.no}: ${sum(chosen, pcsOf)} units sent back to ${s?.name}. Printing the return note.`); onClose();
+  });
+  return (
+    <Modal title="Return goods to a supplier" icon="exchange" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy || over.length > 0} onClick={() => void save()}><Icon n="check" /> Send back and print</button></>}>
+      <div className="frow"><div className="field"><label>Supplier</label><select id="rsup" className="input" value={sup} onChange={(e) => setSup(e.target.value)}><option value="">Choose the supplier</option>{(suppliers.data ?? []).filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></div>
+        <div className="field"><label>Why</label><select id="rreason2" className="input" value={reason} onChange={(e) => setReason(e.target.value)}><option value="">Choose the reason</option>{RTS_REASONS.map((x) => <option key={x}>{x}</option>)}</select></div></div>
+      <div className="search" style={{ maxWidth: 'none', marginBottom: 10 }}><Icon n="search" /><input placeholder={s && theirs.size ? `Showing ${s.name}'s items in the store. Type to find any item` : 'Find an item by name, code or category'} value={q} onChange={(e) => setQ(e.target.value)} /></div>
+      <div className="tw" style={{ maxHeight: '44vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}>
+        {list.length ? <table className="t"><thead><tr><th>Item</th><th className="r">In store</th><th style={{ width: 200 }}>Send back</th></tr></thead><tbody>
+          {list.map((p) => <tr key={p.id}><td><b>{p.name}</b>{theirs.has(p.id) ? <> <span className="chip ok">from this supplier</span></> : null}<div className="code">{p.sku}{per(p) ? ` · ${per(p)} pcs per carton` : ''}</div></td>
+            <td className="r"><QtyCell p={p} q={p.wh_qty} cls={pcsOf(p) > p.wh_qty ? 'bad' : ''} /></td><td>{cell(p)}</td></tr>)}
+        </tbody></table> : <Empty i="search" t="No items match" />}
+      </div>
+      <div className="field" style={{ marginTop: 12 }}><label>Note (optional)</label><input className="input" maxLength={160} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. caps broken in 2 cartons" /></div>
+      {over.length ? <Note i="alert" warn>More than the store has: {over.map((p) => p.name).join(', ')}.</Note>
+        : <Note i="exchange">{chosen.length} item{chosen.length === 1 ? '' : 's'}, {sum(chosen, pcsOf)} units. They leave the central store now, and what you owe the supplier drops at item cost. The Admin settles the amount the supplier credits.</Note>}
+      <div className="lerr">{a.err}</div>
+    </Modal>
+  );
+}
+
+/** Returns to suppliers and claims for goods billed but not received; the Admin sees values and settles or cancels. */
+export function SupplierReturnsList({ openOnly = false }: { openOnly?: boolean }) {
+  const { profile } = useAuth(), isAdmin = profile!.role === 'admin';
+  const list0 = useSupplierReturns(), vals = useSupplierReturnValues(isAdmin), suppliers = useSuppliers(), products = useProducts(), settings = useSettings();
+  const [settle, setSettle] = useState<SupplierReturn | null>(null), [cancel, setCancel] = useState<SupplierReturn | null>(null);
+  const byId = useMemo(() => new Map((products.data ?? []).map((p) => [p.id, p])), [products.data]);
+  const val = new Map((vals.data ?? []).map((v) => [v.id, v])), supName = (id: string) => suppliers.data?.find((s) => s.id === id)?.name ?? '';
+  const list = (list0.data ?? []).filter((r) => !openOnly || r.status === 'open');
+  if (openOnly && !list.length) return null;
+  return (
+    <div className="card p0"><div style={{ padding: '16px 16px 0' }}><h3><Icon n="exchange" /> {openOnly ? `Returns and claims to settle (${list.length})` : 'Returns to suppliers and claims'}</h3></div>
+      {list.length ? <div className="tw"><table className="t" id="rtslist"><thead><tr><th>No.</th><th>Supplier</th><th>Items</th><th>Reason</th>{isAdmin ? <th className="r">Value</th> : null}<th>Status</th><th /></tr></thead><tbody>
+        {list.map((r) => { const v = val.get(r.id); return <tr key={r.id}><td><b>{r.no}</b><div className="code">{dt(r.created_at)}, {r.created_by_name}</div></td><td>{supName(r.supplier_id)}</td>
+          <td>{r.supplier_return_items.map((i) => { const p = byId.get(i.product_id); return <div key={i.product_id}>{i.qty} {p?.stock_unit} {p?.name}</div>; })}</td>
+          <td>{r.kind === 'short' ? <span className="chip warn">Billed, not received</span> : r.reason}{r.note ? <div className="code">{r.note}</div> : null}</td>
+          {isAdmin ? <td className="r nw">{v ? <>{fUSD(v.amount_usd)}{Math.abs(v.amount_usd - v.value_usd) > 0.005 ? <div className="code">cost {fUSD(v.value_usd)}</div> : null}{v.bill_no ? <div className="code">on {v.bill_no}</div> : null}</> : '-'}</td> : null}
+          <td>{r.status === 'open' ? <span className="chip warn">Open</span> : r.status === 'settled' ? <span className="chip ok">Settled</span> : <span className="chip bad" title={r.cancel_reason ?? ''}>Cancelled</span>}</td>
+          <td className="nw"><button className="btn sm" title="Print the return note" onClick={() => printHTML(supplierReturnNoteHTML(r, supName(r.supplier_id), settings.data?.company ?? {}, byId))}><Icon n="printer" /></button>
+            {isAdmin && r.status !== 'cancelled' ? <button className="btn primary sm" onClick={() => setSettle(r)}><Icon n="check" /> {r.status === 'open' ? 'Settle' : 'Change'}</button> : null}
+            {isAdmin && r.status === 'open' ? <button className="btn sm" onClick={() => setCancel(r)}><Icon n="x" /></button> : null}</td></tr>; })}
+      </tbody></table></div> : <Empty i="exchange" t={list0.isLoading ? 'Loading' : 'Nothing sent back to suppliers'} />}
+      {settle ? <SettleReturnModal r={settle} value={val.get(settle.id)} supplier={supName(settle.supplier_id)} onClose={() => setSettle(null)} /> : null}
+      {cancel ? <CancelReturnModal r={cancel} onClose={() => setCancel(null)} /> : null}
+    </div>
+  );
+}
+function SettleReturnModal({ r, value, supplier, onClose }: { r: SupplierReturn; value?: { value_usd: number; amount_usd: number }; supplier: string; onClose: () => void }) {
+  const pay = usePayables(), refresh = useRefresh(), toast = useToast(), a = useAction();
+  const sup = useSuppliers().data?.find((s) => s.id === r.supplier_id);
+  const bills = (pay.data ?? []).find((p) => p.id === r.supplier_id || p.id === sup?.account_id || p.name === supplier)?.bills ?? [];
+  const [amt, setAmt] = useState(String(value?.amount_usd ?? '')), [bill, setBill] = useState(r.bill_id ?? '');
+  const go = () => a.run(async () => {
+    await rpc('settle_supplier_return', { p: { id: r.id, amount_usd: Number(amt), bill_id: bill || null } });
+    await refresh('sreturns', 'audit'); toast(`${r.no} settled with ${supplier}`); onClose();
+  });
+  return (
+    <Modal title={`Settle ${r.no} with ${supplier}`} icon="check" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void go()}><Icon n="check" /> Settle</button></>}>
+      <div className="frow"><div className="field"><label htmlFor="ramt">Amount the supplier credits (USD)</label><input id="ramt" className="input" type="number" min="0" step="0.01" value={amt} onChange={(e) => setAmt(e.target.value)} /><span className="hint">At item cost: {fUSD(value?.value_usd ?? 0)}. A different amount goes to Purchase price difference.</span></div>
+        <div className="field"><label>Set against the bill</label><select id="rbill" className="input" value={bill} onChange={(e) => setBill(e.target.value)}><option value="">No bill (on account)</option>
+          {bills.map((b) => <option key={b.id} value={b.id}>{b.bill_ref} ({b.no}), still to pay {fUSD(b.outstanding)}</option>)}</select></div></div>
+      <div className="lerr">{a.err}</div>
+    </Modal>
+  );
+}
+function CancelReturnModal({ r, onClose }: { r: SupplierReturn; onClose: () => void }) {
+  const refresh = useRefresh(), toast = useToast(), a = useAction(), [why, setWhy] = useState('');
+  const go = () => a.run(async () => { await rpc('cancel_supplier_return', { p_id: r.id, p_reason: why }); await refresh('products', 'sreturns', 'audit'); toast(`${r.no} cancelled`, 'warn'); onClose(); });
+  return (
+    <Modal title={`Cancel ${r.no}`} icon="x" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Keep it</button><button className="btn danger" disabled={a.busy} onClick={() => void go()}><Icon n="x" /> Cancel {r.no}</button></>}>
+      <p>{r.kind === 'return' ? 'The goods come back into the central store and the debit note is cancelled.' : 'The claim is dropped and the bill is owed in full again.'}</p>
+      <div className="field"><label>Reason</label><input className="input" maxLength={80} value={why} onChange={(e) => setWhy(e.target.value)} placeholder="e.g. supplier refused the return" autoFocus /></div>
+      <div className="lerr">{a.err}</div>
+    </Modal>
+  );
+}
+
 export function GoodsIn() {
   const { profile } = useAuth(), isAdmin = profile!.role === 'admin';
   const grns = useGrns(), suppliers = useSuppliers(), products = useProducts();
-  const [recv, setRecv] = useState(false), [bill, setBill] = useState<Grn | null>(null), [f, setF] = useState<'all' | 'awaiting_bill'>('all');
+  const [recv, setRecv] = useState(false), [rts, setRts] = useState(false), [bill, setBill] = useState<Grn | null>(null), [f, setF] = useState<'all' | 'awaiting_bill'>('all');
   const byId = useMemo(() => new Map((products.data ?? []).map((p) => [p.id, p])), [products.data]);
   const supName = (id: string) => suppliers.data?.find((s) => s.id === id)?.name ?? '';
   const list = (grns.data ?? []).filter((g) => f === 'all' || g.status === f), waiting = (grns.data ?? []).filter((g) => g.status === 'awaiting_bill').length;
   return (
     <>
-      <Head t="Goods in" s="Every delivery from a supplier, with what came in. Each one waits for the Admin to enter the supplier's bill." a={<button className="btn primary" onClick={() => setRecv(true)}><Icon n="truck" /> Receive from supplier</button>} />
+      <Head t="Goods in" s="Every delivery from a supplier, with what came in. Each one waits for the Admin to enter the supplier's bill." a={<><button id="rtsbtn" className="btn ghost" onClick={() => setRts(true)}><Icon n="exchange" /> Return to supplier</button><button className="btn primary" onClick={() => setRecv(true)}><Icon n="truck" /> Receive from supplier</button></>} />
       <div className="toolbar"><div className="seg"><button className={f === 'all' ? 'on' : ''} onClick={() => setF('all')}>All</button><button className={f === 'awaiting_bill' ? 'on' : ''} onClick={() => setF('awaiting_bill')}>Waiting for the bill ({waiting})</button></div></div>
       <div className="card p0"><div className="tw">{list.length ? <table className="t"><thead><tr><th>Receipt</th><th>Supplier</th><th>Received</th><th>Items</th><th>Bill</th><th /></tr></thead><tbody>
         {list.map((g) => <tr key={g.id}><td><b>{g.no}</b>{g.ref ? <div className="code">{g.ref}</div> : null}</td><td>{supName(g.supplier_id)}</td><td className="nw">{dt(g.received_at)}<div className="code">{g.received_by_name}</div></td>
@@ -78,7 +174,9 @@ export function GoodsIn() {
           <td>{g.status === 'billed' ? <span className="chip ok">Bill entered</span> : <span className="chip warn">Waiting for the bill</span>}</td>
           <td>{isAdmin && g.status === 'awaiting_bill' ? <button className="btn primary sm" onClick={() => setBill(g)}><Icon n="receipt" /> Enter bill</button> : null}</td></tr>)}
       </tbody></table> : <Empty i="truck" t={grns.isLoading ? 'Loading' : 'Nothing received yet'} />}</div></div>
+      <SupplierReturnsList />
       {recv ? <ReceiveGoodsModal onClose={() => setRecv(false)} /> : null}
+      {rts ? <ReturnToSupplierModal onClose={() => setRts(false)} /> : null}
       {bill ? <BillModal grn={bill} onClose={() => setBill(null)} /> : null}
     </>
   );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
-import { cashNotes, ctnTxt, hotSort, payment, pcValue, takeLocal, totals, unitsOf, usdNotes } from './units';
+import { cashNotes, ctnTxt, hotSort, marginPct, payment, pcValue, takeLocal, totals, unitsOf, usdNotes } from './units';
 import { custName, findByCode, itemProblem } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
@@ -129,4 +129,13 @@ describe('payment in USD and CDF', () => {
     expect(payment(1000, 2850, 2, 20000, true).changeUsd).toBe(2);
   });
   it('offers the USD notes that cover what is due', () => { expect(usdNotes(14.04)).toEqual([20, 50, 100]); expect(usdNotes(0.4)).toEqual([1, 5, 10]); });
+});
+describe('margin', () => {
+  it('is the mark-up on cost: cost + margin % = selling price', () => {
+    expect(marginPct(1.28, 0.9)).toBe(42);   // 0.38 / 0.90 = 42.2%
+    expect(marginPct(1.29, 0.9)).toBe(43);
+    expect(marginPct(2, 1)).toBe(100);
+    expect(marginPct(0.8, 1)).toBe(-20);
+    expect(marginPct(1, 0)).toBeNull();
+  });
 });

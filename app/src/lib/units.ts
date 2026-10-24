@@ -77,3 +77,5 @@ export function payment(total: number, rate: number, usd: number | string, cdf: 
 }
 /** USD notes worth offering: the smallest ones that cover what is due, and the common bigger ones. */
 export const usdNotes = (due: number) => { const up = [1, 5, 10, 20, 50, 100].filter((n) => n >= due).slice(0, 3); return up.length ? up : [100]; };
+/** Margin as a mark-up on cost: cost + margin % = selling price (cost 0.90, price 1.28 -> 42%). Null when there is no cost. */
+export const marginPct = (price: number, cost: number) => (cost > 0 ? Math.round(((price - cost) / cost) * 100) : null);

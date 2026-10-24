@@ -3,7 +3,7 @@ import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useCategories, useCosts, useProducts, useRanks, useRefresh, useSettings } from '../data/queries';
 import { rpc } from '../lib/supabase';
-import { ctnTxt, hotSet, hotSort, pcValue, unitLabel, unitsOf } from '../lib/units';
+import { ctnTxt, hotSet, hotSort, marginPct, pcValue, unitLabel, unitsOf } from '../lib/units';
 import { itemProblem, MONTHS, type ItemInput } from '../lib/items';
 import { ReceiveGoodsModal } from './Stores';
 import { bookRate, fCDF, fUSD, toCDF } from '../lib/format';
@@ -45,14 +45,14 @@ export default function Inventory() {
         {isAdmin ? null : <span className="chip warn"><Icon n="lock" /> Cost prices hidden for your role</span>}<span className="hint">Best sellers of the last 30 days come first; seasonal items out of season come last.</span></div>
       <div className="card p0"><div className="tw">
         {products.isLoading ? <Empty i="refresh" t="Loading items" /> : !list.length ? <Empty i="search" t={products.data?.length ? 'No items match your search' : 'No items yet. Add one or import from Excel.'} /> :
-          <table className="t"><thead><tr><th>Item</th><th>Category</th><th className="r">In store</th>{isAdmin ? <th>Cost</th> : null}<th>Selling prices</th>{isAdmin ? <th className="r">Margin</th> : null}<th /></tr></thead><tbody>
+          <table className="t"><thead><tr><th>Item</th><th>Category</th><th className="r">In store</th>{isAdmin ? <th>Cost</th> : null}<th>Selling prices</th>{isAdmin ? <th className="r" title="Mark-up on cost: cost + margin % = selling price">Margin on cost</th> : null}<th /></tr></thead><tbody>
             {list.map((p) => { const c = costOf.get(p.id); return (
               <tr key={p.id}>
                 <td><b>{p.name}</b>{hot.has(p.id) ? <> <span className="chip hot">Hot</span></> : null}<div className="code">{p.sku}{p.barcode ? ` · ${p.barcode}` : ''}{p.is_bundle ? ` · mixed set of ${p.pieces_per_set}` : p.per_carton > 1 ? ` · ${p.per_carton} pcs per carton` : ''}</div></td><td>{p.category}</td>
                 <td className="r"><QtyCell p={p} q={p.wh_qty} cls={p.wh_qty <= p.reorder ? 'bad' : 'ok'} /></td>
                 {isAdmin ? <td>{c ? (p.is_bundle ? <><Dual usd={c.cost_usd} rate={book} /><div className="code">per set</div></> : <><Dual usd={c.carton_cost_usd} rate={book} /><div className="code">per carton, {fUSD(c.cost_usd)} per pc</div></>) : '-'}</td> : null}
                 <td>{unitsOf(p).map((u, k) => <div key={k} style={{ whiteSpace: 'nowrap' }}><span className="uchip">{unitLabel(u)}</span> <b>{fCDF(toCDF(u.usd, rate))}</b>{isAdmin ? <span className="code"> {fUSD(u.usd)}</span> : null}</div>)}</td>
-                {isAdmin ? <td className="r"><b>{c && pcValue(p) > 0 ? Math.round(((pcValue(p) - c.cost_usd) / pcValue(p)) * 100) : 0}%</b><div className="code">per {p.is_bundle ? 'set' : 'pc'}</div></td> : null}
+                {isAdmin ? <td className="r"><b>{c && pcValue(p) > 0 ? (marginPct(pcValue(p), Number(c.cost_usd)) ?? '-') : '-'}{c && pcValue(p) > 0 && Number(c.cost_usd) > 0 ? '%' : ''}</b><div className="code">per {p.is_bundle ? 'set' : 'pc'}</div></td> : null}
                 <td><div className="act">{!p.active ? <button title="Restore this item" onClick={() => void restore(p)}><Icon n="refresh" /></button>
                   : isAdmin ? <><button title="Edit item and prices" onClick={() => setEdit(p)}><Icon n="edit" /></button><button title="Stock count: correct the store quantity" onClick={() => setCount(p)}><Icon n="layers" /></button><button title="Delete item" onClick={() => void del(p)}><Icon n="trash" /></button></>
                   : <button title="Receive from supplier" onClick={() => setRecv(p)}><Icon n="plus" /></button>}</div></td>
@@ -83,7 +83,7 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
   const o: ItemInput = { name: f.name, category: f.category, is_bundle: f.is_bundle, carton_cost: num(f.carton_cost), per_carton: num(f.per_carton), pc: num(f.pc), half: num(f.half) || 0, dzn: num(f.dzn) || 0, ctn: num(f.ctn) || 0,
     set_cost: num(f.set_cost), set_price: num(f.set_price), pcs: num(f.pcs), piece: num(f.piece) };
   const problem = itemProblem(o), below = !!problem && /below/.test(problem);
-  const row = (u: string, price: number, c: number) => (price > 0 ? <tr key={u}><td><b>{u}</b></td><td className="r"><b>{fCDF(toCDF(price, rate))}</b></td><td className="r">{fUSD(price)}</td><td className="r">{c >= 0 ? fUSD(c) : '-'}</td><td className="r">{c >= 0 ? <span className={`chip ${price < c ? 'bad' : 'ok'}`}>{Math.round(((price - c) / price) * 100)}%</span> : null}</td></tr> : null);
+  const row = (u: string, price: number, c: number) => (price > 0 ? <tr key={u}><td><b>{u}</b></td><td className="r"><b>{fCDF(toCDF(price, rate))}</b></td><td className="r">{fUSD(price)}</td><td className="r">{c >= 0 ? fUSD(c) : '-'}</td><td className="r">{c >= 0 ? <span className={`chip ${price < c ? 'bad' : 'ok'}`}>{marginPct(price, c) ?? '-'}{c > 0 ? '%' : ''}</span> : null}</td></tr> : null);
   const cpc = o.carton_cost >= 0 && o.per_carton > 1 ? o.carton_cost / o.per_carton : -1;
   const rows = o.is_bundle ? [row('1 set', o.set_price, o.set_cost), row('1 piece', o.piece, o.set_cost >= 0 && o.pcs > 1 ? o.set_cost / o.pcs : -1)]
     : [row('1 pc', o.pc, cpc), o.per_carton !== 6 ? row('half dozen (6 pcs)', o.half, cpc >= 0 ? cpc * 6 : -1) : null, o.per_carton !== 12 ? row('1 dozen (12 pcs)', o.dzn, cpc >= 0 ? cpc * 12 : -1) : null, row(`1 carton${o.per_carton > 1 ? ` (${o.per_carton} pcs)` : ''}`, o.ctn, o.carton_cost >= 0 ? o.carton_cost : -1)];
@@ -117,7 +117,7 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
       </>}
       <div id="iprev" className={`note ${below ? 'warn' : ''}`}><Icon n={below ? 'alert' : 'lock'} /><div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ marginBottom: 6 }}>Shops sell at these prices, locked. 1 USD = {fCDF(rate)}.{below ? <b> {problem}.</b> : null}</div>
-        {rows.some(Boolean) ? <div className="tw"><table className="t" style={{ fontSize: 13.5 }}><thead><tr><th>Unit</th><th className="r">Shop price</th><th className="r">USD</th><th className="r">Cost</th><th className="r">Margin</th></tr></thead><tbody>{rows}</tbody></table></div> : 'Enter prices to see the shop price in Francs.'}
+        {rows.some(Boolean) ? <div className="tw"><table className="t" style={{ fontSize: 13.5 }}><thead><tr><th>Unit</th><th className="r">Shop price</th><th className="r">USD</th><th className="r">Cost</th><th className="r" title="Mark-up on cost: cost + margin % = selling price">Margin on cost</th></tr></thead><tbody>{rows}</tbody></table></div> : 'Enter prices to see the shop price in Francs.'}
       </div></div>
       {p ? <Note i="box">Currently {p.wh_qty} {p.stock_unit} in the store{ctnTxt(p, p.wh_qty) ? `, ${ctnTxt(p, p.wh_qty)}` : ''}. New stock comes in through <b>Receive from supplier</b>; a counting error is corrected with the stock count button.</Note>
         : <div className="frow">{!f.is_bundle ? <div className="field"><label>Opening stock, cartons</label><input id="iqc" className="input" type="number" min="0" step="1" value={f.qc} onChange={set('qc')} /></div> : null}
