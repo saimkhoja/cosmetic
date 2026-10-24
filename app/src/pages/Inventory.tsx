@@ -84,9 +84,9 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
     set_cost: num(f.set_cost), set_price: num(f.set_price), pcs: num(f.pcs), piece: num(f.piece) };
   const problem = itemProblem(o), below = !!problem && /below/.test(problem);
   const row = (u: string, price: number, c: number) => (price > 0 ? <tr key={u}><td><b>{u}</b></td><td className="r"><b>{fCDF(toCDF(price, rate))}</b></td><td className="r">{fUSD(price)}</td><td className="r">{c >= 0 ? fUSD(c) : '-'}</td><td className="r">{c >= 0 ? <span className={`chip ${price < c ? 'bad' : 'ok'}`}>{marginPct(price, c) ?? '-'}{c > 0 ? '%' : ''}</span> : null}</td></tr> : null);
-  const cpc = o.carton_cost >= 0 && o.per_carton > 1 ? o.carton_cost / o.per_carton : -1;
+  const cpc = o.carton_cost >= 0 && o.per_carton >= 1 ? o.carton_cost / o.per_carton : -1;
   const rows = o.is_bundle ? [row('1 set', o.set_price, o.set_cost), row('1 piece', o.piece, o.set_cost >= 0 && o.pcs > 1 ? o.set_cost / o.pcs : -1)]
-    : [row('1 pc', o.pc, cpc), o.per_carton !== 6 ? row('half dozen (6 pcs)', o.half, cpc >= 0 ? cpc * 6 : -1) : null, o.per_carton !== 12 ? row('1 dozen (12 pcs)', o.dzn, cpc >= 0 ? cpc * 12 : -1) : null, row(`1 carton${o.per_carton > 1 ? ` (${o.per_carton} pcs)` : ''}`, o.ctn, o.carton_cost >= 0 ? o.carton_cost : -1)];
+    : [row('1 pc', o.pc || (o.per_carton === 1 ? o.ctn : 0), cpc), o.per_carton !== 6 ? row('half dozen (6 pcs)', o.half, cpc >= 0 ? cpc * 6 : -1) : null, o.per_carton !== 12 ? row('1 dozen (12 pcs)', o.dzn, cpc >= 0 ? cpc * 12 : -1) : null, o.per_carton !== 1 ? row(`1 carton${o.per_carton > 1 ? ` (${o.per_carton} pcs)` : ''}`, o.ctn, o.carton_cost >= 0 ? o.carton_cost : -1) : null];
   const save = () => a.run(async () => {
     if (problem) throw new Error(problem);
     await rpc('save_product', { p: { id: p?.id ?? null, name: f.name, category: f.category, is_bundle: f.is_bundle, carton_cost: o.carton_cost, per_carton: o.per_carton, pc: o.pc, half: o.half, dzn: o.dzn, ctn: o.ctn,
@@ -102,7 +102,7 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
       <label className="switch"><input type="checkbox" id="ibundle" checked={f.is_bundle} onChange={set('is_bundle')} /><span>This is a mixed set sold together, for example assorted brushes or clips</span></label>
       {!f.is_bundle ? <>
         <div className="frow"><div className="field"><label>Cost of one carton (USD)</label><input id="icc" className="input" type="number" min="0" step="0.01" value={f.carton_cost} onChange={set('carton_cost')} /></div>
-          <div className="field"><label>Pcs in one carton</label><input id="ipc" className="input" type="number" min="2" step="1" value={f.per_carton} onChange={set('per_carton')} /></div></div>
+          <div className="field"><label>Pcs in one carton</label><input id="ipc" className="input" type="number" min="1" step="1" value={f.per_carton} onChange={set('per_carton')} /></div></div>
         <div className="frow"><div className="field"><label>Selling price per pc (USD)</label><input id="isell" className="input" type="number" min="0" step="0.01" value={f.pc} placeholder="Optional" onChange={set('pc')} /></div>
           <div className="field"><label>Per half dozen, 6 pcs (USD)</label><input id="ihz" className="input" type="number" min="0" step="0.01" value={f.half} placeholder="Optional" onChange={set('half')} /></div></div>
         <div className="frow"><div className="field"><label>Per dozen, 12 pcs (USD)</label><input id="idz" className="input" type="number" min="0" step="0.01" value={f.dzn} placeholder="Optional" onChange={set('dzn')} /></div>
