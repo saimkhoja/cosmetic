@@ -1,7 +1,7 @@
 # Nightly encrypted backup of each client's SIM database to Cloudflare R2 (or any S3-compatible storage).
 # Daily copies go to <client>/daily/ (an R2 lifecycle rule deletes them after 30 days); the backup of the
 # 1st of each month also goes to <client>/monthly/ and is kept. See deploy/DEPLOY.md, section 8.
-# Secrets: CLIENT1_DB_URL, BACKUP_PASSPHRASE, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
+# Secrets: CLIENT1_DB_URL, CLIENT2_DB_URL, BACKUP_PASSPHRASE, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
 name: Backup
 on:
   schedule:
@@ -22,9 +22,8 @@ jobs:
         include:
           - client: client1
             db_secret: CLIENT1_DB_URL
-          # client 2: add the secret CLIENT2_DB_URL, then uncomment
-          # - client: client2
-          #   db_secret: CLIENT2_DB_URL
+          - client: client2
+            db_secret: CLIENT2_DB_URL
     env:
       CLIENT: ${{ matrix.client }}
       DB_URL: ${{ secrets[matrix.db_secret] }}

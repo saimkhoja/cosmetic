@@ -217,7 +217,7 @@ The live database keeps all data for ever: every invoice and voucher from the fi
    | `R2_BUCKET` | `sim-backups` |
 
 5. **Test it now.** GitHub → **Actions → Backup → Run workflow**. After a minute or two the run is green and says `client1 backup saved: client1/daily/client1-2026-…dump.gpg`; the file shows in the R2 bucket. A red run sends an email to the repository owner; the log says which step failed (for example a secret that isn't set).
-6. **Client 2:** add the secret `CLIENT2_DB_URL`, then remove the `#` from the two `client2` lines in `.github/workflows/backup.yml`.
+6. **Client 2** is in the workflow too: add the secret `CLIENT2_DB_URL` (client 2's Session pooler URI) and an R2 lifecycle rule for `client2/daily/`. Each client runs as its own job, so one failing never stops the other. **Another client:** add a `CLIENTn_DB_URL` secret and two lines (`- client: clientn` / `db_secret: CLIENTn_DB_URL`) under `matrix.include` in `.github/workflows/backup.yml`.
 
 GitHub pauses scheduled jobs in a repository that has had **no commit for 60 days**. It emails a warning first; re-enable the job under **Actions → Backup** with one click (or make any commit). A backup can also be taken at any moment with **Run workflow**.
 
