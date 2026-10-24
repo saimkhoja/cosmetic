@@ -1,0 +1,77 @@
+# Nightly encrypted backup of each client's SIM database to Cloudflare R2 (or any S3-compatible storage).
+# Daily copies go to <client>/daily/ (an R2 lifecycle rule deletes them after 30 days); the backup of the
+# 1st of each month also goes to <client>/monthly/ and is kept. See deploy/DEPLOY.md, section 8.
+# Secrets: CLIENT1_DB_URL, BACKUP_PASSPHRASE, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
+name: Backup
+on:
+  schedule:
+    - cron: '17 1 * * *'   # 01:17 UTC = 02:17 in Kinshasa
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: backup
+  cancel-in-progress: false
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - client: client1
+            db_secret: CLIENT1_DB_URL
+          # client 2: add the secret CLIENT2_DB_URL, then uncomment
+          # - client: client2
+          #   db_secret: CLIENT2_DB_URL
+    env:
+      CLIENT: ${{ matrix.client }}
+      DB_URL: ${{ secrets[matrix.db_secret] }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+    steps:
+      - name: Check the secrets are set
+        run: |
+          missing=""
+          for v in DB_URL BACKUP_PASSPHRASE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ENDPOINT R2_BUCKET; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then echo "::error::Not set for $CLIENT:$missing (DB_URL is the secret ${{ matrix.db_secret }})"; exit 1; fi
+      - name: Install the PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
+      - name: Dump the database
+        run: |
+          set -euo pipefail
+          FILE="$CLIENT-$(date -u +%Y-%m-%d-%H%M).dump"
+          echo "FILE=$FILE" >> "$GITHUB_ENV"
+          /usr/lib/postgresql/17/bin/pg_dump "$DB_URL" --format=custom --no-owner --no-privileges \
+            --schema=public --schema=app --schema=auth --file="$FILE"
+          # a usable backup: not empty, readable, and it has the invoices and the logins
+          /usr/lib/postgresql/17/bin/pg_restore --list "$FILE" > list.txt
+          grep -q 'TABLE DATA public invoices' list.txt && grep -q 'TABLE DATA auth users' list.txt
+          echo "Dump: $(du -h "$FILE" | cut -f1), $(grep -c 'TABLE DATA' list.txt) tables"
+      - name: Encrypt
+        run: |
+          set -euo pipefail
+          gpg --batch --yes --symmetric --cipher-algo AES256 --pinentry-mode loopback --passphrase-fd 0 --output "$FILE.gpg" "$FILE" <<< "$BACKUP_PASSPHRASE"
+          rm -f "$FILE" list.txt
+      - name: Upload
+        run: |
+          set -euo pipefail
+          aws s3 cp "$FILE.gpg" "s3://$R2_BUCKET/$CLIENT/daily/$FILE.gpg" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          if [ "$(date -u +%d)" = "01" ]; then
+            aws s3 cp "$FILE.gpg" "s3://$R2_BUCKET/$CLIENT/monthly/$FILE.gpg" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          fi
+          echo "### $CLIENT backup saved: \`$CLIENT/daily/$FILE.gpg\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Clean up
+        if: always()
+        run: rm -f ./*.dump ./*.dump.gpg list.txt

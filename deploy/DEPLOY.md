@@ -189,8 +189,50 @@ It is not a migration and never runs on its own.
 
 ## 8. Backups and exporting data
 
-- Supabase Pro takes daily backups (Dashboard → Database → Backups).
-- For your own copy at any time: `supabase db dump --data-only -f sim-backup.sql` from your computer.
+The live database keeps all data for ever: every invoice and voucher from the first day stays in it. Backups are for getting back to an earlier state: after a mistake, a deletion noticed late, or when a client asks for the data as it was on a given date.
+
+- **Supabase Pro** takes a daily backup and keeps the last 7 days (Dashboard → Database → Backups). Good for "undo yesterday".
+- **SIM's own nightly backup** (`.github/workflows/backup.yml`) keeps much more. Every night at 02:17 Kinshasa time it dumps the whole database (data, settings, logins), encrypts it with your passphrase and stores it in Cloudflare R2:
+  - **daily** copies for 30 days;
+  - the copy of the 1st of each month **for ever**.
+  - It costs a few cents a month; R2's first 10 GB are free.
+
+### Setting up the nightly backup (once)
+
+1. **Cloudflare R2.** Sign up at cloudflare.com, then go to **R2 Object Storage** and create a bucket, e.g. `sim-backups`.
+   - **Manage R2 API Tokens → Create API token**: permission **Object Read & Write**, limited to that bucket. Copy the **Access Key ID**, the **Secret Access Key** and the **S3 endpoint** (`https://<account-id>.r2.cloudflarestorage.com`).
+   - Bucket → **Settings → Object lifecycle rules → Add rule**: prefix `client1/daily/`, *delete objects 30 days after upload*. Add the same rule for `client2/daily/` later. Don't add a rule for `monthly/`.
+2. **The database address.** In client 1's Supabase project, click **Connect** and copy the **Session pooler** URI, then put in the database password. (If you don't know the password, reset it under Project Settings → Database. SIM doesn't use it.)
+3. **A backup passphrase.** Make up a long one (5 or more random words). **Write it down and keep it somewhere safe off the computer.** Without it no backup can be opened, by you or anyone else.
+4. **GitHub secrets.** In the repository on GitHub, go to **Settings → Secrets and variables → Actions → New repository secret**, and add these six:
+
+   | Name | Value |
+   |---|---|
+   | `CLIENT1_DB_URL` | the Session pooler URI from step 2 |
+   | `BACKUP_PASSPHRASE` | the passphrase from step 3 |
+   | `R2_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` |
+   | `R2_ACCESS_KEY_ID` | from step 1 |
+   | `R2_SECRET_ACCESS_KEY` | from step 1 |
+   | `R2_BUCKET` | `sim-backups` |
+
+5. **Test it now.** GitHub → **Actions → Backup → Run workflow**. After a minute or two the run is green and says `client1 backup saved: client1/daily/client1-2026-…dump.gpg`; the file shows in the R2 bucket. A red run sends an email to the repository owner; the log says which step failed (for example a secret that isn't set).
+6. **Client 2:** add the secret `CLIENT2_DB_URL`, then remove the `#` from the two `client2` lines in `.github/workflows/backup.yml`.
+
+GitHub pauses scheduled jobs in a repository that has had **no commit for 60 days**. It emails a warning first; re-enable the job under **Actions → Backup** with one click (or make any commit). A backup can also be taken at any moment with **Run workflow**.
+
+### Getting data back, or giving it to the client
+
+1. In Cloudflare R2, open the bucket, go to `client1/daily/` or `client1/monthly/`, and download the file for the date you need (`client1-YYYY-MM-DD-HHMM.dump.gpg`).
+2. Create a **new, empty** Supabase project and run all the files in `supabase/migrations` on it (section 1). Don't do the setup screen.
+3. On a computer with PostgreSQL 17 tools (`psql`, `pg_restore`) and `gpg`, run:
+   ```bash
+   supabase/scripts/restore_backup.sh client1-2026-11-01-0117.dump.gpg "<Session pooler URI of the NEW project>"
+   ```
+   It asks for the passphrase, then for the word `RESTORE`, and ends with the number of items, invoices, vouchers and logins, and the date of the last sale. It refuses any database that already has logins or invoices, so a live installation can't be overwritten by mistake.
+4. To look at that data in SIM: in Vercel, open the project's **Deployments**, pick the latest, choose **Redeploy** with the new project's URL and key as environment variables (or create a separate Vercel project for it). Everyone signs in with the passwords they had on that date. Reports, statements and the books show the data as it was, and can be printed or saved as PDF for the client.
+5. To **replace** a damaged live installation, restore into a new project as above, check it, then point client 1's Vercel project at the new project's URL and key, and redeploy.
+
+For a quick copy without the nightly job: `pg_dump "<Session pooler URI>" --format=custom --schema=public --schema=app --schema=auth -f sim-backup.dump`.
 
 ## 9. Checking the build yourself
 
