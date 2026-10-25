@@ -157,7 +157,7 @@ export function SettingsPage() {
           <div className="field"><label>Address</label><input className="input" maxLength={80} value={shop.address} onChange={(e) => setShop({ ...shop, address: e.target.value })} /></div><div className="lerr">{b.err}</div><button className="btn ghost full" disabled={b.busy} onClick={() => void addShop()}><Icon n="plus" /> Add shop</button></div></div>
       <div className="card"><h3><Icon n="cart" /> Till options</h3>
         {sw('customer_optional', 'The customer name is optional: walk-in customers are sold to without typing a name')}
-        {sw('barcode', 'Barcode scanning: items have a barcode, and scanning it at the till adds 1 pc to the sale')}
+        {sw('barcode', 'Barcode scanning: items have barcodes (several per item if needed), and scanning any of them at the till adds 1 pc to the sale')}
         {sw('till_sells', 'Till operators sell directly: they take the cash and print the invoice without the shop admin approving the order (only the shop admin gives discounts)')}
         {sw('cash_change', 'Enter the cash received: the till shows the change to give and prints the cash received and the change on the receipt')}
         {sw('usd_pay', 'Accept payment in USD (and CDF): the cashier enters the dollars and Francs received at the sales rate; change is in CDF, or whole dollars plus CDF')}
