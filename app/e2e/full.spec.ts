@@ -446,8 +446,23 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.fill('#scan', '6009998887776'); await shop.press('#scan', 'Enter');               // the second barcode scans too
   await expect(shop.locator('.line', { hasText: 'Shea body lotion' })).toContainText('pcs');
   await expect(shop.locator('#scan')).toHaveValue('');
+  await shop.fill('#scan', '6001234567890'); await shop.press('#scan', 'Enter');               // scanned again: the same line, highlighted
+  await expect(shop.locator('#cart .line')).toHaveCount(1);
+  await expect(shop.locator('#cart .line.on')).toContainText('Shea body lotion');
+  await expect(shop.locator('#cart .line.on .qty b')).toHaveText('2');
+  await shop.locator('#cart .line.on').getByLabel('One less').click();
+  await expect(shop.locator('#cart .line.on .qty b')).toHaveText('1');
   await shop.fill('#scan', '9999999999'); await shop.press('#scan', 'Enter');
   await expect(shop.getByText('No item has the barcode 9999999999')).toBeVisible();
+  // park the sale, serve nobody, and bring it back
+  await shop.click('#park');
+  await expect(shop.getByText('Sale for Walk-in parked')).toBeVisible();
+  await expect(shop.locator('#cart .line')).toHaveCount(0);
+  await expect(shop.locator('#parked')).toContainText('1');
+  await shop.click('#parked');
+  await shop.locator('.modal').getByRole('button', { name: 'Resume the sale for Walk-in' }).click();
+  await expect(shop.locator('#cart .line.on')).toContainText('Shea body lotion');
+  await expect(shop.locator('#parked')).toHaveCount(0);
   await shop.getByRole('button', { name: 'Take cash and print' }).click();
   await expect(shop.getByText(/Sale GOM-T1-\d+ for Walk-in done/)).toBeVisible();
   expect((await prints(shop)).at(-1)).not.toContain('Customer:');
@@ -460,13 +475,19 @@ test('a full day in SIM', async ({ browser }) => {
   await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
   await expect(till.locator('.line', { hasText: 'Shea body lotion' })).toBeVisible();
   await expect(till.getByRole('button', { name: 'Send to shop admin for approval' })).toHaveCount(0);
-  await expect(till.getByRole('button', { name: 'Take cash and print' })).toBeDisabled();       // the cash received comes first
+  await till.getByRole('button', { name: 'Take payment' }).click();                              // the payment window
+  const payw = till.locator('.modal');
+  await expect(payw).toContainText('14 250 CDF');
+  await expect(payw.getByRole('button', { name: 'Take cash and print' })).toBeDisabled();        // the cash received comes first
   await till.fill('#cashin', '100');
   await expect(till.locator('#cashchange')).toContainText('Not enough cash');
+  await till.fill('#cashin', '6001234567890');                                                   // a barcode scanned into the box
+  await expect(till.locator('#cashchange')).toContainText('Check the amount');
+  await expect(payw.getByRole('button', { name: 'Take cash and print' })).toBeDisabled();
   await till.fill('#cashin', '20000');
   await expect(till.locator('#cashchange')).toContainText('Change to give');
   await expect(till.locator('#cashchange')).toContainText('5 750 CDF');                          // 20 000 - 14 250
-  await till.getByRole('button', { name: 'Take cash and print' }).click();
+  await payw.getByRole('button', { name: 'Take cash and print' }).click();
   await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done, 14 250 CDF\. Change 5 750 CDF/)).toBeVisible();
   const cashRcpt = (await prints(till)).at(-1)!;
   expect(cashRcpt).toContain('Grace Mbuyi'); expect(cashRcpt).toMatch(/Cash received\s*20,000\.00/); expect(cashRcpt).toMatch(/Change\s*5,750\.00/);
@@ -476,12 +497,13 @@ test('a full day in SIM', async ({ browser }) => {
   await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
   await till.goto('/till');
   await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
+  await till.getByRole('button', { name: 'Take payment' }).click();
   await expect(till.locator('#usddue')).toHaveText('$5.00');                                     // 14 250 / 2 850
   await till.fill('#cashusd', '20');
   await expect(till.locator('#cashchange')).toContainText('42 750 CDF');                         // 57 000 - 14 250
   await till.click('#dollarsback');
   await expect(till.locator('#cashchange')).toContainText('$15 + 0 CDF');
-  await till.getByRole('button', { name: 'Take cash and print' }).click();
+  await till.locator('.modal').getByRole('button', { name: 'Take cash and print' }).click();
   await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done, 14 250 CDF\. Change \$15 \+ 0 CDF/)).toBeVisible();
   const usdRcpt = (await prints(till)).at(-1)!;
   expect(usdRcpt).toMatch(/Paid USD\s*20\.00/); expect(usdRcpt).toMatch(/Change\s*\$15 \+ 0\.00/); expect(usdRcpt).toContain('1 USD = 2850 CDF');

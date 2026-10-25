@@ -48,11 +48,11 @@ export default function Layout({ children }: { children: ReactNode }) {
   };
   return (
     <>
-      <header className="top">
+      <header className={pos ? 'top tilltop' : 'top'}>
         <div className="brand"><div className="logo">SIM</div><div style={{ minWidth: 0 }}><div className="bt">Smart Invoice Management</div><div className="bs">{shopName ?? 'Central store'}</div></div></div>
-        <div className="sp" />
+        {pos ? <div id="topslot" className="topslot" /> : <div className="sp" />}
         {pill}
-        <div className="who"><span className="av"><Icon n={ROLEICON[profile.role]} /></span><div><b>{profile.name}</b><small>{R[profile.role]}</small></div></div>
+        <div className="who" title={`${profile.name}, ${R[profile.role]}`}><span className="av"><Icon n={ROLEICON[profile.role]} /></span><div><b>{profile.name}</b><small>{R[profile.role]}</small></div></div>
         <button className="iconbtn" id="themebtn" onClick={switchTheme} title={`Screen: ${THEME_LABEL[theme]}. Click to change`} aria-label={`Screen colours: ${THEME_LABEL[theme]}. Click to change`}><Icon n={THEME_ICON[theme]} /></button>
         <button className="iconbtn" onClick={doSignOut} title="Sign out" aria-label="Sign out"><Icon n="logout" /></button>
       </header>

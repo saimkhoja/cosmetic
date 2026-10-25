@@ -2,6 +2,7 @@
 // registration and invoice counter, and the outbox of sales not yet sent to the server.
 import { openDB, type IDBPDatabase } from 'idb';
 import type { Category, Invoice, Product, Rank, Settings, Shop } from '../lib/types';
+import type { CartLine } from '../lib/units';
 
 export interface Snapshot { shop: Shop; settings: Settings; products: Product[]; stock: Record<string, { qty: number; open_pieces: number }>; at: number; categories?: Category[]; ranks?: Rank[] }
 export interface Device { id: string; code: string; shop_id: string; shop_code: string; last_seq: number }
@@ -27,6 +28,10 @@ export const kvDel = async (k: string) => { await (await db()).delete('kv', k); 
 
 export const getSnapshot = (shopId: string) => kvGet<Snapshot>('snap:' + shopId);
 export const setSnapshot = (s: Snapshot) => kvSet('snap:' + s.shop.id, s);
+/** A sale put aside at the till, to serve another customer and finish it later. Kept on this device only. */
+export interface Parked { id: string; t: string; customer: string; lines: CartLine[]; dp: number; total: number; count: number; by: string }
+export const getParked = async (shopId: string) => (await kvGet<Parked[]>('parked:' + shopId)) ?? [];
+export const setParked = (shopId: string, l: Parked[]) => kvSet('parked:' + shopId, l);
 export const getDevice = (shopId: string) => kvGet<Device>('device:' + shopId);
 export const setDevice = (d: Device) => kvSet('device:' + d.shop_id, d);
 
