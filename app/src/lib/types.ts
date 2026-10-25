@@ -9,7 +9,7 @@ export interface Shop { id: string; code: string; name: string; address: string;
 export interface Product {
   id: string; sku: string; name: string; category: string; stock_unit: 'pcs' | 'set'; is_bundle: boolean;
   per_carton: number; pieces_per_set: number; price_usd: number; half_dozen_usd: number; dozen_usd: number; carton_usd: number; piece_usd: number;
-  reorder: number; wh_qty: number; active: boolean; archived_at?: string | null; barcode?: string | null;
+  reorder: number; wh_qty: number; active: boolean; archived_at?: string | null; barcode?: string | null; barcodes?: string[] | null;
 }
 export interface Cost { product_id: string; carton_cost_usd: number; cost_usd: number }
 export interface StockRow { shop_id: string; product_id: string; qty: number; open_pieces: number }

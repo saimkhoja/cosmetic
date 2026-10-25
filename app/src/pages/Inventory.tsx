@@ -4,7 +4,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { useCategories, useCosts, useProducts, useRanks, useRefresh, useSettings } from '../data/queries';
 import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSet, hotSort, marginPct, pcValue, unitLabel, unitsOf } from '../lib/units';
-import { itemProblem, MONTHS, type ItemInput } from '../lib/items';
+import { barcodesOf, itemProblem, MONTHS, type ItemInput } from '../lib/items';
 import { ReceiveGoodsModal } from './Stores';
 import { bookRate, fCDF, fUSD, toCDF } from '../lib/format';
 import { Dual, Empty, Head, Modal, Note, num, useAction, useToast } from '../components/ui';
@@ -25,7 +25,7 @@ export default function Inventory() {
   const costOf = useMemo(() => new Map((costs.data ?? []).map((c) => [c.product_id, c])), [costs.data]);
   const live = (products.data ?? []).filter((p) => p.active), gone = (products.data ?? []).filter((p) => !p.active);
   const hot = hotSet(ranks.data);
-  const list = hotSort(archived ? gone : live, ranks.data).filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category + ' ' + (p.barcode ?? '')).toLowerCase().includes(q.toLowerCase()));
+  const list = hotSort(archived ? gone : live, ranks.data).filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category + ' ' + barcodesOf(p).join(' ')).toLowerCase().includes(q.toLowerCase()));
   const del = async (p: Product) => {
     if (!confirm(`Delete ${p.name}? An item that was ever received, sent or sold is archived instead, so its history stays.`)) return;
     try { const r = await rpc<string>('delete_product', { p_id: p.id }); await refresh('products', 'costs', 'stock', 'audit'); toast(r === 'deleted' ? `${p.name} deleted` : `${p.name} archived. Find it under Archived items.`, 'warn'); }
@@ -48,7 +48,7 @@ export default function Inventory() {
           <table className="t"><thead><tr><th>Item</th><th>Category</th><th className="r">In store</th>{isAdmin ? <th>Cost</th> : null}<th>Selling prices</th>{isAdmin ? <th className="r" title="Mark-up on cost: cost + margin % = selling price">Margin on cost</th> : null}<th /></tr></thead><tbody>
             {list.map((p) => { const c = costOf.get(p.id); return (
               <tr key={p.id}>
-                <td><b>{p.name}</b>{hot.has(p.id) ? <> <span className="chip hot">Hot</span></> : null}<div className="code">{p.sku}{p.barcode ? ` · ${p.barcode}` : ''}{p.is_bundle ? ` · mixed set of ${p.pieces_per_set}` : p.per_carton > 1 ? ` · ${p.per_carton} pcs per carton` : ''}</div></td><td>{p.category}</td>
+                <td><b>{p.name}</b>{hot.has(p.id) ? <> <span className="chip hot">Hot</span></> : null}<div className="code">{p.sku}{barcodesOf(p).length ? ` · ${barcodesOf(p).join(', ')}` : ''}{p.is_bundle ? ` · mixed set of ${p.pieces_per_set}` : p.per_carton > 1 ? ` · ${p.per_carton} pcs per carton` : ''}</div></td><td>{p.category}</td>
                 <td className="r"><QtyCell p={p} q={p.wh_qty} cls={p.wh_qty <= p.reorder ? 'bad' : 'ok'} /></td>
                 {isAdmin ? <td>{c ? (p.is_bundle ? <><Dual usd={c.cost_usd} rate={book} /><div className="code">per set</div></> : <><Dual usd={c.carton_cost_usd} rate={book} /><div className="code">per carton, {fUSD(c.cost_usd)} per pc</div></>) : '-'}</td> : null}
                 <td>{unitsOf(p).map((u, k) => <div key={k} style={{ whiteSpace: 'nowrap' }}><span className="uchip">{unitLabel(u)}</span> <b>{fCDF(toCDF(u.usd, rate))}</b>{isAdmin ? <span className="code"> {fUSD(u.usd)}</span> : null}</div>)}</td>
@@ -77,8 +77,11 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
     carton_cost: v(p && !p.is_bundle ? cost?.carton_cost_usd : undefined), per_carton: v(p?.per_carton || undefined), pc: p && !p.is_bundle && p.price_usd > 0 ? String(p.price_usd) : '',
     half: p?.half_dozen_usd ? String(p.half_dozen_usd) : '', dzn: p?.dozen_usd ? String(p.dozen_usd) : '', ctn: v(p?.carton_usd || undefined),
     set_cost: p?.is_bundle ? String(cost?.cost_usd ?? '') : '', set_price: p?.is_bundle ? String(p.price_usd) : '', pcs: String(p?.pieces_per_set || 12), piece: p?.piece_usd ? String(p.piece_usd) : '',
-    qc: '0', ql: '0', reorder: String(p?.reorder ?? 20), barcode: p?.barcode ?? '',
+    qc: '0', ql: '0', reorder: String(p?.reorder ?? 20),
   });
+  // barcodes (with the Barcode scanning switch on): one box each, "+ Add another barcode" adds one
+  const [codes, setCodes] = useState<string[]>(() => { const l = p ? barcodesOf(p) : []; return l.length ? l : ['']; });
+  const setCode = (i: number, val: string) => setCodes((c) => c.map((x, k) => (k === i ? val : x)));
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value });
   const o: ItemInput = { name: f.name, category: f.category, is_bundle: f.is_bundle, carton_cost: num(f.carton_cost), per_carton: num(f.per_carton), pc: num(f.pc), half: num(f.half) || 0, dzn: num(f.dzn) || 0, ctn: num(f.ctn) || 0,
     set_cost: num(f.set_cost), set_price: num(f.set_price), pcs: num(f.pcs), piece: num(f.piece) };
@@ -90,7 +93,7 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
   const save = () => a.run(async () => {
     if (problem) throw new Error(problem);
     await rpc('save_product', { p: { id: p?.id ?? null, name: f.name, category: f.category, is_bundle: f.is_bundle, carton_cost: o.carton_cost, per_carton: o.per_carton, pc: o.pc, half: o.half, dzn: o.dzn, ctn: o.ctn,
-      set_cost: o.set_cost, set_price: o.set_price, pcs: o.pcs, piece: o.piece, qty_cartons: f.is_bundle ? 0 : Number(f.qc) || 0, qty_loose: Number(f.ql) || 0, reorder: Number(f.reorder) || 0, barcode: f.barcode } });
+      set_cost: o.set_cost, set_price: o.set_price, pcs: o.pcs, piece: o.piece, qty_cartons: f.is_bundle ? 0 : Number(f.qc) || 0, qty_loose: Number(f.ql) || 0, reorder: Number(f.reorder) || 0, barcode: codes.map((x) => x.replace(/\s+/g, '')).filter(Boolean).join(';') } });
     await refresh('products', 'costs', 'stock', 'audit'); toast(p ? 'Item saved' : 'Item added'); onClose();
   });
   return (
@@ -98,7 +101,12 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
       <div className="frow"><div className="field"><label>Item name</label><input id="in" className="input" value={f.name} maxLength={60} onChange={set('name')} placeholder="e.g. Shea body lotion 400 ml" autoFocus /></div>
         <div className="field"><label>Category</label><select id="ic" className="input" value={f.category} onChange={set('category')}><option value="">Choose a category</option>{(cats.data ?? []).map((c) => <option key={c.id} value={c.name}>{c.name}{c.seasonal ? ' (seasonal)' : ''}</option>)}</select>
           <span className="hint">{cats.data && !cats.data.length ? 'No categories yet. ' : ''}<button type="button" className="linkbtn" onClick={() => { onClose(); onCats(); }}>Add or edit categories</button></span></div></div>
-      {barcodes || f.barcode ? <div className="field"><label>Barcode</label><input id="ibar" className="input" value={f.barcode} maxLength={32} inputMode="numeric" autoComplete="off" onChange={set('barcode')} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }} placeholder="Scan the item or type the number under the bars" /><span className="hint">Optional. Scanning it at the till adds 1 pc to the sale.</span></div> : null}
+      {barcodes || codes.some(Boolean) ? <div className="field"><label>{codes.length > 1 ? 'Barcodes' : 'Barcode'}</label>
+        {codes.map((c, i) => <div key={i} className="barrow"><input id={`ibar${i}`} className="input" value={c} maxLength={32} inputMode="numeric" autoComplete="off" autoFocus={i > 0 && i === codes.length - 1 && !c}
+          onChange={(e) => setCode(i, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }} placeholder={i ? 'Scan or type another barcode' : 'Scan the item or type the number under the bars'} aria-label={`Barcode ${i + 1}`} />
+          {codes.length > 1 ? <button type="button" className="iconbtn" title="Remove this barcode" aria-label={`Remove barcode ${i + 1}`} onClick={() => setCodes((x) => x.filter((_, k) => k !== i))}><Icon n="x" /></button> : null}</div>)}
+        {codes.length < 10 ? <button type="button" id="addbar" className="btn ghost sm" style={{ marginTop: 6 }} onClick={() => setCodes((x) => [...x, ''])}><Icon n="plus" /> Add another barcode</button> : null}
+        <span className="hint" style={{ display: 'block' }}>Optional. Scanning any of them at the till adds 1 pc to the sale. One article can have several barcodes (new pack, another supplier); each barcode belongs to one item only.</span></div> : null}
       <label className="switch"><input type="checkbox" id="ibundle" checked={f.is_bundle} onChange={set('is_bundle')} /><span>This is a mixed set sold together, for example assorted brushes or clips</span></label>
       {!f.is_bundle ? <>
         <div className="frow"><div className="field"><label>Cost of one carton (USD)</label><input id="icc" className="input" type="number" min="0" step="0.01" value={f.carton_cost} onChange={set('carton_cost')} /></div>
@@ -158,7 +166,7 @@ function ImportModal({ products, rate, onClose }: { products: Product[]; rate: n
       if (ext === 'xls') throw new Error('Old .xls files are not supported. In Excel choose File, Save As, Excel Workbook (.xlsx).');
       const sheet = ext === 'xlsx' ? await readXlsx(await f.arrayBuffer()) : ext === 'csv' || ext === 'txt' ? readCSV(await f.text()) : null;
       if (!sheet) throw new Error('Choose an .xlsx or .csv file');
-      setRows(impParse(sheet, products.map((p) => p.name), products.map((p) => p.sku), products.flatMap((p) => (p.barcode ? [p.barcode] : []))));
+      setRows(impParse(sheet, products.map((p) => p.name), products.map((p) => p.sku), products.flatMap((p) => barcodesOf(p))));
     } catch (e) { a.setErr((e as Error).message); } finally { setReading(false); }
   };
   const go = () => a.run(async () => {
@@ -167,7 +175,7 @@ function ImportModal({ products, rate, onClose }: { products: Product[]; rate: n
   });
   return (
     <Modal title="Import items from Excel" icon="download" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="impBtn" disabled={!ok.length || a.busy} onClick={() => void go()}><Icon n="check" /> Import {ok.length} item{ok.length === 1 ? '' : 's'}</button></>}>
-      <Note i="doc">One row per new item. Prices are in USD, like the item form. Stock is counted in pcs. Leave any price (per pc, half dozen, dozen or carton) empty when an item is not sold that way; each item needs at least one. A category that does not exist yet is created. Items whose name or code already exists are skipped, so nothing is overwritten.</Note>
+      <Note i="doc">One row per new item. Several barcodes for one item go in the same Barcode cell, separated with ; (for example 6001234567890;6009876543210). Prices are in USD, like the item form. Stock is counted in pcs. Leave any price (per pc, half dozen, dozen or carton) empty when an item is not sold that way; each item needs at least one. A category that does not exist yet is created. Items whose name or code already exists are skipped, so nothing is overwritten.</Note>
       <div className="tw" style={{ marginBottom: 12 }}><table className="t nw" style={{ fontSize: 13 }}><thead><tr>{IMPCOLS.map((c) => <th key={c}>{c}</th>)}</tr></thead><tbody><tr><td>Aloe vera gel 300 ml</td><td>Skin care</td><td>60</td><td>24</td><td>4</td><td>23</td><td>45</td><td>90</td><td>5</td><td>0</td><td>24</td><td /><td /></tr></tbody></table></div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
         <button className="btn ghost" onClick={() => saveBlob(templateXlsx(), 'SIM-items-template.xlsx')}><Icon n="download" /> Download Excel template</button>
@@ -178,7 +186,7 @@ function ImportModal({ products, rate, onClose }: { products: Product[]; rate: n
       {rowsIn.length ? <>
         <div className="toolbar"><span className="chip ok"><Icon n="check" /> {ok.length} ready</span>{bad.length ? <span className="chip bad"><Icon n="alert" /> {bad.length} with errors</span> : null}{skip.length ? <span className="chip warn">{skip.length} skipped, already in the catalogue</span> : null}</div>
         <div className="tw" style={{ maxHeight: '44vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}><table className="t" style={{ fontSize: 13.5 }}><thead><tr><th>Row</th><th>Item</th><th>Carton</th><th className="r">Per pc</th><th className="r">Half dozen</th><th className="r">Per dozen</th><th className="r">Per carton</th><th className="r">Opening</th><th>Status</th></tr></thead><tbody>
-          {rowsIn.slice(0, 500).map((r) => <tr key={r.n}><td className="code">{r.n}</td><td><b>{r.o.name || '(no name)'}</b><div className="code">{r.o.category}{r.sku ? ' · ' + r.sku : ''}{r.barcode ? ' · ' + r.barcode : ''}</div></td>
+          {rowsIn.slice(0, 500).map((r) => <tr key={r.n}><td className="code">{r.n}</td><td><b>{r.o.name || '(no name)'}</b><div className="code">{r.o.category}{r.sku ? ' · ' + r.sku : ''}{r.barcode ? ' · ' + r.barcode.split(';').join(', ') : ''}</div></td>
             <td className="nw">{isNaN(r.o.carton_cost) ? '-' : fUSD(r.o.carton_cost)}<div className="code">{isNaN(r.o.per_carton) ? '-' : r.o.per_carton} pcs</div></td>
             <td className="r nw">{fp(r.o.pc)}</td><td className="r nw">{r.o.per_carton === 6 ? <span className="code">= carton</span> : fp(r.o.half)}</td><td className="r nw">{r.o.per_carton === 12 ? <span className="code">= carton</span> : fp(r.o.dzn)}</td><td className="r nw">{fp(r.o.ctn)}</td><td className="r nw">{r.status === 'ok' ? r.qty + ' pcs' : ''}</td>
             <td>{r.status === 'ok' ? <span className="chip ok">Ready</span> : <span className={`chip ${r.status === 'skip' ? 'warn' : 'bad'}`}>{r.msg}</span>}</td></tr>)}

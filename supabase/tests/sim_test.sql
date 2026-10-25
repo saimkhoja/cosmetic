@@ -521,6 +521,15 @@ select t.ok((public.import_products('[{"row":2,"name":"Scan cream","category":"S
 select t.ok((select barcode from products where name = 'Scan gel') = '6009999999999', 'import saves the barcode');
 select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,'barcode',''));
 select t.ok((select barcode from products where id = t.get('scan')::uuid) is null, 'a barcode can be removed');
+-- several barcodes per item
+select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,'barcode','111111; 222222'));
+select t.ok((select barcodes = '{111111,222222}' and barcode = '111111' from products where id = t.get('scan')::uuid), 'an item keeps several barcodes, the first also as its main one');
+select t.fails($$select public.save_product('{"name":"Scan soap 4","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"999999;222222"}')$$, '222222 is already used by Scan soap', 'a second barcode belongs to one item too');
+select t.ok((public.import_products('[{"row":2,"name":"Scan cream B","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"333333;444444"},
+  {"row":3,"name":"Scan cream C","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"555555,111111"}]')->>'imported')::int = 1, 'import takes several barcodes and skips a row reusing one');
+select t.ok((select barcodes from products where name = 'Scan cream B') = '{333333,444444}', 'import saves every barcode of the row');
+select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,'barcode','222222'));
+select t.ok((select barcodes = '{222222}' and barcode = '222222' from products where id = t.get('scan')::uuid), 'removing one barcode keeps the other');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
@@ -601,6 +610,9 @@ create function t.sup_owes() returns numeric language sql security definer as $$
   select coalesce(sum(case when l.side = 'Cr' then l.base else -l.base end), 0) from voucher_lines l join vouchers v on v.id = l.voucher_id
   where v.status = 'posted' and l.account_id = (select account_id from suppliers where name = 'Beauty Import SARL') $$;
 grant execute on function t.sup_owes() to authenticated;
+-- the money columns of returns are hidden from signed-in users (the Admin reads them through supplier_return_values)
+create function t.sr(p_no text) returns public.supplier_returns language sql security definer as $$ select * from public.supplier_returns where no = p_no $$;
+grant execute on function t.sr(text) to authenticated;
 select t.put('owes0', t.sup_owes()::text);
 select t.put('wh_lot', (select wh_qty::text from products where id = t.get('lotion')::uuid));
 select t.put('cost_lot', (select cost_usd::text from product_costs where product_id = t.get('lotion')::uuid));
@@ -628,12 +640,13 @@ select t.put('grn9', public.receive_goods(jsonb_build_object('supplier_id', t.ge
 select t.put('b9', public.enter_bill(jsonb_build_object('grn_id', t.get('grn9'), 'bill_no', 'F-900', 'amount', round(5 * t.get('cost_lot')::numeric, 2), 'currency', 'USD',
   'billed', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 5))))::text);
 select t.ok((t.get('b9')::jsonb->>'claim') is not null, 'goods billed but not received become a claim');
-select t.ok((select kind || ':' || i.qty || ':' || value_usd from supplier_returns r join supplier_return_items i on i.return_id = r.id where r.no = t.get('b9')::jsonb->>'claim')
+select t.ok((select r.kind || ':' || i.qty || ':' || (t.sr(r.no)).value_usd from supplier_returns r join supplier_return_items i on i.return_id = r.id where r.no = t.get('b9')::jsonb->>'claim')
   = 'short:2:' || round(2 * t.get('cost_lot')::numeric, 2), 'the claim is for the 2 pcs missing, at item cost');
 select t.ok(round(t.outstanding((t.get('b9')::jsonb->>'voucher_id')::uuid), 2) = round(3 * t.get('cost_lot')::numeric, 2), 'the bill only stays owed for what arrived');
 -- the Admin settles the return at what the supplier credits, against that bill
 select public.settle_supplier_return(jsonb_build_object('id', t.get('rts1'), 'amount_usd', 1.50, 'bill_id', (t.get('b9')::jsonb->>'voucher_id')));
-select t.ok((select status || ':' || amount_usd from supplier_returns where id = t.get('rts1')::uuid) = 'settled:1.50', 'the Admin settles the return at the credited amount');
+select t.ok((select status || ':' || (t.sr(no)).amount_usd from supplier_returns where id = t.get('rts1')::uuid) = 'settled:1.50', 'the Admin settles the return at the credited amount');
+select t.ok((select (v->>'amount_usd')::numeric from jsonb_array_elements(public.supplier_return_values()) v where v->>'id' = t.get('rts1')) = 1.50, 'the Admin reads the values through supplier_return_values');
 select t.ok(round(t.outstanding((t.get('b9')::jsonb->>'voucher_id')::uuid), 2) = round(3 * t.get('cost_lot')::numeric - 1.50, 2), 'the settled return is set against the bill');
 select t.ok(t.unbalanced() = 0, 'returns and claims keep every voucher balanced');
 select t.fails(format($$select public.cancel_voucher('%s', 'wrong bill')$$, t.get('b9')::jsonb->>'voucher_id'), 'cancel that first', 'a bill with a return set against it is not cancelled');

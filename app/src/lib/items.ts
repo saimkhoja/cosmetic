@@ -35,10 +35,14 @@ const CATICON: Record<string, string> = { all: 'grid', skin: 'lotion', hair: 'co
 export const catIcon = (c: string) => { const k = c.toLowerCase(); const hit = Object.keys(CATICON).find((x) => k.startsWith(x) || k.includes(' ' + x)); return hit ? CATICON[hit] : 'box'; };
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const UPCATS = ['Rent', 'Electricity & fuel', 'Security', 'Salaries', 'Transport', 'Maintenance', 'Taxes & licences', 'Other'];
-/** A scanned or typed code: the item with that barcode, else the item with that SIM code. */
-export const findByCode = <T extends { sku: string; barcode?: string | null }>(products: T[], code: string): T | undefined => {
+/** An item's barcodes: all of them, or the single one an older database keeps. */
+export const barcodesOf = (p: { barcode?: string | null; barcodes?: string[] | null }) => (p.barcodes?.length ? p.barcodes : p.barcode ? [p.barcode] : []);
+/** Barcodes as typed or imported: separated by , ; or | (or new lines), spaces removed, repeats dropped. */
+export const splitBarcodes = (v: string) => [...new Set(v.split(/[,;|\n\r]+/).map((x) => x.replace(/\s+/g, '')).filter(Boolean))];
+/** A scanned or typed code: the item with that barcode (any of its barcodes), else the item with that SIM code. */
+export const findByCode = <T extends { sku: string; barcode?: string | null; barcodes?: string[] | null }>(products: T[], code: string): T | undefined => {
   const c = code.replace(/\s+/g, ''); if (!c) return undefined;
-  return products.find((p) => p.barcode === c) ?? products.find((p) => p.sku.toLowerCase() === c.toLowerCase());
+  return products.find((p) => barcodesOf(p).includes(c)) ?? products.find((p) => p.sku.toLowerCase() === c.toLowerCase());
 };
 /** How a sale or order without a customer name is shown. */
 export const custName = (c?: string | null) => c || 'Walk-in';

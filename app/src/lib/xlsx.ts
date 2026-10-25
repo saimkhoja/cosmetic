@@ -1,5 +1,5 @@
 // Excel (.xlsx) and CSV reading/writing with no outside library, so import works offline.
-import { itemProblem } from './items';
+import { itemProblem, splitBarcodes } from './items';
 
 export const IMPCOLS = ['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per half dozen USD', 'Price per dozen USD', 'Price per carton USD', 'Opening cartons', 'Opening pcs', 'Reorder at (pcs)', 'SKU', 'Barcode'];
 const IMPKEYS: Record<string, string[]> = {
@@ -136,21 +136,22 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
   const out: ImportRow[] = [];
   rows.slice(hi + 1).forEach((r, i) => {
     if (!r || !r.some((c) => String(c ?? '').trim() !== '')) return;
-    const name = String(g(r, 'name')).trim().replace(/\s+/g, ' ').slice(0, 60), sku = String(g(r, 'sku')).trim().slice(0, 20), barcode = String(g(r, 'barcode')).replace(/\s+/g, ''), dz = inum(g(r, 'dzn')), hz = inum(g(r, 'half')), ct = inum(g(r, 'ctn'));
+    const name = String(g(r, 'name')).trim().replace(/\s+/g, ' ').slice(0, 60), sku = String(g(r, 'sku')).trim().slice(0, 20), bl = splitBarcodes(String(g(r, 'barcode'))), barcode = bl.join(';'), dz = inum(g(r, 'dzn')), hz = inum(g(r, 'half')), ct = inum(g(r, 'ctn'));
     const oc = inum(g(r, 'openCtn')), op = inum(g(r, 'openPcs')), ro = inum(g(r, 'reorder'));
     const o = { name, category: String(g(r, 'category')).trim().replace(/\s+/g, ' ').slice(0, 30) || 'Other', carton_cost: inum(g(r, 'cartonCost')), per_carton: inum(g(r, 'perCarton')), pc: (() => { const v = inum(g(r, 'pc')); return isNaN(v) ? 0 : v; })(), half: isNaN(hz) ? 0 : hz, dzn: isNaN(dz) ? 0 : dz, ctn: isNaN(ct) ? 0 : ct,
       open_cartons: isNaN(oc) ? 0 : oc, open_pcs: isNaN(op) ? 0 : op, reorder: isNaN(ro) ? null : ro };
     const row: ImportRow = { n: hi + i + 2, o, sku, barcode, status: 'ok', msg: '', qty: 0 };
     if (name && names.has(name.toLowerCase())) { row.status = 'skip'; row.msg = 'Name already exists'; }
     else if (sku && skus.has(sku.toLowerCase())) { row.status = 'skip'; row.msg = 'Code already exists'; }
-    else if (barcode && codes.has(barcode)) { row.status = 'skip'; row.msg = 'Barcode already exists'; }
-    else if (barcode && !/^[A-Za-z0-9-]{3,32}$/.test(barcode)) { row.status = 'bad'; row.msg = 'Barcode must be 3 to 32 letters or digits'; }
+    else if (bl.some((b) => codes.has(b))) { row.status = 'skip'; row.msg = `Barcode already exists (${bl.find((b) => codes.has(b))})`; }
+    else if (bl.some((b) => !/^[A-Za-z0-9-]{3,32}$/.test(b))) { row.status = 'bad'; row.msg = 'Each barcode must be 3 to 32 letters or digits; separate several with ;'; }
+    else if (bl.length > 10) { row.status = 'bad'; row.msg = 'At most 10 barcodes per item'; }
     else {
       const p = itemProblem({ ...o, is_bundle: false, set_cost: 0, set_price: 0, pcs: 0, piece: 0 });
       if (p) { row.status = 'bad'; row.msg = p; }
       else if (oc < 0 || op < 0 || ro < 0) { row.status = 'bad'; row.msg = 'Stock and reorder cannot be negative'; }
       else if ([oc, op, ro].some((x) => !isNaN(x) && x % 1)) { row.status = 'bad'; row.msg = 'Stock and reorder must be whole numbers'; }
-      else { row.qty = o.open_cartons * o.per_carton + o.open_pcs; if (row.o.reorder === null) row.o.reorder = o.per_carton; names.add(name.toLowerCase()); if (sku) skus.add(sku.toLowerCase()); if (barcode) codes.add(barcode); }
+      else { row.qty = o.open_cartons * o.per_carton + o.open_pcs; if (row.o.reorder === null) row.o.reorder = o.per_carton; names.add(name.toLowerCase()); if (sku) skus.add(sku.toLowerCase()); bl.forEach((b) => codes.add(b)); }
     }
     out.push(row);
   });

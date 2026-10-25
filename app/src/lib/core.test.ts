@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
 import { cashNotes, ctnTxt, hotSort, marginPct, payment, pcValue, takeLocal, totals, unitsOf, usdNotes } from './units';
-import { custName, findByCode, itemProblem } from './items';
+import { barcodesOf, custName, findByCode, itemProblem, splitBarcodes } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
 
@@ -143,5 +143,21 @@ describe('margin', () => {
     expect(marginPct(2, 1)).toBe(100);
     expect(marginPct(0.8, 1)).toBe(-20);
     expect(marginPct(1, 0)).toBeNull();
+  });
+});
+describe('several barcodes', () => {
+  const items = [P({ id: 'a', sku: 'SK-1', barcode: '111111', barcodes: ['111111', '222222'] }), P({ id: 'b', sku: 'SK-2', barcode: '333333', barcodes: null })];
+  it('finds an item by any of its barcodes, or by the single one of an older database', () => {
+    expect(findByCode(items, '222222')?.id).toBe('a');
+    expect(findByCode(items, '333333')?.id).toBe('b');
+    expect(barcodesOf(items[1])).toEqual(['333333']);
+  });
+  it('splits barcodes typed or imported together', () => { expect(splitBarcodes('111 111; 222222,111111|333333')).toEqual(['111111', '222222', '333333']); });
+  it('imports several barcodes in one cell and skips a row reusing one', () => {
+    const rows = [['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Barcode'],
+      ['A', 'Bath', 24, 24, 1.5, '444444;555555'], ['B', 'Bath', 24, 24, 1.5, '666666, 555555'], ['C', 'Bath', 24, 24, 1.5, '222222']];
+    const r = impParse(rows, [], [], ['222222']);
+    expect(r.map((x) => x.status)).toEqual(['ok', 'skip', 'skip']);
+    expect(r[0].barcode).toBe('444444;555555');
   });
 });

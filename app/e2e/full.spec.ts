@@ -436,13 +436,14 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(admin.getByText('Settings saved')).toBeVisible();
   await admin.getByRole('link', { name: 'Inventory' }).click();
   await admin.locator('tr', { hasText: 'Shea body lotion' }).getByTitle('Edit item and prices').click();
-  await admin.fill('#ibar', '6001234567890');
+  await admin.fill('#ibar0', '6001234567890');
+  await admin.click('#addbar'); await admin.fill('#ibar1', '6009998887776');                    // a second barcode for the same article
   await admin.getByRole('button', { name: 'Save item' }).click();
   await expect(admin.getByText('Item saved')).toBeVisible();
-  await expect(admin.locator('tr', { hasText: 'Shea body lotion' })).toContainText('6001234567890');
+  await expect(admin.locator('tr', { hasText: 'Shea body lotion' })).toContainText('6001234567890, 6009998887776');
   await shop.goto('/till');
   await expect(shop.locator('#cust')).toHaveAttribute('placeholder', 'Customer name (optional)');
-  await shop.fill('#scan', '6001234567890'); await shop.press('#scan', 'Enter');
+  await shop.fill('#scan', '6009998887776'); await shop.press('#scan', 'Enter');               // the second barcode scans too
   await expect(shop.locator('.line', { hasText: 'Shea body lotion' })).toContainText('pcs');
   await expect(shop.locator('#scan')).toHaveValue('');
   await shop.fill('#scan', '9999999999'); await shop.press('#scan', 'Enter');
