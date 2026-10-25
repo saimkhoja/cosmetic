@@ -1,20 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { rpc, rows, supabase } from '../lib/supabase';
 import { cartPriced, cashNotes, hotSet, hotSort, payment, takeLocal, totals, unitLabel, unitNote, unitsOf, usdNotes, type CartLine, type PayIn } from '../lib/units';
 import { catIcon, custName, findByCode } from '../lib/items';
-import { fCDF, fUSD, tm, toCDF, today } from '../lib/format';
+import { dt, fCDF, fNum, fUSD, ld, tm, toCDF, today } from '../lib/format';
 import { orderRef, orderSlipHTML, printHTML, receiptHTML, saleCopies } from '../lib/print';
 import { Empty, Modal, Note, useAction, useToast } from '../components/ui';
 import { TicketsModal } from '../components/Tickets';
 import { useDeliveries, useOrders } from '../data/queries';
-import { getDevice, getSnapshot, nextInvoiceNo, outboxAll, outboxPut, setDevice, setSnapshot, type Device, type OutboxEntry, type Snapshot } from '../offline/store';
+import { getDevice, getParked, getSnapshot, nextInvoiceNo, outboxAll, outboxPut, setDevice, setParked, setSnapshot, type Device, type OutboxEntry, type Parked, type Snapshot } from '../offline/store';
 import { isNetworkError, startSync, syncOutbox } from '../offline/sync';
 import type { Category, Invoice, Product, Rank, SaleOrder, Settings, Shop, StockRow } from '../lib/types';
 
 const SHORT: Record<string, string> = { 'half dzn': '½ dz', dzn: 'dz', carton: 'ctn' };
+/** A line of the sale: one item in one unit. */
+const keyOf = (l: { pid: string; ui: number }) => l.pid + ':' + l.ui;
 
 /** Loads the shop's catalogue from the server and keeps it on the device for offline selling. */
 export async function refreshSnapshot(shopId: string): Promise<Snapshot> {
@@ -64,10 +67,21 @@ export default function Till() {
   const [snap, setSnap] = useState<Snapshot | null>(null), [dev, setDev] = useState<Device | null>(null), [problem, setProblem] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]), [dp, setDp] = useState(0), [cat, setCat] = useState('All'), [q, setQ] = useState('');
   const [customer, setCustomer] = useState(''), [custDraft, setCustDraft] = useState(''), [editing, setEditing] = useState<SaleOrder | null>(null), [tickets, setTickets] = useState(false);
-  const [pick, setPick] = useState<{ pid: string; idx: number } | null>(null), [check, setCheck] = useState(false), [disc, setDisc] = useState(false), [reject, setReject] = useState<SaleOrder | null>(null);
+  const [pick, setPick] = useState<{ pid: string; k: string | null } | null>(null), [check, setCheck] = useState(false), [disc, setDisc] = useState(false), [reject, setReject] = useState<SaleOrder | null>(null);
   const [last, setLast] = useState<Invoice | null>(null), [view, setView] = useState<Invoice | null>(null), [outbox, setOutbox] = useState<OutboxEntry[]>([]), [flash, setFlash] = useState(false);
-  const [cash, setCash] = useState(''), [cashUsd, setCashUsd] = useState(''), [back, setBack] = useState(false), [cashFor, setCashFor] = useState<{ total: number; go: (pay: PayIn) => Promise<boolean>; cancel: () => void } | null>(null);
+  const [cashFor, setCashFor] = useState<{ total: number; info: string; go: (pay: PayIn) => Promise<boolean>; cancel: () => void } | null>(null);
+  // the highlighted line (n changes on every scan, so the same line flashes and scrolls into view again)
+  const [sel, setSel] = useState<{ k: string; n: number } | null>(null), [parked, setParkedList] = useState<Parked[]>([]), [showParked, setShowParked] = useState(false);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const busy = useRef(false), scan = useRef<HTMLInputElement>(null), custIn = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => setSlot(document.getElementById('topslot')), []);
+  useEffect(() => { void getParked(shopId).then(setParkedList); }, [shopId]);
+  // only the sale list scrolls to the highlighted line, never the page
+  useEffect(() => {
+    const el = sel && document.getElementById('ln-' + sel.k), box = el?.parentElement; if (!el || !box) return;
+    const r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
+    if (r.top < b.top) box.scrollTop -= b.top - r.top + 4; else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom + 4;
+  }, [sel]);
   const startOfDay = useMemo(() => new Date(today() + 'T00:00:00').toISOString(), []);
   const orders = useOrders(isAdmin ? 'pending' : 'all', isAdmin ? undefined : startOfDay);
   const dels = useDeliveries(shopId, isAdmin);
@@ -124,16 +138,18 @@ export default function Till() {
   const orderTotal = (o: SaleOrder) => o.items.reduce((s, it) => { const p = byId.get(it.product_id); if (!p) return s; const u = unitsOf(p).find((x) => (it.piece ? !!x.piece : !x.piece && x.mult === it.mult)); return s + (u ? toCDF(u.usd, rate) * it.qty : 0); }, 0);
 
   const startCustomer = () => { const c = custDraft.trim().replace(/\s+/g, ' ').slice(0, 60); if (!c) { if (optCust) scan.current?.focus(); else toast('Type the customer name, then press Enter', 'warn'); return; } setCustomer(c); setCustDraft(''); setTimeout(() => scan.current?.focus(), 50); };
-  const resetSale = () => { setCart([]); setDp(0); setCustomer(''); setCash(''); setCashUsd(''); setBack(false); };
+  const resetSale = () => { setCart([]); setDp(0); setCustomer(''); setSel(null); };
+  const hi = (k: string) => { setSel((s) => ({ k, n: (s?.n ?? 0) + 1 })); setFlash(true); setTimeout(() => setFlash(false), 600); };
   const add = (pid: string, ui?: number) => {
     if (!ready) { toast('Type the customer name first', 'warn'); custIn.current?.focus(); return; }
     const p = byId.get(pid); if (!p) return;
     const us = unitsOf(p);
     if (!us.length) { toast(`${p.name} has no price yet`, 'warn'); return; }
-    if (ui === undefined && us.length > 1) { setPick({ pid, idx: -1 }); return; }
+    if (ui === undefined && us.length > 1) { setPick({ pid, k: null }); return; }
     const i = ui ?? 0;
-    setCart((c) => { const l = c.find((x) => x.pid === pid && x.ui === i); return l ? c.map((x) => (x === l ? { ...x, qty: x.qty + 1 } : x)) : [{ pid, ui: i, qty: 1 }, ...c]; });
-    setFlash(true); setTimeout(() => setFlash(false), 600);
+    // a new line goes at the bottom, as on the receipt; scanning it again adds 1 to its line
+    setCart((c) => { const l = c.find((x) => x.pid === pid && x.ui === i); return l ? c.map((x) => (x === l ? { ...x, qty: x.qty + 1 } : x)) : [...c, { pid, ui: i, qty: 1 }]; });
+    hi(keyOf({ pid, ui: i }));
     if (!us[i].piece && left(p) - us[i].mult < 0) toast(`${p.name}: selling on order, the shop is ${Math.abs(left(p) - us[i].mult)} short`, 'warn');
   };
   // a USB scanner types the barcode and presses Enter: the item goes into the sale as 1 pc (or 1 set)
@@ -143,8 +159,29 @@ export default function Till() {
     if (p) { add(p.id, 0); setQ(''); }
     else if (/^\d{6,}$/.test(code)) { toast(`No item has the barcode ${code}`, 'warn'); setQ(''); }
   };
-  const chg = (i: number, d: number) => setCart((c) => { const l = c[i]; if (!l) return c; const n = d === -999 || l.qty + d <= 0 ? c.filter((_, k) => k !== i) : c.map((x, k) => (k === i ? { ...x, qty: x.qty + d } : x)); if (!n.length) setDp(0); return n; });
-  const setUnit = (idx: number, ui: number) => setCart((c) => { const l = c[idx]; if (!l) return c; const same = c.findIndex((x, k) => k !== idx && x.pid === l.pid && x.ui === ui); if (same >= 0) return c.map((x, k) => (k === same ? { ...x, qty: x.qty + l.qty } : x)).filter((_, k) => k !== idx); return c.map((x, k) => (k === idx ? { ...x, ui } : x)); });
+  // removing the highlighted line moves the highlight to the line above it
+  const remove = (k: string) => {
+    const ks = priced.map(keyOf), at = ks.indexOf(k), nk = ks[at - 1] ?? ks[at + 1];
+    setCart((c) => { const n = c.filter((x) => keyOf(x) !== k); if (!n.length) setDp(0); return n; });
+    if (!sel || sel.k === k) setSel(nk ? { k: nk, n: (sel?.n ?? 0) + 1 } : null);
+  };
+  const step = (k: string, d: number) => {
+    const l = cart.find((x) => keyOf(x) === k); if (!l) return;
+    if (l.qty + d <= 0) { remove(k); return; }
+    setCart((c) => c.map((x) => (keyOf(x) === k ? { ...x, qty: x.qty + d } : x))); hi(k);
+  };
+  const setUnit = (k: string, ui: number) => {
+    const l = cart.find((x) => keyOf(x) === k); if (!l || l.ui === ui) return;
+    const nk = keyOf({ pid: l.pid, ui });
+    setCart((c) => { const same = c.find((x) => keyOf(x) === nk); return same ? c.flatMap((x) => (keyOf(x) === k ? [] : x === same ? [{ ...x, qty: x.qty + l.qty }] : [x])) : c.map((x) => (keyOf(x) === k ? { ...x, ui } : x)); });
+    hi(nk);
+  };
+  // the arrow keys in the search box walk through the sale, to check it line by line
+  const move = (d: number) => {
+    const ks = priced.map(keyOf); if (!ks.length) return;
+    const at = sel ? ks.indexOf(sel.k) : -1, i = at < 0 ? (d > 0 ? 0 : ks.length - 1) : Math.min(ks.length - 1, Math.max(0, at + d));
+    setSel({ k: ks[i], n: (sel?.n ?? 0) + 1 });
+  };
 
   // an order's lines as cart lines, at today's prices; lines whose unit no longer exists are reported
   const orderLines = (o: SaleOrder) => {
@@ -199,14 +236,37 @@ export default function Till() {
       return true;
     } finally { busy.current = false; }
   };
-  const P = payment(T.total, rate, usdPay ? cashUsd : 0, cash, back), short = cashStep && P.short > 0;
-  const pay = async () => { if (short) return; if (await sell(cart, dp, customer, null, cashStep ? P.pay : undefined)) resetSale(); };
+  // with the cash step on, the payment window asks what the customer hands over; otherwise the sale prints at once
+  const pay = () => {
+    if (!priced.length || !ready) return;
+    if (!cashStep) { void sell(cart, dp, customer, null).then((ok) => { if (ok) resetSale(); }); return; }
+    setCashFor({ total: T.total, info: `${custName(customer)} · ${T.count} ${T.count === 1 ? 'item' : 'items'}`, go: async (t) => { const ok = await sell(cart, dp, customer, null, t); if (ok) resetSale(); return ok; }, cancel: () => {} });
+  };
   // approving an order: with the switch on, the cash received is asked first
   const sellOrder = async (lines: CartLine[], d: number, o: SaleOrder) => {
     if (!cashStep) return sell(lines, d, o.customer, o);
     const total = totals(cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate), d, vat).total;
-    return new Promise<boolean>((done) => setCashFor({ total, go: async (t) => { const ok = await sell(lines, d, o.customer, o, t); if (ok) done(true); return ok; }, cancel: () => done(false) }));
+    return new Promise<boolean>((done) => setCashFor({ total, info: `Order ${orderRef(o.id)} for ${custName(o.customer)}`, go: async (t) => { const ok = await sell(lines, d, o.customer, o, t); if (ok) done(true); return ok; }, cancel: () => done(false) }));
   };
+  // a parked sale waits on this till (it survives a restart) while the next customer is served
+  const saveParked = (l: Parked[]) => { setParkedList(l); void setParked(shopId, l); };
+  const withCurrent = (l: Parked[]) => [...l, { id: crypto.randomUUID(), t: new Date().toISOString(), customer, lines: cart, dp, total: T.total, count: T.count, by: profile!.name }];
+  const park = () => {
+    if (!priced.length) return;
+    if (parked.length >= 20) { toast('20 sales are parked already. Finish or delete one first.', 'warn'); return; }
+    saveParked(withCurrent(parked)); toast(`Sale for ${custName(customer)} parked. Open Parked to finish it.`); resetSale();
+    setTimeout(() => (optCust ? scan : custIn).current?.focus(), 50);
+  };
+  const resume = (x: Parked) => {
+    const rest = parked.filter((y) => y.id !== x.id), swap = priced.length > 0;
+    saveParked(swap ? withCurrent(rest) : rest);
+    const lines = x.lines.filter((l) => byId.has(l.pid));
+    setCart(lines); setDp(x.dp); setCustomer(x.customer); setShowParked(false);
+    setSel(lines.length ? { k: keyOf(lines[lines.length - 1]), n: (sel?.n ?? 0) + 1 } : null);
+    toast(`Sale for ${custName(x.customer)} back on the till${swap ? `; the sale for ${custName(customer)} is parked` : ''}`);
+    setTimeout(() => scan.current?.focus(), 50);
+  };
+  const unpark = (x: Parked) => { if (confirm(`Delete the parked sale for ${custName(x.customer)}, ${fCDF(x.total)}? Nothing was sold.`)) saveParked(parked.filter((y) => y.id !== x.id)); };
   const approve = async (o: SaleOrder) => {
     const { lines, missing } = orderLines(o);
     if (missing.length) { toast(`Open the order with Edit: ${missing.join(', ')} can no longer be sold this way`, 'warn'); setEditing(o); return; }
@@ -218,19 +278,25 @@ export default function Till() {
   const myUnsent = outbox.filter((e) => e.kind === 'order');
   const myOrders = sells ? [] : (orders.data ?? []).slice(0, 8);
 
+  // the search box, Price check and Tickets sit in the top bar
+  const top = slot ? createPortal(<>
+    <div className={`hscan ${ready ? '' : 'off'}`}><Icon n="search" /><input id="scan" ref={scan} autoComplete="off" spellCheck={false} placeholder={codes ? 'Scan a barcode or type part of the item name' : 'Type part of the item name, e.g. lotion'} aria-label="Search items" value={q} onChange={(e) => setQ(e.target.value)}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); scanned(); } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); move(e.key === 'ArrowDown' ? 1 : -1); } }} />
+      {q ? <button className="hclear" onClick={() => { setQ(''); scan.current?.focus(); }} aria-label="Clear the search"><Icon n="x" /></button> : null}</div>
+    <button className="hbtn" onClick={() => setCheck(true)} title="Check a price, including the piece price of a set" aria-label="Price check"><Icon n="tag" /><span>Price check</span></button>
+    <button className="hbtn" onClick={() => setTickets(true)} title="Print price tickets for the shelves" aria-label="Tickets"><Icon n="printer" /><span>Tickets</span></button>
+  </>, slot) : null;
+
   const pos = (
     <div className="pos"><section className="pos-left">
       {customer ? (
-        <div className="custbar on"><Icon n="user" /><span style={{ flex: 1 }}>Customer: <b id="custname">{customer}</b></span>
+        <div className="custbar on"><Icon n="user" /><span className="cn">Customer: <b id="custname">{customer}</b></span>
           <button className="btn sm" onClick={() => { setCustDraft(customer); setCustomer(''); }}><Icon n="edit" /> Change</button></div>
       ) : (
         <form className="custbar" onSubmit={(e) => { e.preventDefault(); startCustomer(); }}><Icon n="user" />
           <input id="cust" ref={custIn} autoComplete="off" placeholder={optCust ? 'Customer name (optional)' : 'New sale: type the customer name and press Enter'} aria-label="Customer name" value={custDraft} maxLength={60} onChange={(e) => setCustDraft(e.target.value)} />
           <button className="btn primary sm"><Icon n="check" /> Start</button></form>
       )}
-      <div className="scan" style={ready ? undefined : { opacity: 0.5 }}><Icon n="search" /><input id="scan" ref={scan} autoComplete="off" spellCheck={false} placeholder={codes ? 'Scan a barcode or type part of the item name' : 'Type part of the item name, e.g. lotion'} aria-label="Search items" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); scanned(); } }} />
-        <button className="btn primary sm" onClick={() => setCheck(true)} title="Check a price, including the piece price of a set"><Icon n="tag" /><span>Price check</span></button>
-        <button className="btn sm" onClick={() => setTickets(true)} title="Print price tickets for the shelves"><Icon n="printer" /><span>Tickets</span></button></div>
       <div className="cats">{cats.map((c) => <button key={c} className={cat === c ? 'on' : ''} onClick={() => setCat(c)}><Icon n={c === 'All' ? 'grid' : catIcon(c)} /><span>{c}</span></button>)}</div>
       <div className="pgrid">{list.length ? list.map((p) => { const us = unitsOf(p), lf = left(p); return (
         <button key={p.id} className="ptile" onClick={() => add(p.id)}><span className="ptop"><span className="ico"><Icon n={p.is_bundle ? 'gift' : catIcon(p.category)} /></span>
@@ -240,23 +306,31 @@ export default function Till() {
         : <Empty i="search" t={snap.products.length ? 'No items found. Try another word or another category.' : 'No items yet. The Admin adds them in Inventory.'} />}</div>
     </section>
     <section className="cart" id="cart">
-      <div className="cart-h"><b><Icon n="cart" /> {sells ? 'Current sale' : 'New order'}</b><span className="chip">{T.count} {T.count === 1 ? 'item' : 'items'}</span>{cart.length || customer ? <button className="iconbtn dark" onClick={resetSale} title="Clear" aria-label="Clear sale"><Icon n="trash" /></button> : null}</div>
-      <div className="lines">{priced.length ? priced.map((l, i) => { const short = !l.u.piece && st(l.p).qty - cartBase(l.pid) < 0; return (
-        <div key={l.pid + ':' + l.ui} className={`line ${flash && i === 0 ? 'flash' : ''}`}><div><div className="ln">{l.p.name}</div><div className="lp"><Icon n="lock" /> {fCDF(l.price)} <button className="uchip" onClick={() => setPick({ pid: l.pid, idx: i })} title="Change unit">{unitLabel(l.u)} <Icon n="edit" /></button>{short ? <> <span className="chip warn">on order</span></> : null}</div></div><div className="lt">{fCDF(l.price * l.qty)}</div>
-          <div className="qty"><button onClick={() => chg(i, -1)} aria-label="One less"><Icon n="minus" /></button><b>{l.qty}</b><button onClick={() => chg(i, 1)} aria-label="One more"><Icon n="plus" /></button></div><button className="rm" onClick={() => chg(i, -999)} aria-label="Remove item"><Icon n="x" /></button></div>); })
+      <div className="cart-h"><b><Icon n="cart" /> {sells ? 'Current sale' : 'New order'}</b><span className="chip">{T.count} {T.count === 1 ? 'item' : 'items'}</span>
+        {parked.length ? <button id="parked" className="btn sm ghost" onClick={() => setShowParked(true)} title="Sales put aside on this till"><Icon n="pause" /><span className="lbl">Parked</span><em className="badge">{parked.length}</em></button> : null}
+        {sells && last ? <button className="btn sm" onClick={() => setView(last)} title={`Last sale ${last.no}, ${fCDF(last.total)}`} aria-label="Last sale"><Icon n="receipt" /><span className="lbl">Last sale</span></button> : null}
+        {cart.length || customer ? <button className="iconbtn dark" onClick={resetSale} title="Clear" aria-label="Clear sale"><Icon n="trash" /></button> : null}</div>
+      {priced.length ? <div className="lhead" aria-hidden="true"><span>#</span><span>Item</span><span className="c">Qty</span><span className="r">Price</span><span className="r">Amount</span><span /></div> : null}
+      <div className="lines">{priced.length ? priced.map((l, i) => { const k = keyOf(l), on = sel?.k === k, short = !l.u.piece && st(l.p).qty - cartBase(l.pid) < 0, many = unitsOf(l.p).length > 1; return (
+        <div key={k} id={'ln-' + k} className={`line ${on ? 'on' : ''} ${on && flash ? 'flash' : ''}`} onClick={() => { if (!on) setSel({ k, n: (sel?.n ?? 0) + 1 }); }}>
+          <span className="no">{i + 1}</span>
+          <div className="li"><div className="ln">{l.p.name}</div>{many || short || l.u.u !== 'pcs' ? <div className="lp">{many ? <button className="uchip" onClick={() => setPick({ pid: l.pid, k })} title="Change unit">{unitLabel(l.u)} <Icon n="edit" /></button> : l.u.u !== 'pcs' ? <span className="uchip">{unitLabel(l.u)}</span> : null}{short ? <span className="chip warn">on order</span> : null}</div> : null}</div>
+          <div className="qty"><button onClick={() => step(k, -1)} aria-label="One less"><Icon n="minus" /></button><b>{l.qty}</b><button onClick={() => step(k, 1)} aria-label="One more"><Icon n="plus" /></button></div>
+          <span className="lpr"><small>× </small>{fNum(l.price)}</span>
+          <b className="lt">{fNum(l.price * l.qty)}</b>
+          <button className="rm" onClick={(e) => { e.stopPropagation(); remove(k); }} title="Remove from the sale" aria-label="Remove item"><Icon n="x" /></button></div>); })
         : <Empty i={ready ? 'cart' : 'user'} t={ready ? (codes ? 'Scan or tap an item to add it' : 'Tap an item to add it') : 'Start with the customer name'} tall />}</div>
-      <div className="totals"><div className="row"><span>Subtotal</span><span>{fCDF(T.gross)}</span></div>
-        {T.disc ? <div className="row"><span>Invoice discount {dp}%</span><span>- {fCDF(T.disc)}</span></div> : null}
-        <div className="row muted"><span>Includes VAT {vat}%</span><span>{fCDF(T.vat)}</span></div>
-        <div className="grand"><span>{sells ? 'To pay' : 'Order total'}</span><b>{fCDF(T.total)}</b></div>
-        {cart.length ? (isAdmin ? <button className="btn ghost full disc-btn" onClick={() => setDisc(true)}><Icon n="tag" /> {dp ? `Invoice discount ${dp}%, change` : 'Discount on this invoice'}</button> : null) : null}
-        {sells && cashStep && cart.length ? (usdPay
-          ? <UsdCashIn total={T.total} rate={rate} usd={cashUsd} cdf={cash} back={back} onUsd={setCashUsd} onCdf={setCash} onBack={setBack} onEnter={() => void pay()} />
-          : <CashIn total={T.total} value={cash} onChange={setCash} onEnter={() => void pay()} />) : null}
-        <div className="paybtns one">{sells
-          ? <button className="paybtn cash" onClick={() => void pay()} disabled={!cart.length || !ready || short}><Icon n="cash" /> Take cash and print</button>
-          : <button className="paybtn" onClick={() => void sendOrder()} disabled={!cart.length || !ready}><Icon n="check" /> Send to shop admin for approval</button>}</div>
-        {sells && last ? <div className="row muted" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13.5 }}><span className="chip ok"><Icon n="check" /> Last sale</span><span style={{ flex: 1 }}><b>{last.no}</b>, <span style={{ whiteSpace: 'nowrap' }}>{fCDF(last.total)}</span></span><button className="btn sm" onClick={() => setView(last)}><Icon n="eye" /> View</button></div> : null}
+      <div className="totals">
+        <div className="tsum"><div className="sumrows"><div className="row"><span>Subtotal</span><span>{fCDF(T.gross)}</span></div>
+          {T.disc ? <div className="row"><span>Discount {dp}%</span><span>- {fCDF(T.disc)}</span></div> : null}
+          <div className="row muted"><span>Incl. VAT {vat}%</span><span>{fCDF(T.vat)}</span></div></div>
+          <div className="grand"><span>{sells ? 'To pay' : 'Order total'}</span><b>{fCDF(T.total)}</b></div></div>
+        <div className={`cact ${isAdmin ? 'three' : ''}`}>
+          {isAdmin ? <button className={`btn ${dp ? 'primary' : ''}`} onClick={() => setDisc(true)} disabled={!cart.length} title="Discount on this invoice" aria-label="Discount on this invoice"><Icon n="tag" /><span>{dp ? `${dp}%` : 'Discount'}</span></button> : null}
+          <button id="park" className="btn" onClick={park} disabled={!priced.length} title="Put this sale aside and serve the next customer"><Icon n="pause" /><span>Park sale</span></button>
+          {sells
+            ? <button id="paybtn" className="paybtn cash" onClick={pay} disabled={!priced.length || !ready}><Icon n="cash" /> {cashStep ? 'Take payment' : 'Take cash and print'}</button>
+            : <button className="paybtn" onClick={() => void sendOrder()} disabled={!priced.length || !ready}><Icon n="check" /> Send to shop admin for approval</button>}</div>
         {!sells && (myUnsent.length || myOrders.length) ? <div className="myorders"><div className="code" style={{ margin: '10px 0 4px', fontWeight: 800 }}>My orders today</div>
           {myUnsent.map((e) => <div key={e.id} className="morow"><span>{e.kind === 'order' ? custName(e.payload.customer) : ''}</span><span className="chip warn">{e.error ? 'Not accepted: ' + e.error : 'Not sent yet'}</span></div>)}
           {myOrders.filter((o) => !myUnsent.some((e) => e.id === o.id)).map((o) => <div key={o.id} className="morow"><span>{custName(o.customer)} <span className="code">{orderRef(o.id)}, {tm(o.created_at)}</span></span>
@@ -266,11 +340,15 @@ export default function Till() {
     </section></div>
   );
 
+  // with "Till operators sell directly" on, no orders come in: the review panel shows only when something waits
+  const review = isAdmin && (!snap.settings.features?.till_sells || toReview.length > 0 || toReceive > 0);
+
   return (
     <>
+      {top}
       {problem ? <Note i="alert" warn>{problem}</Note> : null}
       {failed.length ? <Note i="alert" warn><span>{failed.length} {failed.length > 1 ? 'entries' : 'entry'} could not be saved on the server: {failed[0].error}. {isAdmin ? 'Check the items and prices, then try again.' : 'Tell the shop admin.'} <button className="btn sm" style={{ marginLeft: 8 }} onClick={() => void syncOutbox().then(loadOutbox)}>Try again</button></span></Note> : null}
-      {isAdmin ? (
+      {review ? (
         <div className="tillwrap">{pos}
           <aside className="review" aria-label="Orders for review">
             <div className="cart-h"><b><Icon n="receipt" /> For review</b><span className={`chip ${toReview.length ? 'warn' : ''}`}>{toReview.length}</span></div>
@@ -291,16 +369,17 @@ export default function Till() {
       ) : pos}
 
       {pick ? (() => { const p = byId.get(pick.pid)!, s = st(p); return (
-        <Modal title={pick.idx >= 0 ? 'Change the unit' : 'How is it sold?'} icon={p.is_bundle ? 'gift' : 'layers'} onClose={() => setPick(null)} foot={<button className="btn" onClick={() => setPick(null)}>Cancel</button>}>
+        <Modal title={pick.k ? 'Change the unit' : 'How is it sold?'} icon={p.is_bundle ? 'gift' : 'layers'} onClose={() => setPick(null)} foot={<button className="btn" onClick={() => setPick(null)}>Cancel</button>}>
           <p><b>{p.name}</b><br /><span className="code">{s.qty >= 0 ? s.qty : Math.abs(s.qty) + ' on order'} {p.stock_unit} in the shop{p.is_bundle ? `, ${s.open_pieces} pieces sold from an open set` : ''}</span></p>
-          <div className="ugrid">{unitsOf(p).map((u, i) => <button key={i} className="ubtn" onClick={() => { setPick(null); if (pick.idx >= 0) setUnit(pick.idx, i); else add(pick.pid, i); }}><b>{unitLabel(u)}</b><span>{unitNote(p, u)}</span><em>{fCDF(toCDF(u.usd, rate))}</em></button>)}</div>
+          <div className="ugrid">{unitsOf(p).map((u, i) => <button key={i} className="ubtn" onClick={() => { setPick(null); if (pick.k) setUnit(pick.k, i); else add(pick.pid, i); }}><b>{unitLabel(u)}</b><span>{unitNote(p, u)}</span><em>{fCDF(toCDF(u.usd, rate))}</em></button>)}</div>
           {p.is_bundle ? <Note i="tag">The piece price is the last price set by the Admin. It cannot be changed at the shop.</Note> : null}
         </Modal>); })() : null}
       {check ? <PriceCheck products={snap.products} stock={snap.stock} rate={rate} onClose={() => setCheck(false)} /> : null}
       {disc ? <DiscModal v={dp} onApply={(v) => { setDp(v); setDisc(false); }} onClose={() => setDisc(false)} /> : null}
       {reject ? <RejectModal o={reject} onClose={() => setReject(null)} onDone={() => { if (editing?.id === reject.id) setEditing(null); setReject(null); void orders.refetch(); }} /> : null}
       {editing ? <OrderEditor o={editing} init={orderLines(editing)} byId={byId} snap={snap} onClose={() => setEditing(null)} onReject={() => { setReject(editing); }} onApprove={async (lines, d) => { if (await sellOrder(lines, d, editing)) setEditing(null); }} /> : null}
-      {cashFor ? <CashModal total={cashFor.total} rate={rate} usdPay={usdPay} onClose={() => { cashFor.cancel(); setCashFor(null); }} onPay={async (p) => { if (await cashFor.go(p)) setCashFor(null); }} /> : null}
+      {cashFor ? <CashModal total={cashFor.total} info={cashFor.info} rate={rate} usdPay={usdPay} onClose={() => { cashFor.cancel(); setCashFor(null); }} onPay={async (p) => { if (await cashFor.go(p)) setCashFor(null); }} /> : null}
+      {showParked ? <ParkedModal list={parked} onResume={resume} onDelete={unpark} onClose={() => setShowParked(false)} /> : null}
       {tickets ? <TicketsModal products={hotSort(snap.products, snap.ranks)} rate={rate} shopName={snap.shop.name} onClose={() => setTickets(false)} /> : null}
       {view ? <Modal title={'Invoice ' + view.no} icon="receipt" onClose={() => setView(null)} foot={<button className="btn" onClick={() => setView(null)}>Close</button>}><div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, snap.settings.company, snap.shop, { copy: 'client', cash: cashStep }) }} /></Modal> : null}
     </>
@@ -331,45 +410,47 @@ function PriceCheck({ products, stock, rate, onClose }: { products: Product[]; s
     </Modal>
   );
 }
-/** Cash received from the customer, quick amounts and the change to give. */
-function CashIn({ total, value, onChange, onEnter, autoFocus }: { total: number; value: string; onChange: (v: string) => void; onEnter: () => void; autoFocus?: boolean }) {
-  const got = Math.round(Number(value) || 0), change = got - total;
-  return (
-    <div className="cashin">
-      <div className="field"><label htmlFor="cashin">Cash received (CDF)</label><input id="cashin" className="input" type="number" min="0" step="10" inputMode="numeric" autoComplete="off" value={value} autoFocus={autoFocus}
-        onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onEnter(); } }} placeholder={String(total)} /></div>
-      <div className="cnotes">{cashNotes(total).map((n) => <button key={n} type="button" className={got === n ? 'on' : ''} onClick={() => onChange(String(n))}>{n === total ? 'Exact' : fCDF(n)}</button>)}</div>
-      <div id="cashchange" className={`row ${value && change < 0 ? 'bad' : ''}`}><span>{value && change < 0 ? 'Not enough cash' : 'Change to give'}</span><b>{value ? fCDF(Math.abs(change)) : '-'}</b></div>
-    </div>
-  );
-}
-/** Dollars and Francs received, what is still due or the change, and the choice to give whole dollars back. */
-function UsdCashIn({ total, rate, usd, cdf, back, onUsd, onCdf, onBack, onEnter, autoFocus }: { total: number; rate: number; usd: string; cdf: string; back: boolean; onUsd: (v: string) => void; onCdf: (v: string) => void; onBack: (b: boolean) => void; onEnter: () => void; autoFocus?: boolean }) {
-  const P = payment(total, rate, usd, cdf, back), any = !!usd || !!cdf;
-  const enter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); onEnter(); } };
-  return (
-    <div className="cashin">
-      <div className="row muted"><span>Due in USD (1 USD = {fCDF(rate)})</span><b id="usddue">{fUSD(P.due)}</b></div>
-      <div className="frow">
-        <div className="field"><label htmlFor="cashusd">USD received</label><input id="cashusd" className="input" type="number" min="0" step="1" inputMode="decimal" autoComplete="off" value={usd} autoFocus={autoFocus} onChange={(e) => onUsd(e.target.value)} onKeyDown={enter} placeholder="0" /></div>
-        <div className="field"><label htmlFor="cashin">CDF received</label><input id="cashin" className="input" type="number" min="0" step="10" inputMode="numeric" autoComplete="off" value={cdf} onChange={(e) => onCdf(e.target.value)} onKeyDown={enter} placeholder="0" /></div>
-      </div>
-      <div className="cnotes">{usdNotes(P.due).map((n) => <button key={'u' + n} type="button" className={P.usd === n && !cdf ? 'on' : ''} onClick={() => { onUsd(String(n)); onCdf(''); }}>${n}</button>)}
-        <button type="button" className={!usd && P.cdf === total ? 'on' : ''} onClick={() => { onUsd(''); onCdf(String(total)); }}>Exact CDF</button></div>
-      <div id="cashchange" className={`row ${any && P.short ? 'bad' : ''}`}><span>{any && P.short ? 'Still to pay' : 'Change to give'}</span>
-        <b>{!any ? '-' : P.short ? `${fCDF(P.short)} (≈ ${fUSD(Math.ceil((P.short / rate) * 100) / 100)})` : P.changeUsd ? `$${P.changeUsd} + ${fCDF(P.changeCdf)}` : fCDF(P.change)}</b></div>
-      {P.maxDollars > 0 ? <button id="dollarsback" type="button" className={`btn sm full ${back ? 'primary' : 'ghost'}`} onClick={() => onBack(!back)}>
-        {back ? `Giving $${P.maxDollars} + ${fCDF(P.change - Math.round(P.maxDollars * rate))}: tap for all in CDF` : `Give dollars back: $${P.maxDollars} + ${fCDF(P.change - Math.round(P.maxDollars * rate))}`}</button> : null}
-    </div>
-  );
-}
-function CashModal({ total, rate, usdPay, onClose, onPay }: { total: number; rate: number; usdPay: boolean; onClose: () => void; onPay: (pay: PayIn) => Promise<void> }) {
+/** The payment window: what the customer hands over (Francs, and dollars when allowed), and the change to give. */
+function CashModal({ total, info, rate, usdPay, onClose, onPay }: { total: number; info: string; rate: number; usdPay: boolean; onClose: () => void; onPay: (pay: PayIn) => Promise<void> }) {
   const [v, setV] = useState(''), [u, setU] = useState(''), [back, setBack] = useState(false), [busy, setBusy] = useState(false);
-  const P = payment(total, rate, usdPay ? u : 0, v, back);
-  const go = () => { if (P.short || busy) return; setBusy(true); void onPay(P.pay).finally(() => setBusy(false)); };
+  const P = payment(total, rate, usdPay ? u : 0, v, back), any = !!u || !!v;
+  // a barcode scanned into the box by mistake is far more digits than any amount
+  const odd = v.replace(/\D/g, '').length >= 10 || u.replace(/\D/g, '').length >= 10;
+  const go = () => { if (P.short || odd || busy) return; setBusy(true); void onPay(P.pay).finally(() => setBusy(false)); };
+  const enter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
+  const rest = P.change - Math.round(P.maxDollars * rate);
   return (
-    <Modal title={`Cash for ${fCDF(total)}`} icon="cash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={P.short > 0 || busy} onClick={go}><Icon n="cash" /> Take cash and print</button></>}>
-      {usdPay ? <UsdCashIn total={total} rate={rate} usd={u} cdf={v} back={back} onUsd={setU} onCdf={setV} onBack={setBack} onEnter={go} autoFocus /> : <CashIn total={total} value={v} onChange={setV} onEnter={go} autoFocus />}
+    <Modal title="Payment" icon="cash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn go" disabled={P.short > 0 || odd || busy} onClick={go}><Icon n="cash" /> Take cash and print</button></>}>
+      <div className="paytotal"><small>{info}</small><b>{fCDF(total)}</b>{usdPay ? <small>Due in USD <span id="usddue" className="due">{fUSD(P.due)}</span> · 1 USD = {fCDF(rate)}</small> : null}</div>
+      <div className="cashin">
+        {usdPay ? <div className="frow">
+          <div className="field"><label htmlFor="cashusd">USD received</label><input id="cashusd" className="input" type="number" min="0" step="1" inputMode="decimal" autoComplete="off" value={u} autoFocus onChange={(e) => setU(e.target.value)} onKeyDown={enter} placeholder="0" /></div>
+          <div className="field"><label htmlFor="cashin">CDF received</label><input id="cashin" className="input" type="number" min="0" step="10" inputMode="numeric" autoComplete="off" value={v} onChange={(e) => setV(e.target.value)} onKeyDown={enter} placeholder="0" /></div>
+        </div> : <div className="field"><label htmlFor="cashin">Cash received (CDF)</label><input id="cashin" className="input" type="number" min="0" step="10" inputMode="numeric" autoComplete="off" value={v} autoFocus onChange={(e) => setV(e.target.value)} onKeyDown={enter} placeholder={String(total)} /></div>}
+        <div className="cnotes">{usdPay ? <>
+          {usdNotes(P.due).map((n) => <button key={'u' + n} type="button" className={P.usd === n && !v ? 'on' : ''} onClick={() => { setU(String(n)); setV(''); }}>${n}</button>)}
+          <button type="button" className={!u && P.cdf === total ? 'on' : ''} onClick={() => { setU(''); setV(String(total)); }}>Exact CDF</button>
+        </> : cashNotes(total).map((n) => <button key={n} type="button" className={!u && P.cdf === n ? 'on' : ''} onClick={() => setV(String(n))}>{n === total ? 'Exact' : fCDF(n)}</button>)}</div>
+        <div id="cashchange" className={`paychange ${!any ? '' : odd || P.short ? 'bad' : 'ok'}`}>
+          <span>{odd ? 'Check the amount' : any && P.short ? (usdPay ? 'Still to pay' : 'Not enough cash') : 'Change to give'}</span>
+          <b>{!any || odd ? '-' : P.short ? (usdPay ? `${fCDF(P.short)} (≈ ${fUSD(Math.ceil((P.short / rate) * 100) / 100)})` : fCDF(P.short)) : P.changeUsd ? `$${P.changeUsd} + ${fCDF(P.changeCdf)}` : fCDF(P.change)}</b></div>
+        {usdPay && P.maxDollars > 0 && !odd ? <button id="dollarsback" type="button" className={`btn sm full ${back ? 'primary' : 'ghost'}`} onClick={() => setBack(!back)}>
+          {back ? `Giving $${P.maxDollars} + ${fCDF(rest)}: tap for all in CDF` : `Give dollars back: $${P.maxDollars} + ${fCDF(rest)}`}</button> : null}
+      </div>
+    </Modal>
+  );
+}
+/** Sales put aside on this till: resume one (the sale on the till is parked in its place) or delete it. */
+function ParkedModal({ list, onResume, onDelete, onClose }: { list: Parked[]; onResume: (x: Parked) => void; onDelete: (x: Parked) => void; onClose: () => void }) {
+  return (
+    <Modal title="Parked sales" icon="pause" wide onClose={onClose} foot={<button className="btn" onClick={onClose}>Close</button>}>
+      <p>Resume a sale to finish it. If a sale is on the till, it is parked in its place. Prices are today's.</p>
+      {list.length ? <div className="tw"><table className="t"><thead><tr><th>Customer</th><th>Parked</th><th className="r">Items</th><th className="r">Total</th><th /></tr></thead><tbody>
+        {[...list].reverse().map((x) => <tr key={x.id}><td><b>{custName(x.customer)}</b></td><td className="nw">{ld(x.t) === today() ? tm(x.t) : dt(x.t)}<div className="code">{x.by}</div></td>
+          <td className="r">{x.count}</td><td className="r nw"><b>{fCDF(x.total)}</b></td>
+          <td><div className="pact"><button className="btn sm primary" onClick={() => onResume(x)} aria-label={`Resume the sale for ${custName(x.customer)}`}><Icon n="cart" /> Resume</button>
+            <button className="rbtn bad" onClick={() => onDelete(x)} title="Delete this parked sale" aria-label={`Delete the parked sale for ${custName(x.customer)}`}><Icon n="trash" /></button></div></td></tr>)}
+      </tbody></table></div> : <Empty i="pause" t="No parked sales" />}
     </Modal>
   );
 }
