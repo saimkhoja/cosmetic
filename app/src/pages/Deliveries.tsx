@@ -8,6 +8,7 @@ import { dt, fCDF, fUSD, sum, toCDF } from '../lib/format';
 import { deliveryNoteHTML, printHTML, stockCountHTML, stockValueHTML } from '../lib/print';
 import { Dual, Dual2, Empty, Head, Kpi, Modal, Note, useAction, useToast } from '../components/ui';
 import { QtyCell } from './Inventory';
+import { blankLine, per, StockPicker, type Line } from '../components/StockPicker';
 import type { Delivery, Product, Shop } from '../lib/types';
 import { useNavigate } from 'react-router-dom';
 
@@ -129,28 +130,25 @@ function ReasonModal({ title, text, button, fn, id, done, onClose }: { title: st
   );
 }
 
-type Line = { n: string; u: 'ctn' | 'pcs' };
 export function DeliveryModal({ d, pid, sid, onClose, onSent }: { d: Delivery | null; pid?: string; sid?: string; onClose: () => void; onSent?: (d: Delivery) => void }) {
-  const shops = useShops(), products = useProducts(), stock = useStock(), refresh = useRefresh(), toast = useToast(), a = useAction(), dels = useDeliveries();
-  const per = (p: Product) => (!p.is_bundle && p.per_carton > 1 ? p.per_carton : 0);
+  const shops = useShops(), products = useProducts(), stock = useStock(), settings = useSettings(), refresh = useRefresh(), toast = useToast(), a = useAction(), dels = useDeliveries();
   const init = () => {
     const l: Record<string, Line> = {};
     d?.delivery_items.forEach((it) => { const p = products.data?.find((x) => x.id === it.product_id); const k = p ? per(p) : 0; l[it.product_id] = k && it.qty % k === 0 ? { n: String(it.qty / k), u: 'ctn' } : { n: String(it.qty), u: 'pcs' }; });
-    if (pid && !l[pid]) { const p = products.data?.find((x) => x.id === pid); l[pid] = { n: '', u: p && per(p) ? 'ctn' : 'pcs' }; }
+    const p = pid && !l[pid] ? products.data?.find((x) => x.id === pid) : undefined; if (p) l[p.id] = blankLine(p);
     return l;
   };
   const [sel, setSel] = useState<string[]>(d ? [d.shop_id] : sid ? [sid] : []);
   const [lines, setLines] = useState<Record<string, Line>>(init);
-  const [q, setQ] = useState(pid ? products.data?.find((x) => x.id === pid)?.name ?? '' : ''), [reason, setReason] = useState('');
+  const [reason, setReason] = useState('');
   const pcsOf = (p: Product) => { const l = lines[p.id]; if (!l) return 0; const n = Math.max(0, parseInt(l.n) || 0); return l.u === 'ctn' ? n * per(p) : n; };
   // store stock not yet promised to deliveries waiting at a shop (this one excluded when editing)
   const avail = (p: Product) => p.wh_qty - sum((dels.data ?? []).filter((x) => x.status === 'pending' && x.id !== d?.id), (x) => sum(x.delivery_items.filter((i) => i.product_id === p.id), (i) => i.qty));
   const stockAt = (s: string, p: string) => stock.data?.find((r) => r.shop_id === s && r.product_id === p)?.qty ?? 0;
   const all = (products.data ?? []).filter((p) => p.active), chosen = all.filter((p) => pcsOf(p) > 0), k = sel.length;
   const short = chosen.filter((p) => avail(p) < pcsOf(p) * Math.max(1, k));
-  const ql = q.trim().toLowerCase();
-  const list = all.filter((p) => pcsOf(p) > 0 || !ql || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql)).sort((x, y) => Number(pcsOf(y) > 0) - Number(pcsOf(x) > 0)).slice(0, 150);
-  const setLine = (p: Product, patch: Partial<Line>) => setLines({ ...lines, [p.id]: { ...(lines[p.id] ?? { n: '', u: per(p) ? 'ctn' : 'pcs' }), ...patch } });
+  const units = sum(chosen, pcsOf);
+  const setLine = (p: Product, patch: Partial<Line>) => setLines((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? blankLine(p)), ...patch } }));
   const toggle = (s: string, on: boolean) => setSel(d ? [s] : on ? [...new Set([...sel, s])] : sel.filter((x) => x !== s));
   const save = () => a.run(async () => {
     if (!k) throw new Error('Pick at least one outlet');
@@ -171,21 +169,16 @@ export function DeliveryModal({ d, pid, sid, onClose, onSent }: { d: Delivery | 
     if (made.length === 1 && onSent) { const fresh = (await dels.refetch()).data?.find((x) => x.id === made[0].id); if (fresh) onSent(fresh); }
   });
   return (
-    <Modal title={d ? 'Edit delivery ' + d.no : 'New delivery to shops'} icon="truck" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> {d ? 'Save changes' : 'Send stock'}</button></>}>
+    <Modal title={d ? 'Edit delivery ' + d.no : 'New delivery to shops'} icon="truck" xl onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> {d ? 'Save changes' : 'Send stock'}{chosen.length ? ` · ${chosen.length} item${chosen.length === 1 ? '' : 's'}` : ''}</button></>}>
       <div className="field"><label>{d ? 'Deliver to (one outlet)' : 'Send to these outlets'}</label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{(shops.data ?? []).filter((s) => s.active).map((s) => <label key={s.id} className="chip" style={{ cursor: 'pointer', padding: '8px 12px', fontSize: 14, ...(sel.includes(s.id) ? { background: 'var(--btn)', color: '#fff' } : {}) }}><input type={d ? 'radio' : 'checkbox'} name="dshop" checked={sel.includes(s.id)} onChange={(e) => toggle(s.id, e.target.checked)} /> {s.name}</label>)}</div>
         {d ? null : <span className="hint">Tick one or more outlets. Each ticked outlet gets the same quantities and its own delivery note.</span>}</div>
-      <div className="search" style={{ maxWidth: 'none', marginBottom: 10 }}><Icon n="search" /><input placeholder="Find an item by name, code or category" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-      <div className="tw" style={{ maxHeight: '48vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}>
-        {list.length ? <table className="t"><thead><tr><th>Item</th><th className="r">Store can send</th>{sel.map((s) => <th key={s} className="r">{shops.data?.find((x) => x.id === s)?.code} has</th>)}<th style={{ width: 200 }}>Send</th></tr></thead><tbody>
-          {list.map((p) => { const l = lines[p.id] ?? { n: '', u: per(p) ? 'ctn' : 'pcs' }; return <tr key={p.id}><td><b>{p.name}</b><div className="code">{p.sku}{per(p) ? ` · ${per(p)} pcs per carton` : ''}</div></td>
-            <td className="r"><QtyCell p={p} q={avail(p)} cls={avail(p) <= 0 ? 'bad' : ''} />{avail(p) !== p.wh_qty ? <div className="code">{p.wh_qty - avail(p)} promised</div> : null}</td>
-            {sel.map((s) => { const v = stockAt(s, p.id); return <td key={s} className="r"><QtyCell p={p} q={v} cls={v <= 0 ? 'bad' : v <= 5 ? 'warn' : 'ok'} /></td>; })}
-            <td><div style={{ display: 'flex', gap: 6 }}><input className="input" type="number" min="0" inputMode="numeric" placeholder="0" value={l.n} style={{ minHeight: 42, width: 84 }} onChange={(e) => setLine(p, { n: e.target.value })} aria-label={`Send ${p.name}`} />
-              {per(p) ? <select className="input" style={{ minHeight: 42, width: 'auto', padding: '0 8px' }} value={l.u} onChange={(e) => setLine(p, { u: e.target.value as Line['u'] })}><option value="ctn">ctn</option><option value="pcs">pcs</option></select> : <span className="code" style={{ alignSelf: 'center' }}>{p.stock_unit}</span>}</div></td></tr>; })}
-        </tbody></table> : <Empty i="search" t="No items match" />}
-      </div>
-      <div className={`note ${short.length || !k ? 'warn' : ''}`} style={{ marginTop: 12 }}><Icon n={short.length ? 'alert' : 'truck'} /><div>{chosen.length} item{chosen.length === 1 ? '' : 's'}, {sum(chosen, pcsOf)} units to {k ? (k === 1 ? 'each outlet' : `each of ${k} outlets`) : <b>no outlet yet</b>}{k > 1 ? `, ${sum(chosen, pcsOf) * k} units in all` : ''}.{short.length ? <> <b>Not enough in the store:</b> {short.map((p) => p.name).join(', ')}.</> : null}</div></div>
+      <StockPicker all={all} qty={{ lines, setLine, pcsOf }} codes={!!settings.data?.features?.barcode} initQ={pid ? all.find((p) => p.id === pid)?.name : ''}
+        cols={[{ th: 'Store can send', td: (p) => <><QtyCell p={p} q={avail(p)} cls={avail(p) <= 0 ? 'bad' : ''} />{avail(p) !== p.wh_qty ? <div className="code">{p.wh_qty - avail(p)} promised</div> : null}</> },
+          ...sel.map((s) => ({ th: `${shops.data?.find((x) => x.id === s)?.code} has`, td: (p: Product) => { const v = stockAt(s, p.id); return <QtyCell p={p} q={v} cls={v <= 0 ? 'bad' : v <= 5 ? 'warn' : 'ok'} />; } }))]}
+        qtyHead="Send" aria={(p) => `Send ${p.name}`} warn={(p) => (avail(p) < pcsOf(p) * Math.max(1, k) ? `The store can send only ${avail(p)}` : null)}
+        sideTitle="To send" sideNote={k ? (k === 1 ? `To ${shops.data?.find((x) => x.id === sel[0])?.name}` : `To each of ${k} outlets, ${units * k} units in all`) : 'No outlet ticked yet'} />
+      <div className={`note ${short.length || !k ? 'warn' : ''}`} style={{ marginTop: 12 }}><Icon n={short.length ? 'alert' : 'truck'} /><div>{chosen.length} item{chosen.length === 1 ? '' : 's'}, {units} units to {k ? (k === 1 ? 'each outlet' : `each of ${k} outlets`) : <b>no outlet yet</b>}{k > 1 ? `, ${units * k} units in all` : ''}.{short.length ? <> <b>Not enough in the store:</b> {short.map((p) => p.name).join(', ')}.</> : null}</div></div>
       {d ? <div className="field"><label>Reason for the change</label><input id="dreason" className="input" maxLength={80} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Wrong quantity counted at loading" /></div> : null}
       <div className="lerr">{a.err}</div>
     </Modal>

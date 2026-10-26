@@ -25,11 +25,11 @@ export function HList({ arr }: { arr: { name: string; val: number; txt: string }
   const max = Math.max(1, ...arr.map((a) => a.val));
   return arr.length ? <>{arr.map((a, k) => <div className="hl" key={k}><span>{a.name}</span><div className="trk"><i style={{ width: `${(a.val / max) * 100}%` }} /></div><b>{a.txt}</b></div>)}</> : <Empty i="chart" t="No sales yet" />;
 }
-export function Modal({ title, icon, children, foot, wide, onClose }: { title: string; icon: string; children: ReactNode; foot?: ReactNode; wide?: boolean; onClose: () => void }) {
+export function Modal({ title, icon, children, foot, wide, xl, onClose }: { title: string; icon: string; children: ReactNode; foot?: ReactNode; wide?: boolean; xl?: boolean; onClose: () => void }) {
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, [onClose]);
   return (
     <div className="modal-wrap" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true">
+      <div className={`modal ${xl ? 'xl' : wide ? 'wide' : ''}`} role="dialog" aria-modal="true">
         <header><Icon n={icon} /><span>{title}</span><button className="iconbtn dark" style={{ marginLeft: 'auto' }} onClick={onClose} aria-label="Close"><Icon n="x" /></button></header>
         <div className="body">{children}</div>{foot ? <footer>{foot}</footer> : null}
       </div>

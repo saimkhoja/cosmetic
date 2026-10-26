@@ -150,6 +150,34 @@ main.posmain{padding:14px;max-width:none}
 .modal-wrap[hidden]{display:none}
 .modal{background:var(--card);color:var(--text);border-radius:20px;width:100%;max-width:560px;max-height:94vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.35)}
 .modal.wide{max-width:780px}
+.modal.xl{max-width:1180px}
+/* goods in, deliveries, returns to suppliers: item list on the left, what was entered on the right */
+.picker{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
+.pleft{min-width:0}
+.pscan{max-width:none;margin-bottom:8px;border-width:2px;border-color:var(--blue);color:var(--blue)}
+.pscan input{font-size:16.5px;font-weight:600}
+.plist{max-height:min(52vh,560px);overflow:auto;border:1px solid var(--line);border-radius:12px}
+.plist thead th{position:sticky;top:0;z-index:1}
+.plist tr.on td{background:var(--blue-l)}
+.plist tr.on td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
+.plist .psep td{background:var(--bg);font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:6px 12px}
+.pqty{display:flex;gap:6px;align-items:center}
+.pqty .input{min-height:42px;width:84px}
+.pqty select.input{width:auto;padding:0 8px}
+.pside{border:1px solid var(--line);border-radius:12px;background:var(--bg);display:flex;flex-direction:column;max-height:calc(min(52vh,560px) + 58px);min-height:220px}
+.psh{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line)}
+.psh b{font-size:15px}
+.psl{flex:1;overflow-y:auto;padding:6px}
+.prow{display:grid;grid-template-columns:24px minmax(0,1fr) 32px;gap:8px;align-items:center;padding:8px 6px;border-radius:10px;background:var(--card);margin-bottom:6px;cursor:pointer;border:1.5px solid transparent}
+.prow.on{border-color:var(--blue)}
+.prow.bad{border-color:var(--bad)}
+.prow .no{width:24px;height:24px;border-radius:7px;background:var(--bg);color:var(--muted);display:grid;place-items:center;font-size:12px;font-weight:800}
+.prow.on .no{background:var(--btn);color:#fff}
+.pn{min-width:0}.pn b{display:block;line-height:1.2;overflow-wrap:anywhere;font-size:14px}
+.pq{font-size:13.5px;font-weight:800;color:var(--blue);margin-top:2px}
+.pw{font-size:12.5px;font-weight:700;color:var(--bad);margin-top:2px}
+.pst{padding:10px 14px;border-top:1px solid var(--line);font-size:14.5px}
+@media(max-width:900px){.picker{grid-template-columns:1fr}.pside{max-height:none;min-height:0}}
 .modal header{display:flex;align-items:center;gap:10px;padding:14px 16px 14px 20px;border-bottom:1px solid var(--line);font-weight:900;font-size:19px;position:sticky;top:0;background:var(--card);z-index:1}
 .modal header>svg{color:var(--blue);font-size:23px}
 .modal .body{padding:20px}

@@ -130,6 +130,9 @@ test('a full day in SIM', async ({ browser }) => {
   await op.getByRole('link', { name: 'Goods in' }).click();
   await op.getByRole('button', { name: 'Receive from supplier' }).click();
   await op.getByLabel('Quantity Shea body lotion 400 ml').fill('2');
+  await expect(op.locator('.modal .plist tbody tr').first()).toContainText('Aloe vera gel');        // the row does not jump to the top
+  await expect(op.locator('#picked')).toContainText('Shea body lotion 400 ml');                  // the list to check before confirming
+  await expect(op.locator('#picked')).toContainText('2 ctn (48 pcs)');
   await op.getByRole('button', { name: 'Add to store stock' }).click();
   await expect(op.locator('.modal .lerr')).toContainText('Choose the supplier');
   await op.selectOption('#gsup', { label: 'Beauté Import SARL' });
@@ -144,6 +147,8 @@ test('a full day in SIM', async ({ browser }) => {
   await op.getByLabel('Send Shea body lotion 400 ml').fill('2');
   await op.getByLabel('Send Matte lipstick').fill('1');
   await expect(op.locator('.modal')).toContainText('to each of 2 outlets');
+  await expect(op.locator('#picked')).toContainText('Matte lipstick');
+  await expect(op.locator('#picked')).toContainText('2 items, 96 units');                         // 2 ctn of 24 + 1 ctn of 48
   await op.getByRole('button', { name: 'Send stock' }).click();
   await expect(op.getByText('2 deliveries sent: DEL-0001, DEL-0002')).toBeVisible();
   await op.locator('.card', { hasText: 'DEL-0002' }).getByRole('button', { name: 'Edit' }).click();
@@ -431,8 +436,14 @@ test('a full day in SIM', async ({ browser }) => {
   await op.getByRole('link', { name: 'Goods in' }).click();
   await op.getByRole('button', { name: 'Receive from supplier' }).click();
   await op.selectOption('#gsup', { label: 'Beauté Import SARL' });
+  await op.fill('#pscan', 'SK-101'); await op.press('#pscan', 'Enter');                            // the item code (or a barcode) finds the item
+  const gq = op.getByLabel('Quantity Shea body lotion 400 ml');
+  await expect(gq).toBeFocused(); await expect(gq).toHaveValue('1');
+  await expect(op.locator('.modal .plist tr.on')).toContainText('Shea body lotion');
   const grow = op.locator('.modal tr', { hasText: 'Shea body lotion' });
-  await grow.locator('select').selectOption('pcs'); await grow.locator('input').fill('10');
+  await grow.locator('select').selectOption('pcs'); await gq.fill('10'); await gq.press('Enter');
+  await expect(op.locator('#pscan')).toBeFocused();                                              // Enter goes back to the scan box
+  await expect(op.locator('#picked')).toContainText('10 pcs');
   await op.getByRole('button', { name: 'Add to store stock' }).click();
   await expect(op.getByText('GRN-0002 saved: 10 units added')).toBeVisible();
   await admin.getByRole('link', { name: 'Goods in' }).click(); await admin.reload();          // the list refreshes every 30 s; reload to see it now
@@ -456,6 +467,20 @@ test('a full day in SIM', async ({ browser }) => {
   await admin.getByRole('button', { name: 'Save item' }).click();
   await expect(admin.getByText('Item saved')).toBeVisible();
   await expect(admin.locator('tr', { hasText: 'Shea body lotion' })).toContainText('6001234567890, 6009998887776');
+  // the warehouse scans at goods in: the item is found with 1 filled in, the count is typed; a scan into the quantity box adds 1
+  await op.goto('/goods-in');
+  await op.getByRole('button', { name: 'Receive from supplier' }).click();
+  await op.fill('#pscan', '6009998887776'); await op.press('#pscan', 'Enter');
+  const sq = op.getByLabel('Quantity Shea body lotion 400 ml');
+  await expect(sq).toBeFocused(); await expect(sq).toHaveValue('1');
+  await op.keyboard.type('4'); await op.keyboard.press('Enter');
+  await expect(op.locator('#pscan')).toBeFocused();
+  await sq.fill('46001234567890'); await sq.press('Enter');                                       // the scanner typed into the quantity box
+  await expect(sq).toHaveValue('5');
+  await expect(op.locator('#picked')).toContainText('5 ctn (120 pcs)');
+  await op.fill('#pscan', '9876543210'); await op.press('#pscan', 'Enter');
+  await expect(op.locator('.modal')).toContainText('No item has the barcode 9876543210');
+  await op.locator('.modal footer').getByRole('button', { name: 'Cancel' }).click();             // nothing received
   await shop.goto('/till');
   await expect(shop.locator('#cust')).toHaveAttribute('placeholder', 'Customer name (optional)');
   await shop.fill('#scan', '6009998887776'); await shop.press('#scan', 'Enter');               // the second barcode scans too
@@ -487,6 +512,7 @@ test('a full day in SIM', async ({ browser }) => {
   await admin.getByRole('button', { name: 'Save settings' }).click();
   await expect(admin.getByText('Settings saved')).toBeVisible();
   await till.goto('/till');
+  await expect(till.locator('#cust')).toHaveAttribute('placeholder', 'Customer name (optional)');  // the till has loaded the new settings
   await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
   await expect(till.locator('.line', { hasText: 'Shea body lotion' })).toBeVisible();
   await expect(till.getByRole('button', { name: 'Send to shop admin for approval' })).toHaveCount(0);

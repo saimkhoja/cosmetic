@@ -9,54 +9,47 @@ import { ctnTxt } from '../lib/units';
 import { dt, fUSD, sum } from '../lib/format';
 import { printHTML, supplierReturnNoteHTML } from '../lib/print';
 import { Empty, Head, Modal, Note, useAction, useToast } from '../components/ui';
+import { blankLine, per, StockPicker, type Line } from '../components/StockPicker';
 import { QtyCell } from './Inventory';
 import { BillModal, StatementView, usePayables } from './Accounts';
 import type { Grn, Product, ShopReturn, SupplierReturn } from '../lib/types';
 
-export type Line = { n: string; u: 'ctn' | 'pcs' };
-export const per = (p: Product) => (!p.is_bundle && p.per_carton > 1 ? p.per_carton : 0);
+export { per, type Line };
 /** Quantity entry by carton or pcs, shared by goods in and returns. */
 export function useQtyLines(init: Record<string, Line> = {}) {
   const [lines, setLines] = useState<Record<string, Line>>(init);
   const pcsOf = (p: Product) => { const l = lines[p.id]; if (!l) return 0; const n = Math.max(0, parseInt(l.n) || 0); return l.u === 'ctn' ? n * per(p) : n; };
-  const setLine = (p: Product, patch: Partial<Line>) => setLines((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? { n: '', u: per(p) ? 'ctn' : 'pcs' }), ...patch } }));
-  const cell = (p: Product) => { const l = lines[p.id] ?? { n: '', u: per(p) ? 'ctn' : 'pcs' }; return (
+  const setLine = (p: Product, patch: Partial<Line>) => setLines((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? blankLine(p)), ...patch } }));
+  const cell = (p: Product) => { const l = lines[p.id] ?? blankLine(p); return (
     <div style={{ display: 'flex', gap: 6 }}><input className="input" type="number" min="0" inputMode="numeric" placeholder="0" value={l.n} style={{ minHeight: 42, width: 84 }} onChange={(e) => setLine(p, { n: e.target.value })} aria-label={`Quantity ${p.name}`} />
       {per(p) ? <select className="input" style={{ minHeight: 42, width: 'auto', padding: '0 8px' }} value={l.u} onChange={(e) => setLine(p, { u: e.target.value as Line['u'] })}><option value="ctn">ctn</option><option value="pcs">pcs</option></select> : <span className="code" style={{ alignSelf: 'center' }}>{p.stock_unit}</span>}</div>); };
-  return { pcsOf, cell, setLine };
+  return { pcsOf, cell, setLine, lines };
 }
 
 export function ReceiveGoodsModal({ pid, onClose }: { pid?: string; onClose: () => void }) {
-  const products = useProducts(), suppliers = useSuppliers(), refresh = useRefresh(), toast = useToast(), a = useAction();
-  const [sup, setSup] = useState(''), [ref, setRef] = useState(''), [note, setNote] = useState(''), [q, setQ] = useState('');
-  const { pcsOf, cell, setLine } = useQtyLines();
-  const [seeded, setSeeded] = useState(false);
-  const all = (products.data ?? []).filter((p) => p.active);
-  if (pid && !seeded && all.length) { const p = all.find((x) => x.id === pid); if (p) setLine(p, {}); setSeeded(true); if (p) setQ(p.name); }
+  const products = useProducts(), suppliers = useSuppliers(), settings = useSettings(), refresh = useRefresh(), toast = useToast(), a = useAction();
+  const [sup, setSup] = useState(''), [ref, setRef] = useState(''), [note, setNote] = useState('');
+  const qty = useQtyLines(), { pcsOf } = qty;
   const s = suppliers.data?.find((x) => x.id === sup), theirs = new Set((s?.supplier_items ?? []).map((i) => i.product_id));
-  const ql = q.trim().toLowerCase(), chosen = all.filter((p) => pcsOf(p) > 0);
-  const list = all.filter((p) => pcsOf(p) > 0 || (ql ? (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql) : !s || theirs.has(p.id) || !theirs.size))
-    .sort((x, y) => Number(pcsOf(y) > 0) - Number(pcsOf(x) > 0) || Number(theirs.has(y.id)) - Number(theirs.has(x.id)) || x.name.localeCompare(y.name)).slice(0, 150);
+  // the supplier's items first, then by name: the order stays put while quantities are typed
+  const all = (products.data ?? []).filter((p) => p.active).sort((x, y) => Number(theirs.has(y.id)) - Number(theirs.has(x.id)) || x.name.localeCompare(y.name));
+  const chosen = all.filter((p) => pcsOf(p) > 0), units = sum(chosen, pcsOf);
   const save = () => a.run(async () => {
     if (!sup) throw new Error('Choose the supplier first');
     if (!chosen.length) throw new Error('Enter a quantity for at least one item');
     const r = await rpc<{ no: string }>('receive_goods', { p: { supplier_id: sup, ref, note, lines: chosen.map((p) => ({ product_id: p.id, qty: pcsOf(p) })) } });
-    await refresh('products', 'grns', 'audit'); toast(`${r.no} saved: ${sum(chosen, pcsOf)} units added to the store. The Admin enters the bill.`); onClose();
+    await refresh('products', 'grns', 'audit'); toast(`${r.no} saved: ${units} units added to the store. The Admin enters the bill.`); onClose();
   });
   return (
-    <Modal title="Receive goods from a supplier" icon="truck" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Add to store stock</button></>}>
+    <Modal title="Receive goods from a supplier" icon="truck" xl onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Add to store stock{chosen.length ? ` · ${chosen.length} item${chosen.length === 1 ? '' : 's'}, ${units} units` : ''}</button></>}>
       <div className="frow"><div className="field"><label>Supplier</label><select id="gsup" className="input" value={sup} onChange={(e) => setSup(e.target.value)}><option value="">Choose the supplier</option>{(suppliers.data ?? []).filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
         {suppliers.data && !suppliers.data.length ? <span className="hint">No suppliers yet. The Admin adds them under Accounts, Suppliers.</span> : null}</div>
         <div className="field"><label>Supplier's delivery note or invoice no. (optional)</label><input id="gref" className="input" maxLength={60} value={ref} onChange={(e) => setRef(e.target.value)} /></div></div>
-      <div className="search" style={{ maxWidth: 'none', marginBottom: 10 }}><Icon n="search" /><input placeholder={s && theirs.size ? `Showing ${s.name}'s items. Type to find any item` : 'Find an item by name, code or category'} value={q} onChange={(e) => setQ(e.target.value)} /></div>
-      <div className="tw" style={{ maxHeight: '44vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}>
-        {list.length ? <table className="t"><thead><tr><th>Item</th><th className="r">In store</th><th style={{ width: 200 }}>Received</th></tr></thead><tbody>
-          {list.map((p) => <tr key={p.id}><td><b>{p.name}</b>{theirs.has(p.id) ? <> <span className="chip ok">from this supplier</span></> : null}<div className="code">{p.sku}{per(p) ? ` · ${per(p)} pcs per carton` : ''}</div></td>
-            <td className="r"><QtyCell p={p} q={p.wh_qty} /></td><td>{cell(p)}</td></tr>)}
-        </tbody></table> : <Empty i="search" t="No items match" />}
-      </div>
+      <StockPicker all={all} base={theirs.size ? (p) => theirs.has(p.id) : undefined} qty={qty} codes={!!settings.data?.features?.barcode} initQ={pid ? all.find((p) => p.id === pid)?.name : ''}
+        cols={[{ th: 'In store', td: (p) => <QtyCell p={p} q={p.wh_qty} /> }]} qtyHead="Received" aria={(p) => `Quantity ${p.name}`}
+        badge={(p) => (theirs.has(p.id) ? <> <span className="chip ok">from this supplier</span></> : null)} sideTitle="To receive" sideNote={s ? `From ${s.name}${ref ? `, ${ref}` : ''}` : 'Choose the supplier'} />
       <div className="field" style={{ marginTop: 12 }}><label>Note (optional)</label><input className="input" maxLength={120} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. 2 cartons damaged, refused" /></div>
-      <Note>{chosen.length} item{chosen.length === 1 ? '' : 's'}, {sum(chosen, pcsOf)} units. No prices here: the Admin enters the supplier's bill and its amounts.</Note>
+      <Note>No prices here: the Admin enters the supplier's bill and its amounts.</Note>
       <div className="lerr">{a.err}</div>
     </Modal>
   );
@@ -66,13 +59,11 @@ const RTS_REASONS = ['Damaged', 'Expired', 'Wrong item', 'Not ordered', 'Other']
 /** The warehouse (or Admin) sends goods back to a supplier: they leave the store at once and a return note prints. */
 export function ReturnToSupplierModal({ onClose }: { onClose: () => void }) {
   const products = useProducts(), suppliers = useSuppliers(), settings = useSettings(), refresh = useRefresh(), toast = useToast(), a = useAction();
-  const [sup, setSup] = useState(''), [reason, setReason] = useState(''), [note, setNote] = useState(''), [q, setQ] = useState('');
-  const { pcsOf, cell } = useQtyLines();
-  const all = (products.data ?? []).filter((p) => p.active), byId = new Map(all.map((p) => [p.id, p]));
+  const [sup, setSup] = useState(''), [reason, setReason] = useState(''), [note, setNote] = useState('');
+  const qty = useQtyLines(), { pcsOf } = qty;
   const s = suppliers.data?.find((x) => x.id === sup), theirs = new Set((s?.supplier_items ?? []).map((i) => i.product_id));
-  const ql = q.trim().toLowerCase(), chosen = all.filter((p) => pcsOf(p) > 0), over = chosen.filter((p) => pcsOf(p) > p.wh_qty);
-  const list = all.filter((p) => pcsOf(p) > 0 || (ql ? (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql) : (!s || theirs.has(p.id) || !theirs.size) && p.wh_qty > 0))
-    .sort((x, y) => Number(pcsOf(y) > 0) - Number(pcsOf(x) > 0) || Number(theirs.has(y.id)) - Number(theirs.has(x.id)) || x.name.localeCompare(y.name)).slice(0, 150);
+  const all = (products.data ?? []).filter((p) => p.active).sort((x, y) => Number(theirs.has(y.id)) - Number(theirs.has(x.id)) || x.name.localeCompare(y.name)), byId = new Map(all.map((p) => [p.id, p]));
+  const chosen = all.filter((p) => pcsOf(p) > 0), over = chosen.filter((p) => pcsOf(p) > p.wh_qty);
   const save = () => a.run(async () => {
     if (!sup) throw new Error('Choose the supplier first');
     if (!reason) throw new Error('Choose why the goods go back');
@@ -83,19 +74,16 @@ export function ReturnToSupplierModal({ onClose }: { onClose: () => void }) {
     await refresh('products', 'sreturns', 'audit'); toast(`${r.no}: ${sum(chosen, pcsOf)} units sent back to ${s?.name}. Printing the return note.`); onClose();
   });
   return (
-    <Modal title="Return goods to a supplier" icon="exchange" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy || over.length > 0} onClick={() => void save()}><Icon n="check" /> Send back and print</button></>}>
+    <Modal title="Return goods to a supplier" icon="exchange" xl onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy || over.length > 0} onClick={() => void save()}><Icon n="check" /> Send back and print</button></>}>
       <div className="frow"><div className="field"><label>Supplier</label><select id="rsup" className="input" value={sup} onChange={(e) => setSup(e.target.value)}><option value="">Choose the supplier</option>{(suppliers.data ?? []).filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></div>
         <div className="field"><label>Why</label><select id="rreason2" className="input" value={reason} onChange={(e) => setReason(e.target.value)}><option value="">Choose the reason</option>{RTS_REASONS.map((x) => <option key={x}>{x}</option>)}</select></div></div>
-      <div className="search" style={{ maxWidth: 'none', marginBottom: 10 }}><Icon n="search" /><input placeholder={s && theirs.size ? `Showing ${s.name}'s items in the store. Type to find any item` : 'Find an item by name, code or category'} value={q} onChange={(e) => setQ(e.target.value)} /></div>
-      <div className="tw" style={{ maxHeight: '44vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}>
-        {list.length ? <table className="t"><thead><tr><th>Item</th><th className="r">In store</th><th style={{ width: 200 }}>Send back</th></tr></thead><tbody>
-          {list.map((p) => <tr key={p.id}><td><b>{p.name}</b>{theirs.has(p.id) ? <> <span className="chip ok">from this supplier</span></> : null}<div className="code">{p.sku}{per(p) ? ` · ${per(p)} pcs per carton` : ''}</div></td>
-            <td className="r"><QtyCell p={p} q={p.wh_qty} cls={pcsOf(p) > p.wh_qty ? 'bad' : ''} /></td><td>{cell(p)}</td></tr>)}
-        </tbody></table> : <Empty i="search" t="No items match" />}
-      </div>
+      <StockPicker all={all} base={(p) => (!theirs.size || theirs.has(p.id)) && p.wh_qty > 0} qty={qty} codes={!!settings.data?.features?.barcode}
+        cols={[{ th: 'In store', td: (p) => <QtyCell p={p} q={p.wh_qty} cls={pcsOf(p) > p.wh_qty ? 'bad' : ''} /> }]} qtyHead="Send back" aria={(p) => `Quantity ${p.name}`}
+        badge={(p) => (theirs.has(p.id) ? <> <span className="chip ok">from this supplier</span></> : null)} warn={(p) => (pcsOf(p) > p.wh_qty ? `More than the store has (${p.wh_qty})` : null)}
+        sideTitle="To send back" sideNote={s ? `To ${s.name}${reason ? `, ${reason.toLowerCase()}` : ''}` : 'Choose the supplier'} />
       <div className="field" style={{ marginTop: 12 }}><label>Note (optional)</label><input className="input" maxLength={160} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. caps broken in 2 cartons" /></div>
       {over.length ? <Note i="alert" warn>More than the store has: {over.map((p) => p.name).join(', ')}.</Note>
-        : <Note i="exchange">{chosen.length} item{chosen.length === 1 ? '' : 's'}, {sum(chosen, pcsOf)} units. They leave the central store now, and what you owe the supplier drops at item cost. The Admin settles the amount the supplier credits.</Note>}
+        : <Note i="exchange">They leave the central store now, and what you owe the supplier drops at item cost. The Admin settles the amount the supplier credits.</Note>}
       <div className="lerr">{a.err}</div>
     </Modal>
   );
