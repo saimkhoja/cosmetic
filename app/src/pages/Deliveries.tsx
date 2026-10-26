@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useDeliveries, useProducts, useRanks, useRefresh, useSettings, useShops, useStock, useStockRequests } from '../data/queries';
+import { useCosts, useDeliveries, useProducts, useRanks, useRefresh, useSettings, useShops, useStock, useStockRequests } from '../data/queries';
 import { rpc } from '../lib/supabase';
-import { ctnTxt, hotSort } from '../lib/units';
-import { dt, fCDF, sum } from '../lib/format';
-import { deliveryNoteHTML, printHTML, stockCountHTML } from '../lib/print';
-import { Dual, Empty, Head, Modal, Note, useAction, useToast } from '../components/ui';
+import { ctnTxt, hotSort, pcValue, stockValue } from '../lib/units';
+import { dt, fCDF, fUSD, sum, toCDF } from '../lib/format';
+import { deliveryNoteHTML, printHTML, stockCountHTML, stockValueHTML } from '../lib/print';
+import { Dual, Dual2, Empty, Head, Kpi, Modal, Note, useAction, useToast } from '../components/ui';
 import { QtyCell } from './Inventory';
 import type { Delivery, Product, Shop } from '../lib/types';
 import { useNavigate } from 'react-router-dom';
@@ -201,36 +201,46 @@ export function ShopStockAll() {
   const at = new Map((stock.data ?? []).map((r) => [r.shop_id + '|' + r.product_id, r.qty]));
   const dels = useDeliveries(), coming = new Map<string, number>();
   (dels.data ?? []).filter((x) => x.status === 'pending').forEach((x) => x.delivery_items.forEach((i) => coming.set(x.shop_id + '|' + i.product_id, (coming.get(x.shop_id + '|' + i.product_id) ?? 0) + i.qty)));
+  // the Admin sees each outlet's stock at selling price and at cost; the warehouse sees quantities only
+  const isAdmin = profile!.role === 'admin', costs = useCosts(isAdmin), rate = settings.data?.rate ?? 0;
+  const cost = new Map((costs.data ?? []).map((c) => [c.product_id, Number(c.cost_usd)])), live = (products.data ?? []).filter((p) => p.active);
+  const qtyAt = (sid: string | null, p: Product) => (sid ? at.get(sid + '|' + p.id) ?? 0 : p.wh_qty);
+  const worth = (sid: string | null) => { const r = live.map((p) => ({ p, qty: qtyAt(sid, p) })); return { v: stockValue(r, rate), cost: sum(r.filter((x) => x.qty > 0), (x) => (cost.get(x.p.id) ?? 0) * x.qty) }; };
+  const one = only !== 'all' && isAdmin ? only : null;
   return (
     <>
       <Head t="Shop stock" s="What each outlet has right now, next to the central store, best sellers of the last 30 days first. Send stock straight from here." a={<><button className="btn ghost" onClick={() => setCount(true)}><Icon n="printer" /> Print stock count sheet</button><button className="btn primary" onClick={() => setSend({ pid: '' })}><Icon n="truck" /> New delivery</button></>} />
       <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Search by name, code or category" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <select className="input" style={{ width: 'auto' }} value={only} onChange={(e) => setOnly(e.target.value)}><option value="all">All outlets</option>{(shops.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
         <span className="chip warn">5 or fewer</span><span className="chip bad">None or sold on order</span></div>
+      {isAdmin ? <div className="kpis" id="stockvalue">{[{ id: null, name: 'Central store' }, ...cols].map((o) => { const { v, cost: c } = worth(o.id); return (
+        <Kpi key={o.id ?? 'store'} i={o.id ? 'store' : 'warehouse'} l={o.name}><Dual2 b={fCDF(v.cdf)} s={`at selling price, ${fUSD(v.usd)}`} /><div className="code">At cost {fUSD(c)} · {v.lines} items in stock</div></Kpi>); })}</div> : null}
       <div className="card p0"><div className="tw">{!list.length ? <Empty i="search" t={products.isLoading ? 'Loading' : 'No items match your search'} /> :
-        <table className="t"><thead><tr><th>Item</th><th className="r">Central store</th>{cols.map((s) => <th key={s.id} className="r">{s.name}</th>)}<th /></tr></thead><tbody>
+        <table className="t"><thead><tr><th>Item</th><th className="r">Central store</th>{cols.map((s) => <th key={s.id} className="r">{s.name}</th>)}{one ? <th className="r">Value at selling price</th> : null}<th /></tr></thead><tbody>
           {list.map((p) => <tr key={p.id}><td><b>{p.name}</b><div className="code">{p.sku} · {p.category}</div></td><td className="r"><QtyCell p={p} q={p.wh_qty} cls={p.wh_qty <= p.reorder ? 'bad' : ''} /></td>
             {cols.map((s) => { const v = at.get(s.id + '|' + p.id), c = coming.get(s.id + '|' + p.id); return <td key={s.id} className="r">{v === undefined ? <span className="code">Not stocked</span> : <QtyCell p={p} q={v} cls={v <= 0 ? 'bad' : v <= 5 ? 'warn' : 'ok'} />}{c ? <div className="code">+{c} on the way</div> : null}</td>; })}
+            {one ? (() => { const q = qtyAt(one, p), pr = toCDF(pcValue(p), rate); return <td className="r nw"><b>{q > 0 ? fCDF(pr * q) : '-'}</b><div className="code">{fCDF(pr)} per {p.is_bundle ? 'set' : 'pc'}</div></td>; })() : null}
             <td><div className="act"><button title="Send to shops" onClick={() => setSend({ pid: p.id, sid: only !== 'all' ? only : undefined })}><Icon n="truck" /></button></div></td></tr>)}
         </tbody></table>}</div></div>
       {send ? <DeliveryModal d={null} pid={send.pid || undefined} sid={send.sid} onClose={() => setSend(null)} /> : null}
-      {count ? <CountSheet onClose={() => setCount(false)} first={only} print={(where, sid, zero) => {
-        const all = (products.data ?? []).filter((p) => p.active).map((p) => ({ p, qty: sid ? at.get(sid + '|' + p.id) ?? 0 : p.wh_qty })).filter((r) => zero || r.qty !== 0).sort((a, b) => a.p.category.localeCompare(b.p.category) || a.p.name.localeCompare(b.p.name));
-        printHTML(stockCountHTML(settings.data?.company ?? {}, where, profile!.name, all)); setCount(false);
+      {count ? <CountSheet onClose={() => setCount(false)} first={only} values={isAdmin} print={(where, sid, zero, values) => {
+        const all = live.map((p) => ({ p, qty: qtyAt(sid, p) })).filter((r) => zero || r.qty !== 0).sort((a, b) => a.p.category.localeCompare(b.p.category) || a.p.name.localeCompare(b.p.name));
+        printHTML(values ? stockValueHTML(settings.data?.company ?? {}, where, profile!.name, all, rate, (p) => cost.get(p.id) ?? 0) : stockCountHTML(settings.data?.company ?? {}, where, profile!.name, all)); setCount(false);
       }} /> : null}
     </>
   );
 }
 
-function CountSheet({ first, onClose, print }: { first: string; onClose: () => void; print: (where: string, sid: string | null, zero: boolean) => void }) {
+function CountSheet({ first, values, onClose, print }: { first: string; values: boolean; onClose: () => void; print: (where: string, sid: string | null, zero: boolean, values: boolean) => void }) {
   const shops = useShops();
-  const [w, setW] = useState(first === 'all' ? 'store' : first), [zero, setZero] = useState(true);
+  const [w, setW] = useState(first === 'all' ? 'store' : first), [zero, setZero] = useState(true), [val, setVal] = useState(false);
   const name = w === 'store' ? 'Central store' : shops.data?.find((s) => s.id === w)?.name ?? '';
   return (
-    <Modal title="Print stock count sheet" icon="printer" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="cntprint" onClick={() => print(name, w === 'store' ? null : w, zero)}><Icon n="printer" /> Print</button></>}>
+    <Modal title="Print stock count sheet" icon="printer" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="cntprint" onClick={() => print(name, w === 'store' ? null : w, zero, val)}><Icon n="printer" /> Print</button></>}>
       <p>A sheet with every item and the stock SIM shows, and empty columns to write what you count, to check the system against the shelves.</p>
       <div className="field"><label>Where</label><select id="cntwhere" className="input" value={w} onChange={(e) => setW(e.target.value)}><option value="store">Central store</option>{(shops.data ?? []).filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
       <label className="switch"><input type="checkbox" checked={zero} onChange={(e) => setZero(e.target.checked)} /><span>Include items with no stock in the system</span></label>
+      {values ? <label className="switch"><input id="cntvalue" type="checkbox" checked={val} onChange={(e) => setVal(e.target.checked)} /><span>Print the stock valuation instead: price per pc, value of each item, totals at selling price and at cost</span></label> : null}
     </Modal>
   );
 }

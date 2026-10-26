@@ -156,6 +156,7 @@ test('a full day in SIM', async ({ browser }) => {
   const sheaRow = op.locator('tr', { hasText: 'Shea body lotion' });
   await expect(sheaRow).toContainText('240 pcs');                      // 192 + 48 from the supplier; nothing has left the store yet
   await expect(sheaRow).toContainText('+96 on the way');
+  await expect(op.locator('#stockvalue')).toHaveCount(0);              // the warehouse sees quantities, not values
 
   // ---- the shop admin receives: one in full, one short with a note
   const { page: shop } = await open(browser);
@@ -266,6 +267,20 @@ test('a full day in SIM', async ({ browser }) => {
   await shopCtx.setOffline(false);
   await shop.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
+
+  // ---- stock at selling price: the shop admin's own shop, every outlet for the Admin, and the printed valuation
+  await shop.getByRole('link', { name: 'Stock', exact: true }).click();
+  await expect(shop.locator('#stockvalue')).toContainText('Stock at selling price');
+  await expect(shop.locator('main tr', { hasText: 'Shea body lotion' })).toContainText('570 000 CDF');   // 40 x 14 250
+  await admin.getByRole('link', { name: 'Shop stock' }).click();
+  await expect(admin.locator('#stockvalue')).toContainText('SIM Beauté Gombe');
+  await expect(admin.locator('#stockvalue')).toContainText('At cost');
+  await admin.locator('.toolbar select').selectOption({ label: 'SIM Beauté Gombe' });
+  await expect(admin.locator('main tr', { hasText: 'Shea body lotion' })).toContainText('570 000 CDF');
+  await admin.getByRole('button', { name: 'Print stock count sheet' }).click();
+  await admin.check('#cntvalue'); await admin.click('#cntprint');
+  const val = (await prints(admin)).at(-1)!;
+  expect(val).toContain('Stock valuation'); expect(val).toContain('SIM Beauté Gombe'); expect(val).toContain('570 000 CDF'); expect(val).toContain('At cost');
 
   // ---- correct the approved invoice, then the day end report
   await shop.getByRole('link', { name: 'Invoices' }).click();

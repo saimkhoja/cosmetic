@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
-import { cashNotes, ctnTxt, hotSort, marginPct, payment, pcValue, takeLocal, totals, unitsOf, usdNotes } from './units';
+import { cashNotes, ctnTxt, hotSort, marginPct, payment, pcValue, stockValue, takeLocal, totals, unitsOf, usdNotes } from './units';
 import { barcodesOf, custName, findByCode, itemProblem, splitBarcodes } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
@@ -136,6 +136,21 @@ describe('payment in USD and CDF', () => {
   });
   it('offers the USD notes that cover what is due', () => { expect(usdNotes(14.04)).toEqual([20, 50, 100]); expect(usdNotes(0.4)).toEqual([1, 5, 10]); });
 });
+describe('stock at selling price', () => {
+  it('values each pc at its shop price, as at the till', () => {
+    const v = stockValue([{ p: P({ price_usd: 1.5 }), qty: 10 }, { p: P({ price_usd: 0, dozen_usd: 16 }), qty: 24 }], 2850);
+    expect(v.cdf).toBe(10 * 4280 + 24 * toCDF(16 / 12, 2850));   // 4 280 per pc; a dozen-only item at its dozen price / 12
+    expect(v.usd).toBeCloseTo(15 + 32);
+    expect(v).toMatchObject({ lines: 2, units: 34 });
+  });
+  it('counts no value for stock that is zero or sold on order', () => {
+    expect(stockValue([{ p: P({}), qty: 0 }, { p: P({}), qty: -3 }], 2850)).toEqual({ usd: 0, cdf: 0, lines: 0, units: 0 });
+  });
+  it('values a mixed set at the set price', () => {
+    expect(stockValue([{ p: P({ is_bundle: true, stock_unit: 'set', price_usd: 12, piece_usd: 3, pieces_per_set: 6 }), qty: 2 }], 2850).cdf).toBe(2 * 34200);
+  });
+});
+
 describe('margin', () => {
   it('is the mark-up on cost: cost + margin % = selling price', () => {
     expect(marginPct(1.28, 0.9)).toBe(42);   // 0.38 / 0.90 = 42.2%

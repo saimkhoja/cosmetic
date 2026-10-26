@@ -2,7 +2,7 @@
 // Layouts are those approved on the demo. Printing uses the browser; for one-tap printing at
 // the till, start Chrome with --kiosk-printing and set the receipt printer as default.
 import type { Company, Delivery, Invoice, Product, Shop, Statement } from './types';
-import { ctnTxt, unitsOf } from './units';
+import { ctnTxt, pcValue, stockValue, unitsOf } from './units';
 import { dt, esc, fCDF, fUSD, sum, toCDF, today } from './format';
 
 export function printHTML(html: string) {
@@ -139,6 +139,15 @@ export function stockCountHTML(c: Company, where: string, by: string, rows: { p:
   <p style="color:#000;margin-top:14px">${rows.length} items, ${sum(rows, (r) => r.qty)} units in the system. Write what you count; the difference is Counted minus System stock.</p>
   <div style="display:flex;justify-content:space-between;margin-top:28px;gap:20px"><div>Counted by: ____________________<br><br>Signature ____________</div><div>Checked by: ____________________<br><br>Signature ____________</div></div>`;
   return bookHTML(c, 'Stock count sheet', where + ', ' + today(), body, by);
+}
+
+/** Stock valuation: each item's stock at its selling price per pc (as at the till), the total at selling price and, for the Admin, at cost. */
+export function stockValueHTML(c: Company, where: string, by: string, rows: { p: Product; qty: number }[], rate: number, costOf?: (p: Product) => number) {
+  const v = stockValue(rows, rate), cost = costOf ? sum(rows.filter((r) => r.qty > 0), (r) => costOf(r.p) * r.qty) : null;
+  const body = `<table class="t"><thead><tr><th>#</th><th>Item</th><th>Category</th><th class="r">Stock</th><th class="r">Price per pc</th><th class="r">Value</th></tr></thead><tbody>
+  ${rows.map((r, i) => { const pr = toCDF(pcValue(r.p), rate); return `<tr><td>${i + 1}</td><td><b>${esc(r.p.name)}</b><br><small>${esc(r.p.sku)}</small></td><td>${esc(r.p.category)}</td><td class="r">${r.qty} ${esc(r.p.stock_unit)}</td><td class="r">${fCDF(pr)}</td><td class="r"><b>${r.qty > 0 ? fCDF(pr * r.qty) : '-'}</b></td></tr>`; }).join('') || '<tr><td colspan="6">No items</td></tr>'}</tbody></table>
+  <p style="color:#000;margin-top:14px"><b>Total at selling price: ${fCDF(v.cdf)} (${fUSD(v.usd)})</b>, ${v.lines} items, ${v.units} units in stock, at 1 USD = ${fCDF(rate)}.${cost !== null ? ` At cost: ${fUSD(cost)}.` : ''} Stock sold on order counts as none.</p>`;
+  return bookHTML(c, 'Stock valuation', where + ', ' + today(), body, by);
 }
 
 /** A plain A4 document with the company heading, used by the book keeping reports. */
