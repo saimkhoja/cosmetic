@@ -9,7 +9,7 @@ import { UPCATS } from '../lib/items';
 import { Dual, Dual2, Empty, Head, HList, Kpi, Modal, Note, Tile, useAction, useToast } from '../components/ui';
 import { R } from '../components/Layout';
 import { QtyCell } from './Inventory';
-import { pcValue } from '../lib/units';
+import { stockValue } from '../lib/units';
 import { DeliveryModal } from './Deliveries';
 import type { Profile, Role } from '../lib/types';
 
@@ -29,7 +29,7 @@ export function AdminHome() {
       <Head t="Admin dashboard" s={`Sales rate: 1 USD = ${fCDF(rate)} · Internal rate: 1 USD = ${fCDF(book)}`} />
       <div className="kpis">
         <Kpi i="box" l="Store stock at cost"><Dual usd={sum(P, (p) => (cost.get(p.id) ?? 0) * p.wh_qty)} rate={book} /></Kpi>
-        <Kpi i="tag" l="Same stock at selling price"><Dual usd={sum(P, (p) => pcValue(p) * p.wh_qty)} rate={rate} /></Kpi>
+        <Kpi i="tag" l="Same stock at selling price">{(() => { const v = stockValue(P.map((p) => ({ p, qty: p.wh_qty })), rate); return <Dual2 b={fUSD(v.usd)} s={fCDF(v.cdf)} />; })()}</Kpi>
         <Kpi i="wallet" l="Upkeep this month" tone="warn"><Dual usd={upM} rate={book} /></Kpi>
         <Kpi i="chart" l="All shops, sales today" tone="ok"><Dual2 b={fUSD(rep.data?.total_usd ?? 0)} s={`${fCDF(rep.data?.total ?? 0)} from ${rep.data?.n ?? 0} invoices`} /></Kpi>
       </div>

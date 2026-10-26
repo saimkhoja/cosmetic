@@ -20,6 +20,11 @@ export function pcValue(p: Product) {
   if (p.dozen_usd > 0) return p.dozen_usd / 12;
   return p.carton_usd > 0 && p.per_carton > 0 ? p.carton_usd / p.per_carton : 0;
 }
+/** Stock at selling price: each pc (or set) at its shop price, in Francs as at the till and in dollars. Stock sold on order counts as none. */
+export function stockValue(rows: { p: Product; qty: number }[], rate: number) {
+  const r = rows.filter((x) => x.qty > 0);
+  return { usd: r.reduce((s, x) => s + pcValue(x.p) * x.qty, 0), cdf: r.reduce((s, x) => s + toCDF(pcValue(x.p), rate) * x.qty, 0), lines: r.length, units: r.reduce((s, x) => s + x.qty, 0) };
+}
 export function unitNote(p: Product, u: Unit) {
   return u.piece ? `single piece from an open ${p.stock_unit}` : u.mult > 1 ? `${u.mult} ${p.stock_unit}` : `single ${p.stock_unit}`;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
-import { cashNotes, ctnTxt, hotSort, marginPct, payment, pcValue, takeLocal, totals, unitsOf, usdNotes } from './units';
-import { barcodesOf, custName, findByCode, itemProblem, splitBarcodes } from './items';
+import { cashNotes, ctnTxt, hotSort, marginPct, payment, pcValue, stockValue, takeLocal, totals, unitsOf, usdNotes } from './units';
+import { barcodesOf, custName, findByCode, itemProblem, pickList, scanInQty, splitBarcodes } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
 
@@ -136,6 +136,45 @@ describe('payment in USD and CDF', () => {
   });
   it('offers the USD notes that cover what is due', () => { expect(usdNotes(14.04)).toEqual([20, 50, 100]); expect(usdNotes(0.4)).toEqual([1, 5, 10]); });
 });
+describe('goods in and delivery lists', () => {
+  const items = [P({ id: 'a', name: 'Aloe', sku: 'SK-1', barcodes: ['6001234567890'] }), P({ id: 'b', name: 'Brume', sku: 'SK-2' }), P({ id: 'c', name: 'Cologne', sku: 'SK-3', category: 'Fragrance' })];
+  const ids = (r: { hits: Product[]; rest: Product[] }) => [...r.hits, ...r.rest].map((p) => p.id);
+  it('keeps the order when quantities are typed', () => {
+    expect(ids(pickList(items, () => true, () => false, ''))).toEqual(['a', 'b', 'c']);
+    expect(ids(pickList(items, () => true, (p) => p.id === 'c', ''))).toEqual(['a', 'b', 'c']);
+  });
+  it('puts search matches first, then the rest', () => {
+    const r = pickList(items, () => true, () => false, 'frag');
+    expect(r.hits.map((p) => p.id)).toEqual(['c']); expect(r.rest.map((p) => p.id)).toEqual(['a', 'b']);
+    expect(pickList(items, () => true, () => false, '6001234567890').hits.map((p) => p.id)).toEqual(['a']);
+  });
+  it('shows only the chosen items without a search, plus those with a quantity', () => {
+    expect(ids(pickList(items, (p) => p.id === 'a', (p) => p.id === 'c', ''))).toEqual(['a', 'c']);
+    expect(ids(pickList(items, () => true, (p) => p.id === 'c', '', 1))).toEqual(['a', 'c']);   // past the row limit, entered items stay
+  });
+  it('finds a barcode scanned into a quantity box', () => {
+    expect(scanInQty(items, '126001234567890')).toMatchObject({ qty: '12', p: { id: 'a' } });
+    expect(scanInQty(items, '6001234567890')).toMatchObject({ qty: '', p: { id: 'a' } });
+    expect(scanInQty(items, '12')).toBeNull();
+    expect(scanInQty(items, '9999999999')).toBeNull();
+  });
+});
+
+describe('stock at selling price', () => {
+  it('values each pc at its shop price, as at the till', () => {
+    const v = stockValue([{ p: P({ price_usd: 1.5 }), qty: 10 }, { p: P({ price_usd: 0, dozen_usd: 16 }), qty: 24 }], 2850);
+    expect(v.cdf).toBe(10 * 4280 + 24 * toCDF(16 / 12, 2850));   // 4 280 per pc; a dozen-only item at its dozen price / 12
+    expect(v.usd).toBeCloseTo(15 + 32);
+    expect(v).toMatchObject({ lines: 2, units: 34 });
+  });
+  it('counts no value for stock that is zero or sold on order', () => {
+    expect(stockValue([{ p: P({}), qty: 0 }, { p: P({}), qty: -3 }], 2850)).toEqual({ usd: 0, cdf: 0, lines: 0, units: 0 });
+  });
+  it('values a mixed set at the set price', () => {
+    expect(stockValue([{ p: P({ is_bundle: true, stock_unit: 'set', price_usd: 12, piece_usd: 3, pieces_per_set: 6 }), qty: 2 }], 2850).cdf).toBe(2 * 34200);
+  });
+});
+
 describe('margin', () => {
   it('is the mark-up on cost: cost + margin % = selling price', () => {
     expect(marginPct(1.28, 0.9)).toBe(42);   // 0.38 / 0.90 = 42.2%

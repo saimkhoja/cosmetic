@@ -46,3 +46,19 @@ export const findByCode = <T extends { sku: string; barcode?: string | null; bar
 };
 /** How a sale or order without a customer name is shown. */
 export const custName = (c?: string | null) => c || 'Walk-in';
+/** A barcode scanned into a quantity box by mistake: the item it names and the digits typed before it, or null. */
+export const scanInQty = <T extends { barcode?: string | null; barcodes?: string[] | null }>(products: T[], v: string): { qty: string; p: T } | null => {
+  const s = v.replace(/\s+/g, '');
+  for (let i = 0; i + 6 <= s.length && /^\d*$/.test(s.slice(0, i)); i++) { const p = products.find((x) => barcodesOf(x).includes(s.slice(i))); if (p) return { qty: s.slice(0, i), p }; }
+  return null;
+};
+/** Rows of a goods in, delivery or return list in a fixed order that never changes when a quantity is typed.
+ *  A search puts its matches first; the rest follow. Rows with a quantity are always kept. */
+export function pickList<T extends { id: string; name: string; sku: string; category: string; barcode?: string | null; barcodes?: string[] | null }>(all: T[], shown: (p: T) => boolean, keep: (p: T) => boolean, q: string, max = 200) {
+  const ql = q.trim().toLowerCase();
+  const hit = (p: T) => (p.name + ' ' + p.sku + ' ' + p.category + ' ' + barcodesOf(p).join(' ')).toLowerCase().includes(ql);
+  const hits = ql ? all.filter(hit).slice(0, max) : [], ids = new Set(hits.map((p) => p.id));
+  let n = hits.length;
+  const rest = all.filter((p) => !ids.has(p.id) && (keep(p) || (shown(p) && n++ < max)));
+  return { hits, rest };
+}
