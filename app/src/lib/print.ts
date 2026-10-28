@@ -5,18 +5,15 @@ import type { Company, Delivery, Invoice, Product, Shop, Statement } from './typ
 import { ctnTxt, pcValue, stockValue, unitsOf } from './units';
 import { dt, esc, fCDF, fUSD, sum, toCDF, today } from './format';
 
-/** Prints a document, or several copies as one print each: receipt printers cut at the end of a print, so each copy is cut off. */
-export function printHTML(html: string | string[]) {
+export function printHTML(html: string) {
   const el = document.getElementById('print-area')!;
-  for (const h of Array.isArray(html) ? html : [html]) {
-    el.innerHTML = h;
-    pageStyle().textContent = h.includes('class="receipt') ? rollPage(h) : '';
-    try { window.print(); } catch { /* printing unavailable */ }
-  }
+  el.innerHTML = html;
+  pageStyle().textContent = html.includes('class="receipt') ? rollPage(html) : '';
+  try { window.print(); } catch { /* printing unavailable */ }
 }
 
-// Receipts and slips go on the 80 mm roll: no margins, and the page as long as the receipt,
-// so the printer cuts just under the last line.
+// Receipts and slips go on the 80 mm roll: no margins, and each page (one per copy) as long as
+// the longest copy, so a driver set to cut each page cuts just under the last line.
 function pageStyle() {
   let st = document.getElementById('print-page') as HTMLStyleElement | null;
   if (!st) { st = document.createElement('style'); st.id = 'print-page'; document.head.appendChild(st); }
@@ -59,9 +56,8 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   ${ed ? `<div class="small">Modifiée le ${dt(ed.at)} par ${esc(ed.by_name)}</div>` : ''}
   <div class="rnb">${c.footer ? `<div class="c">${esc(c.footer)}</div>` : ''}${NB}</div></div>`;
 }
-/** Customer and shop copies of an invoice, printed one after the other. */
 export const saleCopies = (inv: Invoice, c: Company, shop: Shop, cash = false) =>
-  [receiptHTML(inv, c, shop, { copy: 'client', cash }), receiptHTML(inv, c, shop, { copy: 'shop', cash })];
+  receiptHTML(inv, c, shop, { copy: 'client', cash }) + '<div class="pagebreak"></div>' + receiptHTML(inv, c, shop, { copy: 'shop', cash });
 
 /** Return note for goods sent back to a supplier: the driver signs it. No prices (the warehouse prints it). */
 export function supplierReturnNoteHTML(r: { no: string; kind: string; reason: string; note: string; created_at: string; created_by_name: string; supplier_return_items: { product_id: string; qty: number }[] }, supplier: string, c: Company, products: Map<string, Product>) {
@@ -152,9 +148,9 @@ export function orderSlipHTML(o: OrderSlip, c: Company, shop: Shop, copy?: 'clie
   <div class="rtotal"><span>TOTAL À PAYER</span><span>${fCDF(o.total)}</span></div>
   <div class="c small">Articles : ${sum(o.lines, (l) => l.qty)}. TVA incluse. Montant indicatif ; la facture de la caisse fait foi.</div></div>`;
 }
-/** The order slip twice, customer and shop copies, printed one after the other. */
+/** The order slip twice, customer and shop copies, one page each so the printer cuts between them. */
 export const orderSlipCopies = (o: OrderSlip, c: Company, shop: Shop) =>
-  [orderSlipHTML(o, c, shop, 'client'), orderSlipHTML(o, c, shop, 'shop')];
+  orderSlipHTML(o, c, shop, 'client') + '<div class="pagebreak"></div>' + orderSlipHTML(o, c, shop, 'shop');
 /** Short reference of an order, the same on the till's slip and in the shop admin's review list. */
 export const orderRef = (id: string) => '#' + id.replace(/-/g, '').slice(0, 6).toUpperCase();
 
