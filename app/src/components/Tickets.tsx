@@ -1,8 +1,8 @@
 // Price tickets for the shelves: pick items and copies, then print on A4, a label printer or the receipt printer's roll.
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { fCDF, toCDF } from '../lib/format';
-import { ticketsHTML, printHTML, type TicketLayout, type TicketUnit } from '../lib/print';
+import { fitTicketNames, ticketsHTML, printHTML, type TicketLayout, type TicketUnit } from '../lib/print';
 import { unitLabel, unitsOf } from '../lib/units';
 import { Empty, Modal, Note } from './ui';
 import type { Product } from '../lib/types';
@@ -18,6 +18,8 @@ export function TicketsModal({ products, rate, shopName, onClose }: { products: 
   const list = products.filter((p) => copies(p.id) > 0 || !ql || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql)).slice(0, 120);
   const total = chosen.reduce((s, p) => s + copies(p.id), 0);
   const html = chosen.length ? ticketsHTML(chosen.map((p) => ({ p, copies: copies(p.id) })), rate, layout, shopName, units) : '';
+  const prev = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { if (prev.current) fitTicketNames(prev.current); }, [html]);
   const pick = (l: TicketLayout) => { setLayout(l); try { localStorage.setItem('sim.tickets', l); } catch { /* not saved */ } };
   return (
     <Modal title="Print price tickets" icon="tag" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Close</button><button className="btn primary" id="tprint" disabled={!total} onClick={() => printHTML(html)}><Icon n="printer" /> Print {total} ticket{total === 1 ? '' : 's'}</button></>}>
@@ -33,7 +35,7 @@ export function TicketsModal({ products, rate, shopName, onClose }: { products: 
         </tbody></table> : <Empty i="search" t="No items match" />}
       </div>
       {skipped.length ? <Note i="alert" warn style={{ marginTop: 12 }}>No ticked price for: {skipped.map((p) => p.name).join(', ')}. Tick another unit to print them.</Note> : null}
-      {html ? <div className="tprev" style={{ marginTop: 12 }} dangerouslySetInnerHTML={{ __html: html }} /> : <Note i="tag" style={{ marginTop: 12 }}>Enter how many tickets you want for each item. Prices are today's shop prices in Francs, from the Admin's price list.</Note>}
+      {html ? <div className="tprev" ref={prev} style={{ marginTop: 12 }} dangerouslySetInnerHTML={{ __html: html }} /> : <Note i="tag" style={{ marginTop: 12 }}>Enter how many tickets you want for each item. Prices are today's shop prices in Francs, from the Admin's price list.</Note>}
     </Modal>
   );
 }
