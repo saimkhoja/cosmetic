@@ -1,14 +1,14 @@
-// Price tickets for the shelves: pick items and copies, then print on A4 or a label printer.
+// Price tickets for the shelves: pick items and copies, then print on A4, a label printer or the receipt printer's roll.
 import { useState } from 'react';
 import { Icon } from '../lib/icons';
 import { fCDF, toCDF } from '../lib/format';
-import { ticketsHTML, printHTML, type TicketUnit } from '../lib/print';
+import { ticketsHTML, printHTML, type TicketLayout, type TicketUnit } from '../lib/print';
 import { unitLabel, unitsOf } from '../lib/units';
 import { Empty, Modal, Note } from './ui';
 import type { Product } from '../lib/types';
 
 export function TicketsModal({ products, rate, shopName, onClose }: { products: Product[]; rate: number; shopName: string; onClose: () => void }) {
-  const [q, setQ] = useState(''), [n, setN] = useState<Record<string, string>>({}), [layout, setLayout] = useState<'a4' | 'label'>(() => { try { return (localStorage.getItem('sim.tickets') as 'a4' | 'label') || 'a4'; } catch { return 'a4'; } });
+  const [q, setQ] = useState(''), [n, setN] = useState<Record<string, string>>({}), [layout, setLayout] = useState<TicketLayout>(() => { try { return (localStorage.getItem('sim.tickets') as TicketLayout) || 'a4'; } catch { return 'a4'; } });
   const [units, setUnits] = useState<TicketUnit[]>(() => { try { const v = JSON.parse(localStorage.getItem('sim.ticketunits') ?? 'null'); return Array.isArray(v) && v.length ? v : ['pcs', 'dzn', 'carton']; } catch { return ['pcs', 'dzn', 'carton']; } });
   const toggle = (u: TicketUnit) => { const n = units.includes(u) ? units.filter((x) => x !== u) : [...units, u]; setUnits(n); try { localStorage.setItem('sim.ticketunits', JSON.stringify(n)); } catch { /* not saved */ } };
   const has = (p: Product) => unitsOf(p).some((u) => units.includes((u.u === 'set' || u.piece ? 'pcs' : u.u) as TicketUnit));
@@ -18,10 +18,10 @@ export function TicketsModal({ products, rate, shopName, onClose }: { products: 
   const list = products.filter((p) => copies(p.id) > 0 || !ql || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql)).slice(0, 120);
   const total = chosen.reduce((s, p) => s + copies(p.id), 0);
   const html = chosen.length ? ticketsHTML(chosen.map((p) => ({ p, copies: copies(p.id) })), rate, layout, shopName, units) : '';
-  const pick = (l: 'a4' | 'label') => { setLayout(l); try { localStorage.setItem('sim.tickets', l); } catch { /* not saved */ } };
+  const pick = (l: TicketLayout) => { setLayout(l); try { localStorage.setItem('sim.tickets', l); } catch { /* not saved */ } };
   return (
     <Modal title="Print price tickets" icon="tag" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Close</button><button className="btn primary" id="tprint" disabled={!total} onClick={() => printHTML(html)}><Icon n="printer" /> Print {total} ticket{total === 1 ? '' : 's'}</button></>}>
-      <div className="toolbar"><div className="seg"><button className={layout === 'a4' ? 'on' : ''} onClick={() => pick('a4')}>A4 sheet, 24 per page</button><button className={layout === 'label' ? 'on' : ''} onClick={() => pick('label')}>Label printer, 50 x 30 mm</button></div>
+      <div className="toolbar"><div className="seg"><button className={layout === 'a4' ? 'on' : ''} onClick={() => pick('a4')}>A4 sheet, 24 per page</button><button className={layout === 'label' ? 'on' : ''} onClick={() => pick('label')}>Label printer, 50 x 30 mm</button><button className={layout === 'roll' ? 'on' : ''} onClick={() => pick('roll')}>Receipt printer, 80 mm roll</button></div>
         <button className="btn sm" onClick={() => setN(Object.fromEntries(list.map((p) => [p.id, '1'])))}>1 of each shown</button>{chosen.length ? <button className="btn sm" onClick={() => setN({})}>Clear</button> : null}</div>
       <div className="field"><label>Prices on the ticket</label><div className="mchips" id="tunits">{([['pcs', 'Pcs'], ['half dzn', 'Half dozen'], ['dzn', 'Dozen'], ['carton', 'Carton']] as [TicketUnit, string][]).map(([u, l]) => <label key={u} className="chip" style={{ padding: '8px 12px', fontSize: 14, ...(units.includes(u) ? { background: 'var(--btn)', color: '#fff' } : {}) }}><input type="checkbox" checked={units.includes(u)} onChange={() => toggle(u)} /> {l}</label>)}</div>
         <span className="hint">Tick one or more. Each ticket shows only the ticked prices the item has.</span></div>
