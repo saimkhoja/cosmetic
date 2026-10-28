@@ -356,6 +356,8 @@ main.posmain{padding:14px;max-width:none}
 @media print{
   /* the app is taken off the page, not just hidden, or its height adds blank pages after a receipt */
   body>*:not(#print-area){display:none!important}
+  /* pure white paper: a tinted page prints as faint dots, so the printer can't trim the blank after the receipt */
+  html,body{background:#fff!important}
   body *{visibility:hidden}
   #print-area,#print-area *{visibility:visible}
   #print-area{display:block;position:static;width:100%}
