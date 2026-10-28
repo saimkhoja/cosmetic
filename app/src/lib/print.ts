@@ -8,7 +8,25 @@ import { dt, esc, fCDF, fUSD, sum, toCDF, today } from './format';
 export function printHTML(html: string) {
   const el = document.getElementById('print-area')!;
   el.innerHTML = html;
+  pageStyle().textContent = html.includes('class="receipt') ? rollPage(html) : '';
   try { window.print(); } catch { /* printing unavailable */ }
+}
+
+// Receipts and slips go on the 80 mm roll: no margins, and each page (one per copy) as long as
+// the longest copy, so a driver set to cut each page cuts just under the last line.
+function pageStyle() {
+  let st = document.getElementById('print-page') as HTMLStyleElement | null;
+  if (!st) { st = document.createElement('style'); st.id = 'print-page'; document.head.appendChild(st); }
+  return st;
+}
+function rollPage(html: string) {
+  const box = document.createElement('div');
+  box.style.cssText = 'position:fixed;left:-10000px;top:0;width:302px;visibility:hidden';
+  box.innerHTML = html;
+  document.body.appendChild(box);
+  const px = Math.max(0, ...Array.from(box.querySelectorAll<HTMLElement>('.receipt'), (r) => r.getBoundingClientRect().height));
+  box.remove();
+  return `@page{size:80mm ${px ? Math.ceil((px * 25.4) / 96) + 3 : 297}mm;margin:0}`;
 }
 
 // receipt amounts as on the shop's paper receipts: 2489 in the lines, 2,489.00 in the totals

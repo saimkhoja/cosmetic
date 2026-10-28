@@ -155,6 +155,8 @@ If the update has new files in `supabase/migrations/`, run `supabase db push` fr
 - Chrome menu → **Install SIM** to put it on the desktop like an app.
 - **One-tap printing**: by default the browser shows its print dialog. To print straight to the receipt printer, set it as the Windows default printer and start Chrome with `--kiosk-printing`, for example a desktop shortcut to
   `"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing --app=https://your-domain/till`
+  Close every Chrome window before using the shortcut: the flag only takes effect when Chrome starts fresh.
+- **Auto-cut**: invoices, order slips and day end slips print on an 80 mm page as long as the receipt, one page per copy (customer and shop). Install the printer maker's Windows driver (not "Generic / Text Only") and in the printer's **Printing preferences** set the paper to the 80 mm roll and **Paper cut** to cut at the end of each page (on some drivers "Cut each page" or "Page end cut"). Each copy then prints and is cut just under its last line, with no print window.
 - **Without internet** the till keeps selling and printing. Sales are kept on the till and sent automatically when the connection returns; the pill at the top shows how many are waiting. Do not clear the browser data on a till that shows sales waiting.
 
 ## 6. Another client (a separate installation)
