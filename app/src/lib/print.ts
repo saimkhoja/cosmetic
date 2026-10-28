@@ -3,30 +3,35 @@
 // the till, start Chrome with --kiosk-printing and set the receipt printer as default.
 import type { Company, Delivery, Invoice, Product, Shop, Statement } from './types';
 import { ctnTxt, pcValue, stockValue, unitsOf } from './units';
-import { dt, esc, fCDF, fUSD, sum, toCDF, today } from './format';
+import { dt, esc, fCDF, fNum, fUSD, sum, toCDF, today } from './format';
 
 export function printHTML(html: string) {
   const el = document.getElementById('print-area')!;
   el.innerHTML = html;
-  pageStyle().textContent = html.includes('class="receipt') ? rollPage(html) : '';
+  pageStyle().textContent = /class="(receipt|ticket roll)/.test(html) ? rollPages(el, html) : '';
   try { window.print(); } catch { /* printing unavailable */ }
 }
 
-// Receipts and slips go on the 80 mm roll: no margins, and each page (one per copy) as long as
-// the longest copy, so a driver set to cut each page cuts just under the last line.
+// Receipts, slips and roll tickets go on the 80 mm roll: no margins, and each one (a copy, a ticket) on a
+// page of its own length, so a driver set to cut each page cuts just under its last line.
 function pageStyle() {
   let st = document.getElementById('print-page') as HTMLStyleElement | null;
   if (!st) { st = document.createElement('style'); st.id = 'print-page'; document.head.appendChild(st); }
   return st;
 }
-function rollPage(html: string) {
+const ROLL = '.receipt, .ticket.roll';
+function rollPages(el: HTMLElement, html: string) {
   const box = document.createElement('div');
   box.style.cssText = 'position:fixed;left:-10000px;top:0;width:302px;visibility:hidden';
   box.innerHTML = html;
   document.body.appendChild(box);
-  const px = Math.max(0, ...Array.from(box.querySelectorAll<HTMLElement>('.receipt'), (r) => r.getBoundingClientRect().height));
+  const mm = Array.from(box.querySelectorAll<HTMLElement>(ROLL), (r) => Math.ceil((r.getBoundingClientRect().height * 25.4) / 96) + 3);
   box.remove();
-  return `@page{size:80mm ${px ? Math.ceil((px * 25.4) / 96) + 3 : 297}mm;margin:0}`;
+  if (!mm.length || !mm[0]) return '@page{size:80mm 297mm;margin:0}';
+  el.querySelectorAll<HTMLElement>(ROLL).forEach((r, i) => { r.style.setProperty('page', 'roll' + i); });
+  // a page break belongs to the page before it, or it would get a blank page of its own
+  el.querySelectorAll<HTMLElement>('.pagebreak').forEach((b) => { const prev = b.previousElementSibling as HTMLElement | null; if (prev?.style.getPropertyValue('page')) b.style.setProperty('page', prev.style.getPropertyValue('page')); });
+  return `@page{size:80mm ${Math.max(...mm)}mm;margin:0}` + mm.map((h, i) => `@page roll${i}{size:80mm ${h}mm;margin:0}`).join('');
 }
 
 // receipt amounts as on the shop's paper receipts: 2489 in the lines, 2,489.00 in the totals
@@ -120,19 +125,24 @@ export function reportHTML(r: Report, c: Company, where: string, by: string, sho
 }
 
 export type TicketUnit = 'pcs' | 'half dzn' | 'dzn' | 'carton';
-/** Price tickets: an A4 sheet (3 x 8 tickets of 70 x 37 mm) or one 50 x 30 mm label per ticket for a label printer.
+export type TicketLayout = 'a4' | 'label' | 'roll';
+/** Price tickets: an A4 sheet (3 x 8 tickets of 70 x 37 mm), one 50 x 30 mm label per ticket for a label printer, or
+ *  one big bold ticket per cut on the receipt printer's 80 mm roll, lying sideways (the first price in a black band).
  *  Only the chosen units are printed (pcs also covers a set and its piece). Items with none of them are left out. */
-export function ticketsHTML(items: { p: Product; copies: number }[], rate: number, layout: 'a4' | 'label', shopName = '', units: TicketUnit[] = ['pcs', 'half dzn', 'dzn', 'carton']) {
+export function ticketsHTML(items: { p: Product; copies: number }[], rate: number, layout: TicketLayout, shopName = '', units: TicketUnit[] = ['pcs', 'half dzn', 'dzn', 'carton']) {
   const want = (u: { u: string; piece?: boolean }) => units.includes((u.u === 'set' || u.piece ? 'pcs' : u.u) as TicketUnit);
   const label = (u: { u: string; mult: number; piece?: boolean }) => (u.piece ? '1 piece' : u.u === 'pcs' ? 'pc' : u.u === 'half dzn' ? 'half dozen (6)' : u.u === 'dzn' ? 'dozen (12)' : u.u === 'carton' ? `carton (${u.mult})` : u.u);
   const one = (p: Product) => {
     const us = unitsOf(p).filter(want);
     if (!us.length) return '';
     const up = (t: string) => esc(t.toLocaleUpperCase('fr'));   // tickets are printed in capitals
+    const price = (u: (typeof us)[number]) => `${fNum(toCDF(u.usd, rate))} <small>CDF</small>`;
+    // on the roll the ticket lies sideways, 100 x 70 mm, turned to run along the paper
+    if (layout === 'roll') return `<div class="ticket roll"><div class="tk"><div class="tn">${up(p.name)}</div><div class="hi${us.length > 1 ? '' : ' solo'}"><span>${up(label(us[0]))}</span><b>${price(us[0])}</b></div>${us.length > 1 ? `<div class="tl">${us.slice(1).map((u) => `<div class="tu"><span>${up(label(u))}</span><b>${price(u)}</b></div>`).join('')}</div>` : ''}<div class="tf"><span>${up(p.sku)}</span><span>${up(shopName)}</span></div></div></div>`;
     return `<div class="ticket ${layout}"><div class="tn">${up(p.name)}</div><div class="tl">${us.map((u) => `<div class="tu"><span>${up(label(u))}</span><b>${fCDF(toCDF(u.usd, rate))}</b></div>`).join('')}</div><div class="tf"><span>${up(p.sku)}</span><span>${up(shopName)}</span></div></div>`;
   };
   const all = items.flatMap((x) => { const t = one(x.p); return t ? Array.from({ length: Math.max(0, Math.min(200, x.copies)) }, () => t) : []; });
-  if (layout === 'label') return all.join('<div class="pagebreak"></div>');
+  if (layout !== 'a4') return all.join('<div class="pagebreak"></div>');
   const pages: string[] = [];
   for (let i = 0; i < all.length; i += 24) pages.push(`<div class="tsheet">${all.slice(i, i + 24).join('')}</div>`);
   return pages.join('<div class="pagebreak"></div>');
