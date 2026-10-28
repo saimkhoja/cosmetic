@@ -127,7 +127,7 @@ export function reportHTML(r: Report, c: Company, where: string, by: string, sho
 export type TicketUnit = 'pcs' | 'half dzn' | 'dzn' | 'carton';
 export type TicketLayout = 'a4' | 'label' | 'roll';
 /** Price tickets: an A4 sheet (3 x 8 tickets of 70 x 37 mm), one 50 x 30 mm label per ticket for a label printer, or
- *  one big bold ticket per cut on the receipt printer's 80 mm roll, lying sideways (the first price in a black band).
+ *  one big bold ticket per cut on the receipt printer's 80 mm roll, lying sideways (the first price large in a black box).
  *  Only the chosen units are printed (pcs also covers a set and its piece). Items with none of them are left out. */
 export function ticketsHTML(items: { p: Product; copies: number }[], rate: number, layout: TicketLayout, shopName = '', units: TicketUnit[] = ['pcs', 'half dzn', 'dzn', 'carton']) {
   const want = (u: { u: string; piece?: boolean }) => units.includes((u.u === 'set' || u.piece ? 'pcs' : u.u) as TicketUnit);
@@ -138,7 +138,7 @@ export function ticketsHTML(items: { p: Product; copies: number }[], rate: numbe
     const up = (t: string) => esc(t.toLocaleUpperCase('fr'));   // tickets are printed in capitals
     const price = (u: (typeof us)[number]) => `${fNum(toCDF(u.usd, rate))} <small>CDF</small>`;
     // on the roll the ticket lies sideways, 100 x 70 mm, turned to run along the paper
-    if (layout === 'roll') return `<div class="ticket roll"><div class="tk"><div class="tn">${up(p.name)}</div><div class="hi${us.length > 1 ? '' : ' solo'}"><span>${up(label(us[0]))}</span><b>${price(us[0])}</b></div>${us.length > 1 ? `<div class="tl">${us.slice(1).map((u) => `<div class="tu"><span>${up(label(u))}</span><b>${price(u)}</b></div>`).join('')}</div>` : ''}<div class="tf"><span>${up(p.sku)}</span><span>${up(shopName)}</span></div></div></div>`;
+    if (layout === 'roll') return `<div class="ticket roll"><div class="tk"><div class="tn">${up(p.name).split(' ').map((w) => `<span>${w}</span>`).join(' ')}</div><div class="hi${us.length > 1 ? '' : ' solo'}"><span>${up(label(us[0]))}</span><b>${price(us[0])}</b></div>${us.length > 1 ? `<div class="tl">${us.slice(1).map((u) => `<div class="tu"><span>${up(label(u))}</span><b>${price(u)}</b></div>`).join('')}</div>` : ''}<div class="tf"><span>${up(p.sku)}</span><span>${up(shopName)}</span></div></div></div>`;
     return `<div class="ticket ${layout}"><div class="tn">${up(p.name)}</div><div class="tl">${us.map((u) => `<div class="tu"><span>${up(label(u))}</span><b>${fCDF(toCDF(u.usd, rate))}</b></div>`).join('')}</div><div class="tf"><span>${up(p.sku)}</span><span>${up(shopName)}</span></div></div>`;
   };
   const all = items.flatMap((x) => { const t = one(x.p); return t ? Array.from({ length: Math.max(0, Math.min(200, x.copies)) }, () => t) : []; });
