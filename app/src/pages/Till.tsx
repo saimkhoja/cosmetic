@@ -7,7 +7,7 @@ import { rpc, rows, supabase } from '../lib/supabase';
 import { cartPriced, cashNotes, hotSet, hotSort, payment, takeLocal, totals, unitLabel, unitNote, unitsOf, usdNotes, type CartLine, type PayIn } from '../lib/units';
 import { catIcon, custName, findByCode } from '../lib/items';
 import { dt, fCDF, fNum, fUSD, ld, tm, toCDF, today } from '../lib/format';
-import { orderRef, orderSlipHTML, printHTML, receiptHTML, saleCopies } from '../lib/print';
+import { orderRef, orderSlipCopies, printHTML, receiptHTML, saleCopies } from '../lib/print';
 import { Empty, Modal, Note, useAction, useToast } from '../components/ui';
 import { TicketsModal } from '../components/Tickets';
 import { useDeliveries, useOrders } from '../data/queries';
@@ -203,8 +203,8 @@ export default function Till() {
       const id = crypto.randomUUID(), t = new Date().toISOString();
       await outboxPut({ kind: 'order', id, t, shop_id: shopId, tries: 0, total: T.total, created_by: profile!.id,
         payload: { id, customer, t, items: priced.map((l) => ({ product_id: l.pid, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty })) } });
-      printHTML(orderSlipHTML({ ref: orderRef(id), customer, t, by: profile!.name, total: T.total, lines: priced.map((l) => ({ name: l.p.name, unit: unitLabel(l.u), qty: l.qty, price: l.price })) }, snap.settings.company, snap.shop));
-      toast(`Order ${orderRef(id)} for ${custName(customer)} sent to the shop admin. Printing the order slip.`);
+      printHTML(orderSlipCopies({ ref: orderRef(id), customer, t, by: profile!.name, total: T.total, lines: priced.map((l) => ({ name: l.p.name, unit: unitLabel(l.u), qty: l.qty, price: l.price })) }, snap.settings.company, snap.shop));
+      toast(`Order ${orderRef(id)} for ${custName(customer)} sent to the shop admin. Printing the order slip, customer and shop copies.`);
       resetSale(); void syncOutbox();
     } finally { busy.current = false; }
   };
