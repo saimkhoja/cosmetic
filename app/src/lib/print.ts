@@ -20,20 +20,29 @@ function pageStyle() {
   return st;
 }
 const ROLL = '.receipt, .ticket.roll';
-/** Fits each roll ticket: first its prices, all at one size, shrunk down to 20 px until every price row fits the
- *  width; then its name, shrunk down to 22 px until it fits the room left above the prices. Offset sizes are used
- *  as they ignore the ticket's quarter turn. Returns the [prices, name] sizes of each ticket. */
+/** Fits roll tickets. Prices first, all at one size on a ticket, shrunk (down to 20 px) until every price row fits
+ *  the width. Then the name, shrunk (down to 22 px) until it fits the room left above the prices; a name that still
+ *  does not fit takes room from the prices. Last, every ticket with as many prices takes the smallest of their sizes,
+ *  so pcs + dozen and pcs + carton print alike, and the names are fitted again. Offset sizes are used as they
+ *  ignore the ticket's quarter turn. Returns the [prices, name] sizes of each ticket. */
 export function fitTickets(root: ParentNode) {
-  const shrink = (e: HTMLElement, over: () => boolean, min: number) => {
-    e.style.fontSize = '';
-    for (let px = parseFloat(getComputedStyle(e).fontSize); over() && px > min; px -= 2) e.style.fontSize = px - 2 + 'px';
-    return e.style.fontSize;
-  };
-  return Array.from(root.querySelectorAll<HTMLElement>('.ticket.roll .tk'), (k) => {
+  const px = (e: HTMLElement) => parseFloat(getComputedStyle(e).fontSize);
+  const shrink = (e: HTMLElement, over: () => boolean, min: number) => { for (let s = px(e); over() && s > min; s -= 2) e.style.fontSize = s - 2 + 'px'; };
+  const parts = Array.from(root.querySelectorAll<HTMLElement>('.ticket.roll .tk'), (k) => {
     const ps = k.querySelector<HTMLElement>('.tps')!, t = k.querySelector<HTMLElement>('.tn')!, txt = t.firstElementChild as HTMLElement;
     const rows = Array.from(ps.querySelectorAll<HTMLElement>('.tp'));
-    return [shrink(ps, () => rows.some((r) => r.scrollWidth > r.clientWidth), 20), shrink(t, () => txt.offsetHeight > t.clientHeight || txt.scrollWidth > t.clientWidth, 22)];
+    return { ps, t, wide: () => rows.some((r) => r.scrollWidth > r.clientWidth), tall: () => txt.offsetHeight > t.clientHeight || txt.scrollWidth > t.clientWidth };
   });
+  const name = (p: (typeof parts)[number]) => { p.t.style.fontSize = ''; shrink(p.t, p.tall, 22); };
+  for (const p of parts) {
+    p.ps.style.fontSize = ''; shrink(p.ps, p.wide, 20);
+    name(p);
+    for (let s = px(p.ps); p.tall() && s > 20; s -= 2) { p.ps.style.fontSize = s - 2 + 'px'; name(p); }
+  }
+  const least = new Map<string, number>();
+  for (const p of parts) least.set(p.ps.className, Math.min(least.get(p.ps.className) ?? Infinity, px(p.ps)));
+  for (const p of parts) { p.ps.style.fontSize = least.get(p.ps.className) + 'px'; name(p); }
+  return parts.map((p) => [p.ps.style.fontSize, p.t.style.fontSize]);
 }
 function rollPages(el: HTMLElement, html: string) {
   const box = document.createElement('div');
