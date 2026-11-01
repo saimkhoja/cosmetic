@@ -10,8 +10,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg'],
       manifest: {
-        name: 'SIM – Smart Invoice Management',
-        short_name: 'SIM',
+        name: 'QuickSales',
+        short_name: 'QuickSales',
         description: 'Cosmetics store and till: stock, deliveries, invoices and reports.',
         theme_color: '#06328F',
         background_color: '#F2F5FB',

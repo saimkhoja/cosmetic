@@ -7,6 +7,7 @@ import { outboxAll } from '../offline/store';
 import { syncOutbox } from '../offline/sync';
 import type { Role } from '../lib/types';
 import { getTheme, nextTheme, setTheme, THEME_ICON, THEME_LABEL, type ThemePref } from '../lib/theme';
+import { CartMark } from './Brand';
 
 export const R: Record<Role, string> = { admin: 'Admin', whop: 'Warehouse Operator', shopadmin: 'Shop Admin', till: 'Till Operator' };
 const ROLEICON: Record<Role, string> = { admin: 'shield', whop: 'warehouse', shopadmin: 'store', till: 'cart' };
@@ -49,7 +50,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <>
       <header className={pos ? 'top tilltop' : 'top'}>
-        <div className="brand"><div className="logo">SIM</div><div style={{ minWidth: 0 }}><div className="bt">Smart Invoice Management</div><div className="bs">{shopName ?? 'Central store'}</div></div></div>
+        <div className="brand"><div className="logo"><CartMark size={30} /></div><div style={{ minWidth: 0 }}><div className="bt"><span>Quick</span><span className="bt2">Sales</span></div><div className="bs">{shopName ?? 'Central store'}</div></div></div>
         {pos ? <div id="topslot" className="topslot" /> : <div className="sp" />}
         {pill}
         <div className="who" title={`${profile.name}, ${R[profile.role]}`}><span className="av"><Icon n={ROLEICON[profile.role]} /></span><div><b>{profile.name}</b><small>{R[profile.role]}</small></div></div>

@@ -35,7 +35,7 @@ test('a full day in SIM', async ({ browser }) => {
   const { page: admin } = await open(browser);
   // ---- first-run setup creates the Admin
   await admin.goto('/');
-  await expect(admin.getByText('Set up SIM')).toBeVisible();
+  await expect(admin.getByText('Set up QuickSales')).toBeVisible();
   const setupField = (label: string) => admin.locator('.field', { hasText: label }).locator('input').first();
   await setupField('Your full name').fill('Mireille Tshibanda');
   await setupField('Password (10+').fill(PW.admin); await setupField('Password again').fill(PW.admin);
