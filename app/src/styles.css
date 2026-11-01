@@ -435,6 +435,19 @@ button.uchip svg{font-size:11px}
 .ticket.roll .tf{font-size:11px;font-weight:800}
 .tprev .ticket.roll{width:100mm;height:70mm;margin:0 0 4mm}
 .tprev .ticket.roll .tk{transform:none}
+/* the small roll ticket: 70 x 35 mm, upright across the roll; up to two price boxes side by side, the label above
+   the amount, and a name that may shrink further */
+.ticket.roll.sm{height:36mm}
+.ticket.roll.sm .tk{width:70mm;height:35mm;transform:translateX(1mm);border-width:2.5px;padding:1.2mm 2mm;gap:.8mm;--tn-min:13px;--tps-min:12px}
+.ticket.roll.sm .tn{font-size:26px}
+.ticket.roll.sm .tps{display:grid;grid-template-columns:1fr 1fr;gap:1mm;font-size:22px}
+.ticket.roll.sm .tps.n1{grid-template-columns:1fr;font-size:40px}.ticket.roll.sm .tps.n2{font-size:28px}
+.ticket.roll.sm .tp{flex-direction:column;align-items:stretch;gap:0;border-width:2px;padding:.3mm 1.5mm .5mm}
+.ticket.roll.sm .tp span{font-size:8.5px;line-height:1.1}
+.ticket.roll.sm .tp b{text-align:right}
+.ticket.roll.sm .tp small{font-size:max(.3em,8px)}
+.ticket.roll.sm .tf{font-size:8px}
+.tprev .ticket.roll.sm{width:70mm;height:35mm}
 @media print{.tsheet{width:210mm}.ticket{break-inside:avoid}}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
 .tabs button{border:1.5px solid var(--line);background:var(--card);border-radius:11px;padding:9px 14px;font-weight:800;color:var(--muted)}
