@@ -2,7 +2,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { fCDF, toCDF } from '../lib/format';
-import { fitTicketNames, ticketsHTML, printHTML, type TicketLayout, type TicketUnit } from '../lib/print';
+import { fitTickets, ticketsHTML, printHTML, type TicketLayout, type TicketUnit } from '../lib/print';
 import { unitLabel, unitsOf } from '../lib/units';
 import { Empty, Modal, Note } from './ui';
 import type { Product } from '../lib/types';
@@ -19,7 +19,7 @@ export function TicketsModal({ products, rate, shopName, onClose }: { products: 
   const total = chosen.reduce((s, p) => s + copies(p.id), 0);
   const html = chosen.length ? ticketsHTML(chosen.map((p) => ({ p, copies: copies(p.id) })), rate, layout, shopName, units) : '';
   const prev = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { if (prev.current) fitTicketNames(prev.current); }, [html]);
+  useLayoutEffect(() => { if (prev.current) fitTickets(prev.current); }, [html]);
   const pick = (l: TicketLayout) => { setLayout(l); try { localStorage.setItem('sim.tickets', l); } catch { /* not saved */ } };
   return (
     <Modal title="Print price tickets" icon="tag" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Close</button><button className="btn primary" id="tprint" disabled={!total} onClick={() => printHTML(html)}><Icon n="printer" /> Print {total} ticket{total === 1 ? '' : 's'}</button></>}>
