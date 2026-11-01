@@ -27,7 +27,7 @@ const ROLL = '.receipt, .ticket.roll';
 export function fitTickets(root: ParentNode) {
   const px = (e: HTMLElement) => parseFloat(getComputedStyle(e).fontSize);
   const min = (e: HTMLElement, v: string, d: number) => parseFloat(getComputedStyle(e).getPropertyValue(v)) || d;
-  const shrink = (e: HTMLElement, over: () => boolean, least: number) => { for (let s = px(e); over() && s > least; s -= 2) e.style.fontSize = s - 2 + 'px'; };
+  const shrink = (e: HTMLElement, over: () => boolean, least: number) => { for (let s = px(e); over() && s - 2 >= least; s -= 2) e.style.fontSize = s - 2 + 'px'; };
   return Array.from(root.querySelectorAll<HTMLElement>('.ticket.roll .tk'), (k) => {
     const ps = k.querySelector<HTMLElement>('.tps')!, t = k.querySelector<HTMLElement>('.tn')!, txt = t.firstElementChild as HTMLElement;
     const rows = Array.from(ps.querySelectorAll<HTMLElement>('.tp'));
@@ -36,7 +36,7 @@ export function fitTickets(root: ParentNode) {
     const name = () => { t.style.fontSize = ''; shrink(t, tall, tnMin); };
     ps.style.fontSize = ''; shrink(ps, () => rows.some((r) => r.scrollWidth > r.clientWidth), psMin);
     name();
-    for (let s = px(ps); tall() && s > psMin; s -= 2) { ps.style.fontSize = s - 2 + 'px'; name(); }
+    for (let s = px(ps); tall() && s - 2 >= psMin; s -= 2) { ps.style.fontSize = s - 2 + 'px'; name(); }
     return [ps.style.fontSize, t.style.fontSize];
   });
 }

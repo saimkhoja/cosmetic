@@ -435,17 +435,18 @@ button.uchip svg{font-size:11px}
 .ticket.roll .tf{font-size:11px;font-weight:800}
 .tprev .ticket.roll{width:100mm;height:70mm;margin:0 0 4mm}
 .tprev .ticket.roll .tk{transform:none}
-/* the small roll ticket: 70 x 35 mm, upright across the roll; up to two price boxes side by side, the label above
-   the amount, and a name that may shrink further */
+/* the small roll ticket: 70 x 35 mm, upright across the roll. The prices are the main thing: up to two boxes side by
+   side, the unit label and CDF small along the top so the amount has the whole width; the name above stays bold
+   and readable from a distance and may shrink further than on the big ticket */
 .ticket.roll.sm{height:36mm}
-.ticket.roll.sm .tk{width:70mm;height:35mm;transform:translateX(1mm);border-width:2.5px;padding:1.2mm 2mm;gap:.8mm;--tn-min:13px;--tps-min:12px}
-.ticket.roll.sm .tn{font-size:26px}
-.ticket.roll.sm .tps{display:grid;grid-template-columns:1fr 1fr;gap:1mm;font-size:22px}
-.ticket.roll.sm .tps.n1{grid-template-columns:1fr;font-size:40px}.ticket.roll.sm .tps.n2{font-size:28px}
-.ticket.roll.sm .tp{flex-direction:column;align-items:stretch;gap:0;border-width:2px;padding:.3mm 1.5mm .5mm}
-.ticket.roll.sm .tp span{font-size:8.5px;line-height:1.1}
-.ticket.roll.sm .tp b{text-align:right}
-.ticket.roll.sm .tp small{font-size:max(.3em,8px)}
+.ticket.roll.sm .tk{width:70mm;height:35mm;transform:translateX(1mm);border-width:2.5px;padding:1mm 1.5mm;gap:.8mm;--tn-min:15px;--tps-min:12px}
+.ticket.roll.sm .tn{font-size:22px}
+.ticket.roll.sm .tps{display:grid;grid-template-columns:1fr 1fr;gap:.8mm;font-size:30px}
+.ticket.roll.sm .tps.n1{grid-template-columns:1fr;font-size:58px}.ticket.roll.sm .tps.n2{font-size:40px}
+.ticket.roll.sm .tp{position:relative;display:block;border-width:2px;padding:.2mm 1.2mm .3mm}
+.ticket.roll.sm .tp span{display:block;font-size:8.5px;line-height:1.15}
+.ticket.roll.sm .tp b{display:block;text-align:right;letter-spacing:-.03em}
+.ticket.roll.sm .tp small{position:absolute;top:.2mm;right:1.2mm;font-size:8.5px;line-height:1.15;letter-spacing:0}
 .ticket.roll.sm .tf{font-size:8px}
 .tprev .ticket.roll.sm{width:70mm;height:35mm}
 @media print{.tsheet{width:210mm}.ticket{break-inside:avoid}}
