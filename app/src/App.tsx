@@ -18,7 +18,7 @@ import { startSync } from './offline/sync';
 export default function App() {
   const { status, profile, locked } = useAuth();
   useEffect(() => { if (profile && (profile.role === 'till' || profile.role === 'shopadmin')) startSync(); }, [profile]);
-  if (status === 'loading') return <Empty i="refresh" t="Starting SIM" tall />;
+  if (status === 'loading') return <Empty i="refresh" t="Starting QuickSales" tall />;
   if (status === 'unconfigured') return <Unconfigured />;
   if (status === 'setup') return <Setup />;
   if (status !== 'ready' || !profile) return <Login />;
