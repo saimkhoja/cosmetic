@@ -20,15 +20,19 @@ function pageStyle() {
   return st;
 }
 const ROLL = '.receipt, .ticket.roll';
-/** Shrinks each roll ticket's name, from its full size down to 22 px, until it fits the room left above the prices.
- *  Offset sizes are used as they ignore the ticket's quarter turn. Returns the sizes. */
-export function fitTicketNames(root: ParentNode) {
-  return Array.from(root.querySelectorAll<HTMLElement>('.ticket.roll .tn'), (t) => {
-    const txt = t.firstElementChild as HTMLElement;
-    t.style.fontSize = '';
-    const over = () => txt.offsetHeight > t.clientHeight || txt.scrollWidth > t.clientWidth;
-    for (let px = parseFloat(getComputedStyle(t).fontSize); over() && px > 22; px -= 2) t.style.fontSize = px - 2 + 'px';
-    return t.style.fontSize;
+/** Fits each roll ticket: first its prices, all at one size, shrunk down to 20 px until every price row fits the
+ *  width; then its name, shrunk down to 22 px until it fits the room left above the prices. Offset sizes are used
+ *  as they ignore the ticket's quarter turn. Returns the [prices, name] sizes of each ticket. */
+export function fitTickets(root: ParentNode) {
+  const shrink = (e: HTMLElement, over: () => boolean, min: number) => {
+    e.style.fontSize = '';
+    for (let px = parseFloat(getComputedStyle(e).fontSize); over() && px > min; px -= 2) e.style.fontSize = px - 2 + 'px';
+    return e.style.fontSize;
+  };
+  return Array.from(root.querySelectorAll<HTMLElement>('.ticket.roll .tk'), (k) => {
+    const ps = k.querySelector<HTMLElement>('.tps')!, t = k.querySelector<HTMLElement>('.tn')!, txt = t.firstElementChild as HTMLElement;
+    const rows = Array.from(ps.querySelectorAll<HTMLElement>('.tp'));
+    return [shrink(ps, () => rows.some((r) => r.scrollWidth > r.clientWidth), 20), shrink(t, () => txt.offsetHeight > t.clientHeight || txt.scrollWidth > t.clientWidth, 22)];
   });
 }
 function rollPages(el: HTMLElement, html: string) {
@@ -36,9 +40,13 @@ function rollPages(el: HTMLElement, html: string) {
   box.style.cssText = 'position:fixed;left:-10000px;top:0;width:302px;visibility:hidden';
   box.innerHTML = html;
   document.body.appendChild(box);
-  // names on roll tickets are fitted in the measuring box, then the sizes are copied to what prints
-  const fit = fitTicketNames(box);
-  el.querySelectorAll<HTMLElement>('.ticket.roll .tn').forEach((t, i) => { if (fit[i]) t.style.fontSize = fit[i]; });
+  // roll tickets are fitted in the measuring box, then the sizes are copied to what prints
+  const fit = fitTickets(box);
+  el.querySelectorAll<HTMLElement>('.ticket.roll .tk').forEach((k, i) => {
+    const [ps, tn] = fit[i] ?? [];
+    if (ps) k.querySelector<HTMLElement>('.tps')!.style.fontSize = ps;
+    if (tn) k.querySelector<HTMLElement>('.tn')!.style.fontSize = tn;
+  });
   const mm = Array.from(box.querySelectorAll<HTMLElement>(ROLL), (r) => Math.ceil((r.getBoundingClientRect().height * 25.4) / 96) + 3);
   box.remove();
   if (!mm.length || !mm[0]) return '@page{size:80mm 297mm;margin:0}';
@@ -141,7 +149,7 @@ export function reportHTML(r: Report, c: Company, where: string, by: string, sho
 export type TicketUnit = 'pcs' | 'half dzn' | 'dzn' | 'carton';
 export type TicketLayout = 'a4' | 'label' | 'roll';
 /** Price tickets: an A4 sheet (3 x 8 tickets of 70 x 37 mm), one 50 x 30 mm label per ticket for a label printer, or
- *  one big bold ticket per cut on the receipt printer's 80 mm roll, lying sideways (the first price large in a black box).
+ *  one big bold ticket per cut on the receipt printer's 80 mm roll, lying sideways (every price large, all at one size, in black boxes).
  *  Only the chosen units are printed (pcs also covers a set and its piece). Items with none of them are left out. */
 export function ticketsHTML(items: { p: Product; copies: number }[], rate: number, layout: TicketLayout, shopName = '', units: TicketUnit[] = ['pcs', 'half dzn', 'dzn', 'carton']) {
   const want = (u: { u: string; piece?: boolean }) => units.includes((u.u === 'set' || u.piece ? 'pcs' : u.u) as TicketUnit);
@@ -152,7 +160,7 @@ export function ticketsHTML(items: { p: Product; copies: number }[], rate: numbe
     const up = (t: string) => esc(t.toLocaleUpperCase('fr'));   // tickets are printed in capitals
     const price = (u: (typeof us)[number]) => `${fNum(toCDF(u.usd, rate))} <small>CDF</small>`;
     // on the roll the ticket lies sideways, 100 x 70 mm, turned to run along the paper
-    if (layout === 'roll') return `<div class="ticket roll"><div class="tk"><div class="tn"><div>${up(p.name).split(' ').map((w) => `<span>${w}</span>`).join(' ')}</div></div><div class="hi${us.length > 1 ? '' : ' solo'}"><span>${up(label(us[0]))}</span><b>${price(us[0])}</b></div>${us.length > 1 ? `<div class="tl">${us.slice(1).map((u) => `<div class="tu"><span>${up(label(u))}</span><b>${price(u)}</b></div>`).join('')}</div>` : ''}<div class="tf"><span>${up(p.sku)}</span><span>${up(shopName)}</span></div></div></div>`;
+    if (layout === 'roll') return `<div class="ticket roll"><div class="tk"><div class="tn"><div>${up(p.name).split(' ').map((w) => `<span>${w}</span>`).join(' ')}</div></div><div class="tps n${us.length}">${us.map((u) => `<div class="tp"><span>${up(label(u))}</span><b>${price(u)}</b></div>`).join('')}</div><div class="tf"><span>${up(p.sku)}</span><span>${up(shopName)}</span></div></div></div>`;
     return `<div class="ticket ${layout}"><div class="tn">${up(p.name)}</div><div class="tl">${us.map((u) => `<div class="tu"><span>${up(label(u))}</span><b>${fCDF(toCDF(u.usd, rate))}</b></div>`).join('')}</div><div class="tf"><span>${up(p.sku)}</span><span>${up(shopName)}</span></div></div>`;
   };
   const all = items.flatMap((x) => { const t = one(x.p); return t ? Array.from({ length: Math.max(0, Math.min(200, x.copies)) }, () => t) : []; });
