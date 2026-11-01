@@ -33,7 +33,7 @@ function Hero() {
 }
 
 export function Unconfigured() {
-  return <div className="lockwrap"><div className="card"><h3><Icon n="alert" /> SIM is not connected to a database</h3><p>Set <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> when building the app. See deploy/DEPLOY.md.</p></div></div>;
+  return <div className="lockwrap"><div className="card"><h3><Icon n="alert" /> QuickSales is not connected to a database</h3><p>Set <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> when building the app. See deploy/DEPLOY.md.</p></div></div>;
 }
 
 export function Login() {

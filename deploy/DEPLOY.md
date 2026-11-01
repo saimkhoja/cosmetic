@@ -1,6 +1,6 @@
-# Deploying SIM
+# Deploying QuickSales
 
-SIM has two parts:
+QuickSales has two parts:
 
 | Part | Where it runs | What it holds |
 |---|---|---|
@@ -38,7 +38,7 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    16. `supabase/migrations/20261025000001_one_per_carton.sql` (an item can come one pc per carton: pcs in one carton takes 1 or more)
    17. `supabase/migrations/20261026000001_multi_barcodes.sql` (an item can have several barcodes when Barcode scanning is on; also fixes the Admin's values of returns to suppliers)
 
-   **Already running SIM?** Run only the files you have not run yet, in order (for example only 17). Run it **before** the new app goes live. They keep your data:
+   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 17). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
@@ -79,7 +79,7 @@ supabase functions deploy admin-users --no-verify-jwt
 ### Auth settings (both options)
 
 1. **Authentication → Sign In / Providers → Email**: keep Email enabled, turn **Confirm email off**.
-2. **Authentication → Sign In / Providers**: turn **Allow new users to sign up off**. Only the Admin creates logins, through SIM.
+2. **Authentication → Sign In / Providers**: turn **Allow new users to sign up off**. Only the Admin creates logins, through QuickSales.
 3. **Authentication → Sign In / Providers → Email → Password requirements**: minimum length **10**, require **letters and digits**.
 4. **Authentication → URL Configuration → Site URL**: `https://your-domain` (from step 3; you can set it later).
 5. Optional, once the site is live: in **Edge Functions → Secrets** add `SIM_ALLOWED_ORIGIN` = `https://your-site-address`, so the functions only answer your site. Several addresses can be separated by commas; a trailing `/` does not matter.
@@ -87,7 +87,7 @@ supabase functions deploy admin-users --no-verify-jwt
 
 ### Keys for the web app
 
-**Project Settings → API Keys**. You need the **Project URL** (`https://YOUR-PROJECT-REF.supabase.co`) and the **publishable** key (`sb_publishable_…`), or on older projects the **anon** key. Both are public by design. Do **not** use the **secret** / **service_role** key anywhere in SIM.
+**Project Settings → API Keys**. You need the **Project URL** (`https://YOUR-PROJECT-REF.supabase.co`) and the **publishable** key (`sb_publishable_…`), or on older projects the **anon** key. Both are public by design. Do **not** use the **secret** / **service_role** key anywhere in QuickSales.
 
 ## 2. Try it on your computer (optional)
 
@@ -98,7 +98,7 @@ npm install
 npm run dev                      # open http://localhost:5173
 ```
 
-The first visit shows the **Set up SIM** screen; see step 4. Anything you create here goes into the real project, so you can also do the setup from the VPS later instead.
+The first visit shows the **Set up QuickSales** screen; see step 4. Anything you create here goes into the real project, so you can also do the setup from the VPS later instead.
 
 ## 3a. Or host the web app free on Vercel (no server needed)
 
@@ -140,19 +140,19 @@ If the update has new files in `supabase/migrations/`, run `supabase db push` fr
 
 ## 4. First run
 
-1. Open `https://your-domain`. The **Set up SIM** screen appears (only on an empty project).
+1. Open `https://your-domain`. The **Set up QuickSales** screen appears (only on an empty project).
 2. Enter your name, the Admin username and a strong password, the company details shown on invoices, the exchange rate, VAT and the shops with their 3-letter codes.
 3. You are signed in as Admin. Next:
    - **Inventory → Categories** to make the categories (mark seasonal ones such as school items with the months they sell).
    - **Inventory → Import from Excel** to load the catalogue (download the template there), or add items one by one. A category named in the sheet that does not exist yet is created.
    - **Accounts → Suppliers** to add the suppliers with their credit days and the items each one supplies, and **Accounts → Ledgers** for the opening balances (cash, bank, capital).
-   - **Users → Create login** for the warehouse operator, each shop admin and each till operator. Give each person their username and first password; SIM makes them choose their own at their first sign-in.
+   - **Users → Create login** for the warehouse operator, each shop admin and each till operator. Give each person their username and first password; QuickSales makes them choose their own at their first sign-in.
    - **Deliveries → New delivery** to put stock into the shops.
 
 ## 5. Setting up each till
 
 - Open `https://your-domain` in **Chrome** on the till PC and sign in **while online** once. This loads the items onto the till and registers it (it gets a till code such as T1; invoice numbers look like `GOM-T1-000123`).
-- Chrome menu → **Install SIM** to put it on the desktop like an app.
+- Chrome menu → **Install QuickSales** to put it on the desktop like an app.
 - **One-tap printing**: by default the browser shows its print dialog. To print straight to the receipt printer, set it as the Windows default printer and start Chrome with `--kiosk-printing`, for example a desktop shortcut to
   `"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing --app=https://your-domain/till`
   Close every Chrome window before using the shortcut: the flag only takes effect when Chrome starts fresh.
@@ -166,7 +166,7 @@ Each client has **their own Supabase project and their own website**, built from
 1. **New Supabase project** in the client's name (supabase.com → New project). Do all of section 1 for it: every migration file, the `setup` and `admin-users` functions with **Verify JWT off**, and the Auth settings. Write down its Project URL and publishable key.
 2. **New Vercel project** for the same repository (section 3a again: Add New → Project → import `saimkhoja/cosmetic`, Root Directory `app`). Give it a name such as `sim-clientname`, and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to **the new project's** values. Optionally add the client's own domain under Settings → Domains.
 3. In the **new** Supabase project set **Site URL** (and the `SIM_ALLOWED_ORIGIN` secret if you use it) to the new site's address.
-4. The client opens the new site: the **Set up SIM** screen asks for their name, Admin username and password, company details for the invoices, rate, VAT and their shops (section 4). Their Admin then creates the other logins.
+4. The client opens the new site: the **Set up QuickSales** screen asks for their name, Admin username and password, company details for the invoices, rate, VAT and their shops (section 4). Their Admin then creates the other logins.
 5. Features they need are turned on under **Settings → Till options**:
    - **Customer name optional**: walk-in sales and orders without typing a name. The invoice then has no Client line, and lists show "Walk-in".
    - **Till operators sell directly**: the till operator takes the cash and prints the invoice without the shop admin approving an order. Only the shop admin gives discounts; the invoice names the till operator as the Sales Person.
@@ -188,7 +188,7 @@ It is not a migration and never runs on its own.
 1. **Back up** the database (section 8).
 2. On every till, check that the pill at the top shows **nothing waiting to send**.
 3. Supabase → **SQL Editor** → paste the whole file → **Run**. The result at the end must show 0 invoices, 0 vouchers and 0 stock, plus the number of items, logins, shops and suppliers kept.
-4. On **every till PC**, clear SIM's site data once: in Chrome, click the icon left of the address → **Site settings** → **Delete data**. Then sign in again **while online**. The till registers again as T1, T2… and invoices restart at `000001`.
+4. On **every till PC**, clear the QuickSales site data once: in Chrome, click the icon left of the address → **Site settings** → **Delete data**. Then sign in again **while online**. The till registers again as T1, T2… and invoices restart at `000001`.
 5. Enter the real starting stock through **Goods in** (or the stock count button in Inventory), and the opening balances (cash, bank, capital, what is owed to each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
 
 ## 8. Backups and exporting data
@@ -196,7 +196,7 @@ It is not a migration and never runs on its own.
 The live database keeps all data for ever: every invoice and voucher from the first day stays in it. Backups are for getting back to an earlier state: after a mistake, a deletion noticed late, or when a client asks for the data as it was on a given date.
 
 - **Supabase Pro** takes a daily backup and keeps the last 7 days (Dashboard → Database → Backups). Good for "undo yesterday".
-- **SIM's own nightly backup** (`.github/workflows/backup.yml`) keeps much more. Every night at 02:17 Kinshasa time it dumps the whole database (data, settings, logins), encrypts it with your passphrase and stores it in Cloudflare R2:
+- **The QuickSales nightly backup** (`.github/workflows/backup.yml`) keeps much more. Every night at 02:17 Kinshasa time it dumps the whole database (data, settings, logins), encrypts it with your passphrase and stores it in Cloudflare R2:
   - **daily** copies for 30 days;
   - the copy of the 1st of each month **for ever**.
   - It costs a few cents a month; R2's first 10 GB are free.
@@ -206,7 +206,7 @@ The live database keeps all data for ever: every invoice and voucher from the fi
 1. **Cloudflare R2.** Sign up at cloudflare.com, then go to **R2 Object Storage** and create a bucket, e.g. `sim-backups`.
    - **Manage R2 API Tokens → Create API token**: permission **Object Read & Write**, limited to that bucket. Copy the **Access Key ID**, the **Secret Access Key** and the **S3 endpoint** (`https://<account-id>.r2.cloudflarestorage.com`).
    - Bucket → **Settings → Object lifecycle rules → Add rule**: prefix `client1/daily/`, *delete objects 30 days after upload*. Add the same rule for `client2/daily/` later. Don't add a rule for `monthly/`.
-2. **The database address.** In client 1's Supabase project, click **Connect** and copy the **Session pooler** URI, then put in the database password. (If you don't know the password, reset it under Project Settings → Database. SIM doesn't use it.)
+2. **The database address.** In client 1's Supabase project, click **Connect** and copy the **Session pooler** URI, then put in the database password. (If you don't know the password, reset it under Project Settings → Database. QuickSales doesn't use it.)
 3. **A backup passphrase.** Make up a long one (5 or more random words). **Write it down and keep it somewhere safe off the computer.** Without it no backup can be opened, by you or anyone else.
 4. **GitHub secrets.** In the repository on GitHub, go to **Settings → Secrets and variables → Actions → New repository secret**, and add these six:
 
@@ -233,7 +233,7 @@ GitHub pauses scheduled jobs in a repository that has had **no commit for 60 day
    supabase/scripts/restore_backup.sh client1-2026-11-01-0117.dump.gpg "<Session pooler URI of the NEW project>"
    ```
    It asks for the passphrase, then for the word `RESTORE`, and ends with the number of items, invoices, vouchers and logins, and the date of the last sale. It refuses any database that already has logins or invoices, so a live installation can't be overwritten by mistake.
-4. To look at that data in SIM: in Vercel, open the project's **Deployments**, pick the latest, choose **Redeploy** with the new project's URL and key as environment variables (or create a separate Vercel project for it). Everyone signs in with the passwords they had on that date. Reports, statements and the books show the data as it was, and can be printed or saved as PDF for the client.
+4. To look at that data in QuickSales: in Vercel, open the project's **Deployments**, pick the latest, choose **Redeploy** with the new project's URL and key as environment variables (or create a separate Vercel project for it). Everyone signs in with the passwords they had on that date. Reports, statements and the books show the data as it was, and can be printed or saved as PDF for the client.
 5. To **replace** a damaged live installation, restore into a new project as above, check it, then point client 1's Vercel project at the new project's URL and key, and redeploy.
 
 For a quick copy without the nightly job: `pg_dump "<Session pooler URI>" --format=custom --schema=public --schema=app --schema=auth -f sim-backup.dump`.
