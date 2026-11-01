@@ -80,7 +80,7 @@ export function Setup() {
   const fld = (k: keyof typeof f, l: string, type = 'text', extra: Record<string, unknown> = {}) => <div className="field"><label>{l}</label><input className="input" type={type} value={f[k]} onChange={set(k)} {...extra} /></div>;
   return (
     <div className="lockwrap"><form className="card" style={{ maxWidth: 760 }} onSubmit={go}>
-      <h3><Icon n="shield" /> Set up SIM</h3>
+      <h3><Icon n="shield" /> Set up QuickSales</h3>
       <p>This screen appears once, on a new installation. It creates the Admin login. The Admin then creates every other login.</p>
       <div className="frow">{fld('name', 'Your full name')}{fld('username', 'Admin username', 'text', { autoCapitalize: 'off' })}</div>
       <div className="frow">{fld('password', 'Password (10+ characters, letters and numbers)', 'password', { autoComplete: 'new-password' })}{fld('password2', 'Password again', 'password', { autoComplete: 'new-password' })}</div>
