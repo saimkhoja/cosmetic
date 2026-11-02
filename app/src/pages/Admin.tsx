@@ -11,7 +11,7 @@ import { R } from '../components/Layout';
 import { QtyCell } from './Inventory';
 import { stockValue } from '../lib/units';
 import { DeliveryModal } from './Deliveries';
-import type { Profile, Role } from '../lib/types';
+import type { Profile, Role, Shop } from '../lib/types';
 
 export function AdminHome() {
   const nav = useNavigate();
@@ -129,12 +129,31 @@ function ResetModal({ u, onClose, onDone }: { u: Profile; onClose: () => void; o
   );
 }
 
+/** Changes a shop's name and address. The 3-letter code stays: invoice numbers and the books use it. */
+function ShopEdit({ shop, onClose }: { shop: Shop; onClose: () => void }) {
+  const refresh = useRefresh(), toast = useToast(), a = useAction();
+  const [f, setF] = useState({ name: shop.name, address: shop.address });
+  const save = () => a.run(async () => {
+    await rpc('save_shop', { p: { id: shop.id, name: f.name.trim(), address: f.address.trim() } });
+    await refresh('shops', 'audit'); toast('Shop details saved'); onClose();
+  });
+  return (
+    <Modal title={'Edit shop ' + shop.code} icon="store" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="shopsave" disabled={a.busy || f.name.trim().length < 2} onClick={() => void save()}><Icon n="check" /> Save</button></>}>
+      <div className="frow"><div className="field"><label htmlFor="es-name">Shop name</label><input id="es-name" className="input" maxLength={40} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></div>
+        <div className="field"><label>Short code</label><input className="input" value={shop.code} disabled /><span className="hint">The code can't change: invoice numbers use it.</span></div></div>
+      <div className="field"><label htmlFor="es-addr">Address</label><input id="es-addr" className="input" maxLength={80} value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /><span className="hint">Printed on this shop's invoices and delivery notes from now on. Past invoices don't change.</span></div>
+      <div className="lerr">{a.err}</div>
+    </Modal>
+  );
+}
+
 export function SettingsPage() {
   const settings = useSettings(), shops = useShops(), refresh = useRefresh(), toast = useToast(), a = useAction(), b = useAction();
   const s = settings.data;
   const [f, setF] = useState<Record<string, string> | null>(null);
   const v = f ?? (s ? { rate: String(s.rate), book_rate: String(bookRate(s)), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', usd_pay: s.features?.usd_pay ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
   const [shop, setShop] = useState({ name: '', code: '', address: '' });
+  const [edit, setEdit] = useState<Shop | null>(null);
   if (!v) return <Empty i="refresh" t="Loading" tall />;
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...v, [k]: e.target.value });
   const fld = (k: string, l: string) => <div className="field"><label htmlFor={'s-' + k}>{l}</label><input id={'s-' + k} className="input" maxLength={80} value={v[k]} onChange={set(k)} /></div>;
@@ -152,9 +171,10 @@ export function SettingsPage() {
           <div className="field"><label htmlFor="sbook">Internal rate (taux interne): 1 USD in CDF</label><input id="sbook" type="number" min="1" className="input" value={v.book_rate} onChange={set('book_rate')} /><span className="hint">Suppliers, expenses, cash taken from the shops</span></div></div>
         <div className="frow"><div className="field"><label>VAT (TVA) %</label><input type="number" min="0" max="30" className="input" value={v.vat} onChange={set('vat')} /></div></div>
         <Note>Shop price = selling price in USD × sales rate, rounded to the nearest 10 CDF. Changing the sales rate reprices every shop at once; past invoices keep the rate of their sale. Supplier bills, payments, expenses and vouchers in Francs use the internal rate unless you type another rate on the entry.</Note></div>
-        <div className="card"><h3><Icon n="store" /> Shops</h3><table className="t"><tbody>{(shops.data ?? []).map((x) => <tr key={x.id}><td><b>{x.name}</b><div className="code">{x.code}, {x.address}</div></td></tr>)}</tbody></table>
+        <div className="card"><h3><Icon n="store" /> Shops</h3><table className="t"><tbody>{(shops.data ?? []).map((x) => <tr key={x.id}><td><b>{x.name}</b><div className="code">{x.code}, {x.address}</div></td><td className="nw" style={{ width: 1 }}><button className="btn sm" onClick={() => setEdit(x)} aria-label={`Edit ${x.name}`}><Icon n="edit" /> Edit</button></td></tr>)}</tbody></table>
           <div className="frow" style={{ marginTop: 12 }}><div className="field"><label>New shop name</label><input className="input" maxLength={40} value={shop.name} onChange={(e) => setShop({ ...shop, name: e.target.value })} /></div><div className="field"><label>Short code (3 letters)</label><input className="input" maxLength={3} style={{ textTransform: 'uppercase' }} value={shop.code} onChange={(e) => setShop({ ...shop, code: e.target.value.toUpperCase() })} /></div></div>
           <div className="field"><label>Address</label><input className="input" maxLength={80} value={shop.address} onChange={(e) => setShop({ ...shop, address: e.target.value })} /></div><div className="lerr">{b.err}</div><button className="btn ghost full" disabled={b.busy} onClick={() => void addShop()}><Icon n="plus" /> Add shop</button></div></div>
+      {edit ? <ShopEdit shop={edit} onClose={() => setEdit(null)} /> : null}
       <div className="card"><h3><Icon n="cart" /> Till options</h3>
         {sw('customer_optional', 'The customer name is optional: walk-in customers are sold to without typing a name')}
         {sw('barcode', 'Barcode scanning: items have barcodes (several per item if needed), and scanning any of them at the till adds 1 pc to the sale')}
