@@ -4,11 +4,12 @@ import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useDeliveries, useInvoices, useOrders, useProducts, useRanks, useRefresh, useReport, useSettings, useShops, useStock, useStockRequests } from '../data/queries';
 import { rpc } from '../lib/supabase';
-import { ctnTxt, hotSet, hotSort, pcValue, stockValue, totals, unitLabel, unitsOf } from '../lib/units';
+import { ctnTxt, hotSet, hotSort, pcValue, stockValue, totals, unitLabel, unitsOf, type Disc } from '../lib/units';
 import { TicketsModal } from '../components/Tickets';
 import { dt, fCDF, ld, sum, tm, toCDF, today } from '../lib/format';
 import { printHTML, receiptHTML, stockCountHTML } from '../lib/print';
 import { Dual2, Empty, Head, Kpi, Modal, Note, Tile, useAction, useToast } from '../components/ui';
+import { DiscFields, discProblem } from '../components/Discount';
 import { outboxAll } from '../offline/store';
 import type { Invoice, Product } from '../lib/types';
 
@@ -100,7 +101,7 @@ export function Invoices() {
         <Kpi i={pending ? 'clock' : 'cloud'} l="Sent to server" tone={pending ? 'warn' : 'ok'}><Dual2 b={pending ? pending + ' waiting' : 'All sent'} s={pending ? 'Will send when online' : 'Up to date'} /></Kpi>
       </div>
       <div className="card p0">{list.length ? <div className="tw"><table className="t"><thead><tr><th>Invoice</th><th>Time</th><th>Customer</th><th>Cashier</th><th className="r">Items</th><th className="r">Discount</th><th className="r">Total</th><th>Printing</th><th>Server</th><th /></tr></thead><tbody>
-        {list.slice(0, 300).map((i) => <tr key={i.id}><td><b>{i.no}</b>{i.edits?.length ? <> <span className="chip warn">Edited</span></> : null}</td><td style={{ whiteSpace: 'nowrap' }}>{f === 'today' ? tm(i.t) : dt(i.t)}</td><td>{i.customer || '-'}</td><td>{i.cashier_name}{i.prepared_by_name ? <div className="code">prepared by {i.prepared_by_name}</div> : null}</td><td className="r">{sum(i.items, (x) => x.qty)}</td>
+        {list.slice(0, 300).map((i) => <tr key={i.id}><td><b>{i.no}</b>{i.revised_from != null ? <> <span className="chip warn" title={`Printed at the till for ${fCDF(i.revised_from)}`}>Changed at approval</span></> : null}{i.edits?.length ? <> <span className="chip warn">Edited</span></> : null}</td><td style={{ whiteSpace: 'nowrap' }}>{f === 'today' ? tm(i.t) : dt(i.t)}</td><td>{i.customer || '-'}</td><td>{i.cashier_name}{i.prepared_by_name ? <div className="code">prepared by {i.prepared_by_name}</div> : null}</td><td className="r">{sum(i.items, (x) => x.qty)}</td>
           <td className="r">{i.disc ? fCDF(i.disc) : '-'}</td><td className="r"><b>{fCDF(i.total)}</b></td>
           <td>{i.printed > 2 ? <span className="chip warn">{i.printed - 2} duplicate{i.printed - 2 > 1 ? 's' : ''}</span> : <span className="chip"><Icon n="lock" /> 2 copies</span>}</td>
           <td>{i.synced ? <span className="chip ok"><Icon n="cloud" /> Sent</span> : <span className="chip warn"><Icon n="clock" /> Waiting</span>}</td>
@@ -108,6 +109,7 @@ export function Invoices() {
       </tbody></table></div> : <Empty i="receipt" t={inv.isLoading ? 'Loading' : 'No invoices for this period'} />}</div>
       {view && shop && settings.data ? <Modal title={'Invoice ' + view.no} icon="receipt" onClose={() => setView(null)} foot={<><button className="btn" onClick={() => setView(null)}>Close</button>{view.synced ? <button className="btn ghost" onClick={() => { setEdit(view); setView(null); }}><Icon n="edit" /> Edit invoice</button> : null}<button className="btn primary" onClick={() => void dup(view)}><Icon n="printer" /> Print duplicate</button></>}>
         <div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, settings.data.company, shop, { copy: 'client', dup: true, cash: !!settings.data.features?.cash_change }) }} />
+        {view.revised_from != null ? <Note i="edit" warn>Changed by the shop admin before approving it: the till printed {fCDF(view.revised_from)}{view.prepared_by_name ? ` (prepared by ${view.prepared_by_name})` : ''}, the sale is {fCDF(view.total)}. The copy printed at the till is void.</Note> : null}
         {view.edits?.length ? <Note i="edit" warn>Edited {view.edits.length} time{view.edits.length > 1 ? 's' : ''}. Last change by {view.edits.at(-1)!.by_name} on {dt(view.edits.at(-1)!.at)}: {view.edits.at(-1)!.reason}</Note> : null}
         {!view.synced ? <Note i="clock" warn>Saved on this device. It will be sent to the server when the internet is available; it can be edited after that.</Note> : null}
       </Modal> : null}
@@ -130,24 +132,28 @@ function DeleteInvoice({ inv, onClose }: { inv: Invoice; onClose: () => void }) 
   );
 }
 
+/** The discount an invoice was given, as it was entered: its percentage when that gives its amount, otherwise the amount. */
+const discOfInvoice = (inv: Invoice): Disc => (!inv.disc ? 0 : Math.round((inv.gross * Number(inv.disc_pct)) / 1000) * 10 === inv.disc ? Number(inv.disc_pct) : { amount: inv.disc });
+
 function EditInvoice({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
   const refresh = useRefresh(), toast = useToast(), a = useAction(), products = useProducts();
   const byId = new Map((products.data ?? []).map((p) => [p.id, p]));
-  const [qty, setQty] = useState(inv.items.map((i) => String(i.qty))), [dp, setDp] = useState(String(inv.disc_pct || 0)), [reason, setReason] = useState('');
+  const [qty, setQty] = useState(inv.items.map((i) => String(i.qty))), [dp, setDp] = useState<Disc>(() => discOfInvoice(inv)), [reason, setReason] = useState('');
   // unit chosen per line: -1 keeps the unit it was sold in (and its price); otherwise an index into the item's units today
   const [ui, setUi] = useState<number[]>(inv.items.map(() => -1));
   const opts = (p: Product | undefined) => (p ? unitsOf(p) : []);
   const line = (k: number) => {
     const it = inv.items[k], p = byId.get(it.product_id), u = ui[k] >= 0 ? opts(p)[ui[k]] : undefined;
     const price = u ? toCDF(u.usd, inv.rate) : it.price, q = Math.max(0, parseInt(qty[k]) || 0);
-    return { ...it, unit: u ? (u.piece ? 'piece' : u.u) : it.unit, mult: u ? (u.piece ? 0 : u.mult) : it.mult, piece: u ? !!u.piece : it.piece, price, qty: q, changed: !!u && (!!u.piece !== it.piece || (u.piece ? 0 : u.mult) !== it.mult) };
+    return { ...it, unit: u ? (u.piece ? 'piece' : u.u) : it.unit, mult: u ? (u.piece ? 0 : u.mult) : it.mult, piece: u ? !!u.piece : it.piece, price, qty: q, changed: !!u && ((u.piece ? 'piece' : u.u) !== (it.piece ? 'piece' : it.unit) || (u.piece ? 0 : u.mult) !== it.mult) };
   };
   const lines = inv.items.map((_, k) => line(k)).filter((l) => l.qty > 0);
-  const T = totals(lines, Math.min(30, Math.max(0, parseInt(dp) || 0)), inv.vat_rate), d = T.total - inv.total;
+  const T = totals(lines, dp, inv.vat_rate), d = T.total - inv.total;
   const save = () => a.run(async () => {
     if (!lines.length) throw new Error('Keep at least one line on the invoice');
     if (reason.trim().length < 4) throw new Error('Write a short reason for the change');
-    await rpc('edit_invoice', { p_id: inv.id, p_lines: inv.items.map((it, k) => { const l = line(k); return l.changed ? { line_no: it.line_no, qty: l.qty, mult: l.mult, piece: l.piece } : { line_no: it.line_no, qty: l.qty }; }), p_disc: parseInt(dp) || 0, p_reason: reason });
+    const problem = discProblem(dp, T.gross); if (problem) throw new Error(problem);
+    await rpc('edit_invoice', { p_id: inv.id, p_lines: inv.items.map((it, k) => { const l = line(k); return l.changed ? { line_no: it.line_no, qty: l.qty, unit: l.unit, mult: l.mult, piece: l.piece } : { line_no: it.line_no, qty: l.qty }; }), p_disc: typeof dp === 'number' ? dp : 0, ...(typeof dp === 'number' ? {} : { p_disc_amount: T.disc }), p_reason: reason });
     await refresh('invoices', 'stock', 'report', 'audit'); toast('Invoice updated. Print a duplicate if the customer needs it.'); onClose();
   });
   return (
@@ -160,7 +166,7 @@ function EditInvoice({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
           <td className="r">{fCDF(l.price)}{l.changed ? <div className="code">was {fCDF(it.price)} per {it.unit}</div> : null}</td>
           <td><input className="input" data-eq={k} type="number" min="0" value={qty[k]} style={{ minHeight: 42 }} onChange={(e) => setQty(qty.map((x, j) => (j === k ? e.target.value : x)))} /></td><td className="r"><b>{fCDF(l.price * l.qty)}</b></td></tr>; })}
       </tbody></table></div>
-      <div className="field"><label>Discount on this invoice (%)</label><input id="edp" className="input" type="number" min="0" max="30" value={dp} onChange={(e) => setDp(e.target.value)} /></div>
+      <DiscFields id="edp" gross={T.gross} value={dp} onChange={setDp} />
       <div className="field"><label>Reason for the change</label><input id="ereason" className="input" maxLength={80} placeholder="e.g. Customer took a dozen instead of 12 pcs" value={reason} onChange={(e) => setReason(e.target.value)} /></div>
       <div className={`note ${d > 0 ? 'warn' : ''}`}><Icon n="receipt" /><div>New total <b>{fCDF(T.total)}</b>, was {fCDF(inv.total)}. {lines.length} line{lines.length === 1 ? '' : 's'}. {d < 0 ? <>Give back to the customer: <b>{fCDF(-d)}</b></> : d > 0 ? <>Collect from the customer: <b>{fCDF(d)}</b></> : 'No money changes hands.'}</div></div>
       <div className="lerr">{a.err}</div>

@@ -1,17 +1,18 @@
 import { useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useReport, useSettings, useShops } from '../data/queries';
+import { useCategories, useReport, useSettings, useShops } from '../data/queries';
 import { bookRate, dt, fCDF, fUSD, ld, shortCDF, today } from '../lib/format';
-import { printHTML, reportHTML, shiftSlipHTML } from '../lib/print';
+import { printHTML, reportHTML, shiftSlipHTML, type CategorySales } from '../lib/print';
 import { Bars, Dual2, Empty, Head, HList, Kpi, Modal } from '../components/ui';
+import { CategoryChart, unitsText } from '../components/CategoryChart';
 
 export default function Reports() {
   const { profile } = useAuth();
   const isAdmin = profile!.role === 'admin';
   const [from, setFrom] = useState(ld(Date.now() - 6 * 864e5)), [to, setTo] = useState(today()), [shop, setShop] = useState('all');
-  const [doc, setDoc] = useState<{ title: string; html: string; slip: boolean } | null>(null);
-  const settings = useSettings(), shops = useShops();
+  const [doc, setDoc] = useState<{ title: string; html: string; slip: boolean } | null>(null), [cat, setCat] = useState<CategorySales | null>(null);
+  const settings = useSettings(), shops = useShops(), cats = useCategories();
   const sid = isAdmin ? (shop === 'all' ? null : shop) : profile!.shop_id;
   const rep = useReport(from <= to ? from : to, from <= to ? to : from, sid);
   const r = rep.data, single = from === to;
@@ -46,6 +47,9 @@ export default function Reports() {
           <Kpi i="tag" l="Discounts given" tone="warn"><Dual2 b={fCDF(r.disc)} s={`VAT in the period ${fCDF(r.vat)}`} /></Kpi>
           {isAdmin ? <Kpi i="chart" l="Gross profit, excl. VAT"><Dual2 b={fUSD(r.profit_usd ?? 0)} s={fCDF((r.profit_usd ?? 0) * bookRate(settings.data))} /></Kpi> : <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r.total)} s="all sales are cash" /></Kpi>}
         </div>
+        <div className="card"><h3><Icon n="chart" /> Sales by category</h3>
+          {r.by_category ? <CategoryChart cats={r.by_category} names={(cats.data ?? []).map((c) => c.name)} onOpen={setCat} />
+            : <Empty i="alert" t="Sales by category need the latest database update (migration 21 in the deploy guide)" />}</div>
         <div className="cols">
           <div className="card"><h3><Icon n="chart" /> Sales by day (CDF)</h3>{r.by_day.length ? <Bars arr={r.by_day.slice(-14).map((d) => ({ label: d.day.slice(8) + '/' + d.day.slice(5, 7), val: d.v, txt: shortCDF(d.v) }))} /> : <Empty i="chart" t="No sales in these dates" />}</div>
           <div className="card"><h3><Icon n="box" /> Best sellers</h3><HList arr={r.top.slice(0, 8).map((x) => ({ name: x.name, val: x.val, txt: fCDF(x.val) }))} /></div>
@@ -55,6 +59,14 @@ export default function Reports() {
           {r.invoices.slice(0, 150).map((i) => <tr key={i.id}><td><b>{i.no}</b>{i.edited ? <> <span className="chip warn">Edited</span></> : null}</td><td>{dt(i.t)}</td>{!sid ? <td>{shopName(i.shop_id)}</td> : null}<td>{i.customer || '-'}</td><td>{i.cashier_name}</td><td className="r">{i.items}</td><td className="r">{i.disc ? fCDF(i.disc) : '-'}</td><td className="r"><b>{fCDF(i.total)}</b></td></tr>)}
         </tbody></table></div> : <Empty i="receipt" t="No invoices in these dates" />}</div>
       </>}
+      {cat && r ? <Modal title={`${cat.category}: items sold`} icon="box" wide onClose={() => setCat(null)} foot={<button className="btn" onClick={() => setCat(null)}>Close</button>}>
+        <p><b>{fCDF(cat.val)}</b>, {r.total ? Math.round((cat.val * 1000) / r.total) / 10 : 0}% of the sales from {r.from} to {r.to}{sid ? `, ${shopName(sid)}` : ''}. {cat.items.length} item{cat.items.length === 1 ? '' : 's'}, {cat.pcs} pcs. Amounts are after the invoice discounts, VAT included.</p>
+        <div className="tw"><table className="t" id="catitems"><thead><tr><th>#</th><th>Item</th><th>Sold</th><th className="r">Pcs</th><th className="r">Amount</th><th className="r">Share</th></tr></thead><tbody>
+          {cat.items.map((it, k) => <tr key={it.product_id}><td>{k + 1}</td><td><b>{it.name}</b></td><td>{unitsText(it.units)}</td>
+            <td className="r">{it.pcs}{it.pieces ? <div className="code">+ {it.pieces} piece{it.pieces > 1 ? 's' : ''}</div> : null}</td>
+            <td className="r nw"><b>{fCDF(it.val)}</b></td><td className="r">{cat.val ? Math.round((it.val * 1000) / cat.val) / 10 : 0}%</td></tr>)}
+        </tbody></table></div>
+      </Modal> : null}
       {doc ? <Modal title={doc.title} icon="doc" wide={!doc.slip} onClose={() => setDoc(null)} foot={<><button className="btn" onClick={() => setDoc(null)}>Close</button><button className="btn primary" onClick={() => printHTML(doc.html)}><Icon n="printer" /> Print</button></>}>
         <div className={doc.slip ? 'rwrap' : ''} id="slips" style={doc.slip ? { display: 'grid', gap: 14 } : undefined} dangerouslySetInnerHTML={{ __html: doc.html }} /></Modal> : null}
     </>

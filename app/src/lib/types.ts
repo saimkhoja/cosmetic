@@ -21,6 +21,8 @@ export interface Invoice {
   printed: number; till_printed_at?: string | null; items: InvoiceItem[]; edits?: InvoiceEdit[]; synced?: boolean;
   customer?: string; prepared_by_name?: string | null; order_id?: string | null;
   paid_usd?: number; paid_cdf?: number; change_usd?: number; change_cdf?: number;
+  /** the total the till operator printed, when the shop admin changed the order before approving it */
+  revised_from?: number | null;
 }
 export interface DeliveryItem { product_id: string; qty: number; price_usd: number; received_qty?: number | null }
 export interface DeliveryEdit { at: string; by_name: string; reason: string }
@@ -29,10 +31,12 @@ export interface Delivery {
   status: 'pending' | 'received' | 'cancelled'; received_at: string | null; received_by_name: string | null; received_note: string | null;
   delivery_items: DeliveryItem[]; delivery_edits: DeliveryEdit[];
 }
-export interface OrderItem { product_id: string; mult: number; piece: boolean; qty: number }
+export interface OrderItem { product_id: string; mult: number; piece: boolean; qty: number; price?: number; unit?: string }
 export interface SaleOrder {
   id: string; shop_id: string; customer: string; items: OrderItem[]; status: 'pending' | 'approved' | 'rejected';
   created_by: string; created_by_name: string; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null; reason: string | null; invoice_id: string | null;
+  /** the invoice the till operator printed when sending it (orders from tills with the old app have none) */
+  invoice_no?: string | null; device_id?: string | null; rate?: number | null; vat_rate?: number | null; total?: number | null;
 }
 export interface Category { id: string; name: string; seasonal: boolean; season_months: number[] }
 export interface Rank { product_id: string; sold_30: number; in_season: boolean }

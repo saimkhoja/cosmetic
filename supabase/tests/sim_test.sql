@@ -721,6 +721,163 @@ select t.fails($$select public.save_rate('sales', 3000)$$, 'permission', 'only t
 reset role;
 update settings set rate = 2850, book_rate = 2850;
 
+-- ===== the till operator prints the invoice; the shop admin's approval completes it without a second invoice =====
+-- the till operator's till (T1) numbers the invoice; the order keeps the number, till, rates and printed prices
+select t.put('tno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('tno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('tno3', (select 'GOM-' || code || '-' || lpad((last_seq + 3)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('stk0', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid));
+select t.put('ord5', gen_random_uuid()::text), t.put('ord6', gen_random_uuid()::text), t.put('ord7', gen_random_uuid()::text);
+create function t.tord(id text, no text, qty int) returns jsonb language sql as $$
+  select jsonb_build_object('id', id, 'customer', 'Maman Ngalula', 'no', no, 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16, 't', now(),
+    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', qty, 'price', 4560))) $$;
+grant execute on function t.tord(text, text, int) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.ok((public.submit_order(t.tord(t.get('ord5'), t.get('tno1'), 2))->>'status') = 'ok', 'till operator sends the order with the invoice it printed');
+select t.ok((public.submit_order(t.tord(t.get('ord5'), t.get('tno1'), 2))->>'status') = 'duplicate', 'the same order sent twice is saved once');
+select t.fails(format($$select public.submit_order(t.tord('%s', '%s', 1))$$, gen_random_uuid(), t.get('tno1')), 'already used', 'an invoice number is used once');
+select t.fails(format($$select public.submit_order(t.tord('%s', 'GOM-T9-000001', 1))$$, gen_random_uuid()), 'does not match', 'the number must be this till''s');
+select t.fails(format($$select public.submit_order(t.tord('%s', '%s', 1) || jsonb_build_object('items', jsonb_build_array(jsonb_build_object('product_id', '%s', 'mult', 1, 'qty', 1))))$$, gen_random_uuid(), t.get('tno2'), t.get('lotion')),
+  'Price missing', 'the printed invoice needs a price on every line');
+select public.submit_order(t.tord(t.get('ord6'), t.get('tno2'), 2));
+select public.submit_order(t.tord(t.get('ord7'), t.get('tno3'), 1));
+reset role;
+select t.ok((select invoice_no || '/' || total || '/' || rate from sale_orders where id = t.get('ord5')::uuid) = t.get('tno1') || '/9120/2850.00', 'the order keeps the invoice number, the printed total and the rate');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('stk0')::int, 'printing the invoice at the till takes no stock');
+select t.ok(not exists (select 1 from invoices where no in (t.get('tno1'), t.get('tno2'), t.get('tno3'))), 'no invoice until the shop admin approves');
+select t.ok((select last_seq from devices where id = t.get('dev1')::uuid) = right(t.get('tno3'), 6)::int, 'the till''s invoice counter is remembered on the server');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+-- approving with another number (the shop admin's own till) is refused: the order already has its invoice
+select t.fails(format($$select public.submit_invoice(t.tord('%s', 'GOM-T2-000099', 2) || jsonb_build_object('device_id', '%s', 'order_id', '%s'))$$, gen_random_uuid(), t.get('dev2'), t.get('ord5')),
+  'printed at the till as invoice', 'approving uses the number printed at the till');
+-- approved as printed: the sale is complete, nothing is marked changed
+select t.ok((public.submit_invoice(t.tord(t.get('ord5'), t.get('tno1'), 2) || jsonb_build_object('order_id', t.get('ord5')))->>'revised') = 'false', 'shop admin approves the order as printed');
+select t.ok((select status || '/' || (invoice_id = t.get('ord5')::uuid)::text from sale_orders where id = t.get('ord5')::uuid) = 'approved/true', 'the order is approved and linked to its invoice');
+select t.ok((select count(*) || '/' || bool_and(revised_from is null) || '/' || min(prepared_by_name) || '/' || min(cashier_name) from invoices where no = t.get('tno1')) = '1/true/Grace Mbuyi/Patrick Kabongo',
+  'one invoice with the till''s number, prepared by the till operator, cashed by the shop admin');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('stk0')::int - 2, 'the stock goes down on approval');
+-- changed at approval (2 pcs to 3): the same number, one invoice, marked changed with the total the till printed
+select t.ok((public.submit_invoice(t.tord(t.get('ord6'), t.get('tno2'), 3) || jsonb_build_object('order_id', t.get('ord6')))->>'revised') = 'true', 'shop admin changes the order and approves it');
+select t.ok((select count(*) || '/' || min(revised_from) || '/' || min(total) from invoices where no = t.get('tno2')) = '1/9120/13680', 'changed at approval: one invoice, same number, the printed total kept');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('stk0')::int - 5, 'the stock follows the changed invoice');
+-- rejected: the number printed at the till is void and never becomes an invoice
+select public.reject_order(t.get('ord7')::uuid, 'Customer left');
+select t.ok(not exists (select 1 from invoices where no = t.get('tno3')), 'a rejected order makes no invoice');
+reset role;
+select t.ok(exists (select 1 from audit_log where action like 'Invoice ' || t.get('tno2') || '%changed from 9 120 CDF%'), 'the activity log shows the change at approval');
+select t.ok(exists (select 1 from audit_log where action like '%invoice ' || t.get('tno3') || ' printed at the till voided%'), 'rejecting voids the invoice printed at the till');
+
+-- ===== a discount as an amount (its percentage follows from the total) or as a percentage with decimals =====
+select t.put('sno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('sno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('sno3', (select 'GOM-' || code || '-' || lpad((last_seq + 3)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+create function t.dsale(no text, extra jsonb) returns jsonb language sql as $$
+  select jsonb_build_object('id', gen_random_uuid(), 'no', no, 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Tantine Mado',
+    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 10, 'price', 4560))) || extra $$;
+grant execute on function t.dsale(text, jsonb) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.submit_invoice(t.dsale(t.get('sno1'), '{"disc": 5000}'));
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '5000/40600/10.96', 'a discount of 5 000 CDF on 45 600: total 40 600, 10.96%');
+select t.fails(format($$select public.submit_invoice(t.dsale('%s', '{"disc": 14000}'))$$, t.get('sno2')), 'between 0% and 30%', 'a discount amount above 30% is refused');
+select public.submit_invoice(t.dsale(t.get('sno2'), '{"disc_pct": 2.5}'));
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno2')) = '1140/44460/2.50', 'a 2.5% discount: 1 140 CDF, rounded to 10 CDF');
+select public.edit_invoice((select id from invoices where no = t.get('sno1')), '[{"line_no":1,"qty":10}]', 0, 'Discount agreed with the customer', 3000);
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '3000/42600/6.58', 'editing the invoice to a 3 000 CDF discount');
+select t.fails(format($$select public.edit_invoice('%s', '[{"line_no":1,"qty":1}]', 0, 'Fewer items now', 3000)$$, (select id from invoices where no = t.get('sno1'))),
+  'between 0% and 30%', 'a discount amount above 30% of the new total is refused on an edit');
+select public.edit_invoice((select id from invoices where no = t.get('sno1')), '[{"line_no":1,"qty":10}]', 5, 'Back to a percentage');
+select t.ok((select disc || '/' || disc_pct from invoices where no = t.get('sno1')) = '2280/5.00', 'editing back to a percentage still works');
+reset role;
+-- an amount given while approving the till's invoice counts as a change
+select t.put('tno4', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('ord8', gen_random_uuid()::text);
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select public.submit_order(t.tord(t.get('ord8'), t.get('tno4'), 2));
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.submit_invoice(t.tord(t.get('ord8'), t.get('tno4'), 2) || jsonb_build_object('order_id', t.get('ord8'), 'disc', 1000))->>'revised') = 'true', 'a discount given at approval prints the corrected invoice');
+select t.ok((select disc || '/' || total || '/' || revised_from from invoices where no = t.get('tno4')) = '1000/8120/9120', 'the approved invoice keeps the discount and the total the till printed');
+reset role;
+
+-- ===== half and quarter cartons: half and a quarter of the carton price, only when a different number of pcs =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('cream', public.save_product('{"name":"Test cream","category":"Skin care","carton_cost":36,"per_carton":36,"pc":1.5,"dzn":16,"ctn":50,"reorder":0}')::text);
+reset role;
+select t.put('hp', (select app.unit_price(p, 'half ctn', 2850)::text from products p where id = t.get('cream')::uuid));
+select t.put('qp', (select app.unit_price(p, 'quarter ctn', 2850)::text from products p where id = t.get('cream')::uuid));
+select t.ok(t.get('hp')::bigint = 71250 and t.get('qp')::bigint = 35630, 'half carton 71 250 and quarter carton 35 630 CDF: half and a quarter of 142 500, rounded to 10 CDF');
+select t.put('cno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('cno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('stk1', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cream')::uuid));
+create function t.csale(no text, lines jsonb) returns jsonb language sql as $$
+  select jsonb_build_object('id', gen_random_uuid(), 'no', no, 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Maman Ngalula', 'items', lines) $$;
+grant execute on function t.csale(text, jsonb) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+-- 36 to the carton: a half carton is 18 pcs and a quarter carton 9, sold beside the dozen
+select public.submit_invoice(t.csale(t.get('cno1'), jsonb_build_array(
+  jsonb_build_object('product_id', t.get('cream'), 'unit', 'half ctn', 'mult', 18, 'qty', 1, 'price', t.get('hp')::bigint),
+  jsonb_build_object('product_id', t.get('cream'), 'unit', 'quarter ctn', 'mult', 9, 'qty', 2, 'price', t.get('qp')::bigint),
+  jsonb_build_object('product_id', t.get('cream'), 'mult', 12, 'qty', 1, 'price', 45600))));
+select t.ok((select string_agg(i.unit || ':' || i.mult || ':' || i.price, ',' order by i.line_no) from invoice_items i join invoices v on v.id = i.invoice_id where v.no = t.get('cno1'))
+  = 'half ctn:18:' || t.get('hp') || ',quarter ctn:9:' || t.get('qp') || ',dzn:12:45600', 'half carton, quarter carton and dozen on one invoice, each at its own price');
+select t.ok(not (select price_flag from invoices where no = t.get('cno1')), 'half and quarter carton prices match the price list');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cream')::uuid) = t.get('stk1')::int - 18 - 18 - 12, 'stock goes down by the pcs of each part of a carton');
+select t.fails(format($$select public.submit_invoice(t.csale('%s', jsonb_build_array(jsonb_build_object('product_id', '%s', 'unit', 'half ctn', 'mult', 12, 'qty', 1, 'price', 1000))))$$, t.get('cno2'), t.get('cream')),
+  'cannot be sold by the half carton', 'a half carton must be half the pcs of a carton');
+-- 24 to the carton (the lotion): a half carton is the dozen and a quarter carton the half dozen, so neither is sold
+select t.fails(format($$select public.submit_invoice(t.csale('%s', jsonb_build_array(jsonb_build_object('product_id', '%s', 'unit', 'half ctn', 'mult', 12, 'qty', 1, 'price', 1000))))$$, t.get('cno2'), t.get('lotion')),
+  'sell it by the dozen', 'no half carton when it is a dozen');
+select t.fails(format($$select public.submit_invoice(t.csale('%s', jsonb_build_array(jsonb_build_object('product_id', '%s', 'unit', 'quarter ctn', 'mult', 6, 'qty', 1, 'price', 1000))))$$, t.get('cno2'), t.get('lotion')),
+  'sell it by the half dozen', 'no quarter carton when it is a half dozen');
+select t.fails(format($$select public.submit_invoice(t.csale('%s', jsonb_build_array(jsonb_build_object('product_id', '%s', 'unit', 'quarter ctn', 'mult', 1, 'qty', 1, 'price', 1000))))$$, t.get('cno2'), t.get('brush')),
+  'not sold by the carton', 'a mixed set is not sold by the carton');
+-- an invoice line changed from the dozen to a half carton: 18 pcs at the half carton price
+select public.edit_invoice((select id from invoices where no = t.get('cno1')), '[{"line_no":1,"qty":1},{"line_no":2,"qty":2},{"line_no":3,"qty":1,"unit":"half ctn","mult":18}]', 0, 'Sold as a half carton');
+select t.ok((select i.unit || ':' || i.mult || ':' || i.price from invoice_items i join invoices v on v.id = i.invoice_id where v.no = t.get('cno1') and i.line_no = 3) = 'half ctn:18:' || t.get('hp'), 'an invoice line can change from a dozen to a half carton');
+reset role;
+-- the till operator's invoice keeps the unit's name; approving it as printed changes nothing
+select t.put('tno5', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('ord9', gen_random_uuid()::text);
+create function t.hord(id text, no text) returns jsonb language sql as $$
+  select jsonb_build_object('id', id, 'customer', 'Maman Ngalula', 'no', no, 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16,
+    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cream'), 'unit', 'half ctn', 'mult', 18, 'qty', 1, 'price', t.get('hp')::bigint))) $$;
+grant execute on function t.hord(text, text) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select public.submit_order(t.hord(t.get('ord9'), t.get('tno5')));
+select t.ok((select items->0->>'unit' from sale_orders where id = t.get('ord9')::uuid) = 'half ctn', 'the order keeps the half carton by name');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.submit_invoice(t.hord(t.get('ord9'), t.get('tno5')) || jsonb_build_object('order_id', t.get('ord9')))->>'revised') = 'false', 'a half carton approved as printed is not a change');
+select t.ok((select i.unit from invoice_items i join invoices v on v.id = i.invoice_id where v.no = t.get('tno5')) = 'half ctn', 'the approved invoice sells the half carton');
+reset role;
+
+-- ===== sales by category, with the items sold in each =====
+select t.put('sh1', (select id::text from products where name = 'Argan shampoo'));
+select t.put('cno4', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.submit_invoice(t.csale(t.get('cno4'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 2, 'price', 25650))) || '{"disc_pct": 10}');
+select t.put('crep', public.sales_report(current_date, current_date)::text);
+reset role;
+select t.ok(jsonb_array_length(t.get('crep')::jsonb->'by_category') >= 1, 'the report lists the categories sold');
+select t.ok(abs((select sum((c->>'val')::bigint) from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c) - (t.get('crep')::jsonb->>'total')::bigint) <= 50,
+  'the categories add up to the sales, after the discounts');
+select t.ok(jsonb_array_length(t.get('crep')::jsonb->'by_category') >= 2 and (select bool_and(a.v >= b.v) from (select (c->>'val')::bigint v, row_number() over () n from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c) a
+  join (select (c->>'val')::bigint v, row_number() over () n from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c) b on b.n = a.n + 1), 'the biggest category comes first');
+select t.put('cream_row', (select i::text from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c, jsonb_array_elements(c->'items') i
+  where c->>'category' = 'Skin care' and i->>'name' = 'Test cream'));
+select t.ok((t.get('cream_row')::jsonb->'units') = '{"half ctn": 3, "quarter ctn": 2}'::jsonb and (t.get('cream_row')::jsonb->>'pcs')::int = 3 * 18 + 2 * 9,
+  'an item lists how many of each unit were sold and the pcs: 3 half and 2 quarter cartons, 72 pcs');
+select t.ok((select c->>'val' || '/' || (c->'items'->0->>'pcs') from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c where c->>'category' = 'Hair care') = '46170/2',
+  'a category''s sales are after the invoice discount: 2 shampoos at 25 650 less 10%');
+select t.ok((select sum((i->>'val')::bigint) from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c, jsonb_array_elements(c->'items') i where c->>'category' = 'Skin care')
+  = (select (c->>'val')::bigint from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c where c->>'category' = 'Skin care'), 'a category''s items add up to the category');
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

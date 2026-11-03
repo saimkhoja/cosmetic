@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
-import { cashNotes, ctnTxt, hotSort, marginPct, payment, pcValue, stockValue, takeLocal, totals, unitsOf, usdNotes } from './units';
+import { cashNotes, ctnTxt, hotSort, marginPct, overLimit, payment, pcValue, pctOf, stockValue, takeLocal, totals, unitsOf, usdNotes } from './units';
 import { barcodesOf, custName, findByCode, itemProblem, pickList, scanInQty, splitBarcodes } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
@@ -17,23 +17,46 @@ describe('money', () => {
   });
   it('computes discount and included VAT as the server does', () => {
     const t = totals([{ price: 85500, qty: 1 }, { price: 4000, qty: 1 }], 10, 16);
-    expect(t).toMatchObject({ gross: 89500, disc: 8950, total: 80550, vat: 11110, ht: 69440 });
+    expect(t).toMatchObject({ gross: 89500, disc: 8950, total: 80550, vat: 11110, ht: 69440, pct: 10 });
+  });
+  it('takes a discount as an amount and works out its percentage as the server does', () => {
+    const t = totals([{ price: 4560, qty: 10 }], { amount: 5000 }, 16);
+    expect(t).toMatchObject({ gross: 45600, disc: 5000, total: 40600, pct: 10.96 });
+    expect(totals([{ price: 4560, qty: 10 }], 2.5, 16)).toMatchObject({ disc: 1140, total: 44460, pct: 2.5 });
+    expect(overLimit(totals([{ price: 4560, qty: 10 }], { amount: 14000 }, 16))).toBe(true);
+    expect(overLimit(totals([{ price: 4560, qty: 10 }], { amount: 13680 }, 16))).toBe(false);
+    expect(pctOf(3000, 45600)).toBe(6.58);
   });
 });
 
 describe('units', () => {
   it('pcs, dozen and carton for a carton item', () => {
-    expect(unitsOf(P({})).map((u) => `${u.u}:${u.mult}`)).toEqual(['pcs:1', 'dzn:12', 'carton:24']);
+    expect(unitsOf(P({})).map((u) => `${u.u}:${u.mult}`)).toEqual(['pcs:1', 'dzn:12', 'carton:24', 'quarter ctn:6']);
+  });
+  it('no half or quarter carton that is as many pcs as a unit the item already sells', () => {
+    // 24 to the carton: half a carton is the dozen, a quarter the half dozen
+    expect(unitsOf(P({ half_dozen_usd: 8.5 })).map((u) => u.u)).toEqual(['pcs', 'half dzn', 'dzn', 'carton']);
+    // no dozen price: the half carton of 12 is its own unit
+    expect(unitsOf(P({ dozen_usd: 0 })).map((u) => `${u.u}:${u.mult}`)).toEqual(['pcs:1', 'carton:24', 'half ctn:12', 'quarter ctn:6']);
+    // 4 to the carton: a quarter carton is 1 pc
+    expect(unitsOf(P({ per_carton: 4 })).map((u) => u.u)).toEqual(['pcs', 'dzn', 'carton', 'half ctn']);
+  });
+  it('half and quarter carton at half and a quarter of the carton price, when the pcs divide', () => {
+    const us = unitsOf(P({ per_carton: 36, carton_usd: 50 }));
+    expect(us.filter((u) => u.u.endsWith('ctn')).map((u) => `${u.u}:${u.mult}:${toCDF(u.usd, 2800)}`)).toEqual(['half ctn:18:70000', 'quarter ctn:9:35000']);
+    expect(unitsOf(P({ per_carton: 30 })).map((u) => u.u)).toEqual(['pcs', 'dzn', 'carton', 'half ctn']);
+    expect(unitsOf(P({ per_carton: 25 })).map((u) => u.u)).toEqual(['pcs', 'dzn', 'carton']);
+    expect(unitsOf(P({ carton_usd: 0 })).map((u) => u.u)).toEqual(['pcs', 'dzn']);
   });
   it('no dozen when the carton is 12 or no dozen price', () => {
-    expect(unitsOf(P({ per_carton: 12 })).map((u) => u.u)).toEqual(['pcs', 'carton']);
-    expect(unitsOf(P({ dozen_usd: 0 })).map((u) => u.u)).toEqual(['pcs', 'carton']);
+    expect(unitsOf(P({ per_carton: 12 })).map((u) => u.u)).toEqual(['pcs', 'carton', 'half ctn', 'quarter ctn']);
+    expect(unitsOf(P({ dozen_usd: 0 })).map((u) => u.u)).toEqual(['pcs', 'carton', 'half ctn', 'quarter ctn']);
   });
   it('half dozen when it has a price; carton only when it has a price', () => {
     expect(unitsOf(P({ half_dozen_usd: 8.5 })).map((u) => `${u.u}:${u.mult}`)).toEqual(['pcs:1', 'half dzn:6', 'dzn:12', 'carton:24']);
-    expect(unitsOf(P({ half_dozen_usd: 8.5, per_carton: 6 })).map((u) => u.u)).toEqual(['pcs', 'dzn', 'carton']);
+    expect(unitsOf(P({ half_dozen_usd: 8.5, per_carton: 6 })).map((u) => u.u)).toEqual(['pcs', 'dzn', 'carton', 'half ctn']);
     expect(unitsOf(P({ carton_usd: 0 })).map((u) => u.u)).toEqual(['pcs', 'dzn']);
-    expect(unitsOf(P({ price_usd: 0 })).map((u) => u.u)).toEqual(['dzn', 'carton']);
+    expect(unitsOf(P({ price_usd: 0 })).map((u) => u.u)).toEqual(['dzn', 'carton', 'quarter ctn']);
     expect(pcValue(P({ price_usd: 0 }))).toBeCloseTo(16 / 12);
   });
   it('hot items first, seasonal items out of season last', () => {
