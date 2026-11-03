@@ -2,6 +2,13 @@
 -- chart on the Reports page. Amounts are after each invoice's discount, so the categories add up to the sales.
 -- Already running QuickSales? Run this file once, after 20261103000003_carton_parts.sql, BEFORE the new app goes live.
 
+-- stop at once if the update before this one was not run (supabase/scripts/check_migrations.sql lists what is missing)
+do $$ begin
+  if not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'app' and p.proname = 'unit_named') then
+    raise exception 'Run supabase/migrations/20261103000003_carton_parts.sql first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
+  end if;
+end $$;
+
 create or replace function public.sales_report(p_from date, p_to date, p_shop uuid default null) returns jsonb
 language plpgsql stable security definer set search_path = public, pg_temp as $$
 declare u public.profiles := app.req('admin','shopadmin'); sid uuid; tz text; res jsonb;

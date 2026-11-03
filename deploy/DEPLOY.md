@@ -47,6 +47,8 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
 
+   **Check what an installation has.** Run `supabase/scripts/check_migrations.sql` in the SQL Editor: it lists files 10 to 21 as done or MISSING and changes nothing. Never skip a file: each one rebuilds some functions from the newest version it knows, and those use what the earlier files added (for example the Reports page fails with "column inv.paid_usd does not exist", and sales fail too, when 14 was skipped). Files 18 to 21 stop with a message naming the file to run first. If one was missed, run it and then every later file again, in order (they are safe to run twice): with 14 to 17 missing, run 14, 15, 16, 17, then 18, 19, 20, 21.
+
    To check, run this in a new query. It should return `32 tables, 49 functions`:
    ```sql
    select (select count(*) from information_schema.tables where table_schema = 'public') || ' tables, ' ||

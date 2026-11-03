@@ -4,6 +4,13 @@
 -- Already running QuickSales? Run this file once, after 20261103000001_till_invoices.sql, BEFORE the new app goes live.
 -- It keeps your data; tills with the old app keep giving discounts in whole percentages.
 
+-- stop at once if the update before this one was not run (supabase/scripts/check_migrations.sql lists what is missing)
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'sale_orders' and column_name = 'invoice_no') then
+    raise exception 'Run supabase/migrations/20261103000001_till_invoices.sql first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
+  end if;
+end $$;
+
 alter table public.invoices alter column disc_pct type numeric(5,2);
 
 -- ---------- sales and approvals: a discount as a percentage or an amount ----------
