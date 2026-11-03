@@ -317,6 +317,11 @@ test('a full day in SIM', async ({ browser }) => {
   expect(n('Balance CDF')).toBe(n('Invoice Value CDF'));
   expect(txt).not.toContain('Shea body lotion');               // no item lines on the slip
   await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+  // sales by category: the biggest category first; clicking it lists the items sold in it
+  await expect(shop.locator('.catpie .slice').first()).toBeVisible();
+  await shop.locator('button.catrow').first().click();
+  await expect(shop.locator('#catitems tbody tr').first()).toContainText('CDF');
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
 
   // ---- the shop sends 2 pcs back; the warehouse receives them
   await shop.getByRole('link', { name: 'Returns' }).click();

@@ -135,6 +135,12 @@ export interface Report {
   by_day: { day: string; n: number; q: number; d: number; v: number }[]; top: { name: string; qty: number; val: number }[];
   by_cashier: { name: string; v: number }[]; slips: (Slip & { shop_id: string; code: string })[];
   invoices: { id: string; no: string; t: string; shop_id: string; cashier_name: string; customer?: string; items: number; disc: number; total: number; edited: boolean }[];
+  /** sales of each category, biggest first, with its items (missing before migration 21) */
+  by_category?: CategorySales[];
+}
+export interface CategorySales {
+  category: string; val: number; pcs: number;
+  items: { product_id: string; name: string; val: number; pcs: number; pieces: number; units: Record<string, number> }[];
 }
 export function reportHTML(r: Report, c: Company, where: string, by: string, shopName: (id: string) => string, allShops: boolean, vat: number) {
   return `<div class="doc"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2>${esc(c.name)}</h2><div>${esc(c.address)}</div><div>RCCM ${esc(c.rccm)}, ID NAT ${esc(c.idnat)}, NIF ${esc(c.nif)}</div></div>

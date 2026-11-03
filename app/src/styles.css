@@ -5,15 +5,19 @@
   --r:16px;--shadow:0 1px 2px rgba(6,50,143,.06),0 6px 20px rgba(6,50,143,.05);
   --font:'Figtree',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
   --receipt:'Open Sans',Calibri,'Segoe UI',Arial,sans-serif;
+  /* chart categories: a colour-blind checked order (light on white); the dark steps are below */
+  --cat1:#2a78d6;--cat2:#eb6834;--cat3:#1baf7a;--cat4:#eda100;--cat5:#e87ba4;--cat6:#008300;--cat7:#6250d6;--cat-other:#b9b7b0;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --blue:#6E9BFF;--blue-d:#1B47B8;--blue-l:#13244A;--btn:#1F5BE0;--top:#0B2468;
   --bg:#060D1D;--card:#0D1830;--text:#FFFFFF;--muted:#C2CCE0;--line:#223459;
-  --ok:#4ADE95;--ok-l:#0C2A1E;--warn:#FFC46B;--warn-l:#2E2008;--bad:#FF8A7E;--bad-l:#3A1511;--shadow:none}}
+  --ok:#4ADE95;--ok-l:#0C2A1E;--warn:#FFC46B;--warn-l:#2E2008;--bad:#FF8A7E;--bad-l:#3A1511;--shadow:none;
+  --cat1:#3987e5;--cat2:#d95926;--cat3:#199e70;--cat4:#c98500;--cat5:#d55181;--cat6:#008300;--cat7:#9085e9;--cat-other:#4f5a70}}
 :root[data-theme="dark"]{
   --blue:#6E9BFF;--blue-d:#1B47B8;--blue-l:#13244A;--btn:#1F5BE0;--top:#0B2468;
   --bg:#060D1D;--card:#0D1830;--text:#FFFFFF;--muted:#C2CCE0;--line:#223459;
-  --ok:#4ADE95;--ok-l:#0C2A1E;--warn:#FFC46B;--warn-l:#2E2008;--bad:#FF8A7E;--bad-l:#3A1511;--shadow:none}
+  --ok:#4ADE95;--ok-l:#0C2A1E;--warn:#FFC46B;--warn-l:#2E2008;--bad:#FF8A7E;--bad-l:#3A1511;--shadow:none;
+  --cat1:#3987e5;--cat2:#d95926;--cat3:#199e70;--cat4:#c98500;--cat5:#d55181;--cat6:#008300;--cat7:#9085e9;--cat-other:#4f5a70}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%}
 body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:15px;line-height:1.4;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
@@ -138,6 +142,33 @@ main.posmain{padding:14px;max-width:none}
 .hl .trk{height:12px;background:var(--blue-l);border-radius:6px;overflow:hidden}
 .hl .trk i{display:block;height:100%;background:var(--btn);border-radius:6px}
 .hl b{white-space:nowrap}
+/* sales by category: the donut beside the ranked list */
+.catchart{display:grid;grid-template-columns:minmax(200px,260px) minmax(0,1fr);gap:22px;align-items:start}
+.catpie{position:relative;max-width:260px}
+.catpie svg{display:block;width:100%;height:auto;overflow:visible}
+.catpie .slice{stroke:var(--card);stroke-width:2;stroke-linejoin:round;outline:none;transition:opacity .15s}
+.catpie .slice.whole{stroke:none}
+.catpie .slice.go{cursor:pointer}
+.catpie svg:has(.slice.on) .slice:not(.on){opacity:.45}
+.catpie .slice:focus-visible{stroke:var(--text);stroke-width:2.5}
+.catpie .ctot{font-size:26px;font-weight:900;fill:var(--text)}
+.catpie .csub{font-size:12px;font-weight:700;fill:var(--muted)}
+.ctip{position:absolute;transform:translate(-50%,calc(-100% - 12px));pointer-events:none;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;box-shadow:0 6px 20px rgba(6,20,60,.16);white-space:nowrap;display:grid;gap:2px;z-index:2}
+.ctip b{font-size:15px}
+.ctip span{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700}
+.ctip span i{width:12px;height:3px;border-radius:2px}
+.ctip small{color:var(--muted);font-size:12px}
+.catlist{display:grid;gap:2px}
+.catrow{display:grid;grid-template-columns:12px minmax(0,1fr) auto 52px 20px;gap:10px;align-items:center;padding:9px 10px;border-radius:10px;border:0;background:transparent;color:var(--text);font:inherit;font-size:14.5px;text-align:left;width:100%}
+.catrow i{width:12px;height:12px;border-radius:3px}
+.catrow .cn{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.catrow .cv{font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.catrow .cp{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.catrow svg{color:var(--muted)}
+button.catrow{cursor:pointer}
+button.catrow:hover,button.catrow.on{background:var(--blue-l)}
+.catrow.off{color:var(--muted)}.catrow.off i{border:1.5px dashed var(--line)}.catrow.off .cn{font-weight:600}
+@media(max-width:720px){.catchart{grid-template-columns:1fr}.catpie{margin:0 auto;width:220px}}
 
 /* toasts & modal */
 #toasts{position:fixed;left:50%;top:76px;transform:translateX(-50%);z-index:90;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:max-content;max-width:92vw}

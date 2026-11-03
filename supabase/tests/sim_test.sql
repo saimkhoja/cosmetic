@@ -856,6 +856,28 @@ select t.ok((public.submit_invoice(t.hord(t.get('ord9'), t.get('tno5')) || jsonb
 select t.ok((select i.unit from invoice_items i join invoices v on v.id = i.invoice_id where v.no = t.get('tno5')) = 'half ctn', 'the approved invoice sells the half carton');
 reset role;
 
+-- ===== sales by category, with the items sold in each =====
+select t.put('sh1', (select id::text from products where name = 'Argan shampoo'));
+select t.put('cno4', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.submit_invoice(t.csale(t.get('cno4'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 2, 'price', 25650))) || '{"disc_pct": 10}');
+select t.put('crep', public.sales_report(current_date, current_date)::text);
+reset role;
+select t.ok(jsonb_array_length(t.get('crep')::jsonb->'by_category') >= 1, 'the report lists the categories sold');
+select t.ok(abs((select sum((c->>'val')::bigint) from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c) - (t.get('crep')::jsonb->>'total')::bigint) <= 50,
+  'the categories add up to the sales, after the discounts');
+select t.ok(jsonb_array_length(t.get('crep')::jsonb->'by_category') >= 2 and (select bool_and(a.v >= b.v) from (select (c->>'val')::bigint v, row_number() over () n from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c) a
+  join (select (c->>'val')::bigint v, row_number() over () n from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c) b on b.n = a.n + 1), 'the biggest category comes first');
+select t.put('cream_row', (select i::text from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c, jsonb_array_elements(c->'items') i
+  where c->>'category' = 'Skin care' and i->>'name' = 'Test cream'));
+select t.ok((t.get('cream_row')::jsonb->'units') = '{"half ctn": 3, "quarter ctn": 2}'::jsonb and (t.get('cream_row')::jsonb->>'pcs')::int = 3 * 18 + 2 * 9,
+  'an item lists how many of each unit were sold and the pcs: 3 half and 2 quarter cartons, 72 pcs');
+select t.ok((select c->>'val' || '/' || (c->'items'->0->>'pcs') from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c where c->>'category' = 'Hair care') = '46170/2',
+  'a category''s sales are after the invoice discount: 2 shampoos at 25 650 less 10%');
+select t.ok((select sum((i->>'val')::bigint) from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c, jsonb_array_elements(c->'items') i where c->>'category' = 'Skin care')
+  = (select (c->>'val')::bigint from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c where c->>'category' = 'Skin care'), 'a category''s items add up to the category');
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
