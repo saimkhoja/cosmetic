@@ -38,8 +38,9 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    16. `supabase/migrations/20261025000001_one_per_carton.sql` (an item can come one pc per carton: pcs in one carton takes 1 or more)
    17. `supabase/migrations/20261026000001_multi_barcodes.sql` (an item can have several barcodes when Barcode scanning is on; also fixes the Admin's values of returns to suppliers)
    18. `supabase/migrations/20261103000001_till_invoices.sql` (the till operator's till prints the invoice when sending an order, with its own number, instead of the order slip; the shop admin's approval completes that same invoice without printing it again, unless the order was changed first)
+   19. `supabase/migrations/20261103000002_discount_amount.sql` (a discount can be given as an amount in CDF as well as a percentage; the percentage of an amount is worked out from the total)
 
-   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18). Run it **before** the new app goes live. They keep your data:
+   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 and 19). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.

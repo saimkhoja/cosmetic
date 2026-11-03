@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
-import { cashNotes, ctnTxt, hotSort, marginPct, payment, pcValue, stockValue, takeLocal, totals, unitsOf, usdNotes } from './units';
+import { cashNotes, ctnTxt, hotSort, marginPct, overLimit, payment, pcValue, pctOf, stockValue, takeLocal, totals, unitsOf, usdNotes } from './units';
 import { barcodesOf, custName, findByCode, itemProblem, pickList, scanInQty, splitBarcodes } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
@@ -17,7 +17,15 @@ describe('money', () => {
   });
   it('computes discount and included VAT as the server does', () => {
     const t = totals([{ price: 85500, qty: 1 }, { price: 4000, qty: 1 }], 10, 16);
-    expect(t).toMatchObject({ gross: 89500, disc: 8950, total: 80550, vat: 11110, ht: 69440 });
+    expect(t).toMatchObject({ gross: 89500, disc: 8950, total: 80550, vat: 11110, ht: 69440, pct: 10 });
+  });
+  it('takes a discount as an amount and works out its percentage as the server does', () => {
+    const t = totals([{ price: 4560, qty: 10 }], { amount: 5000 }, 16);
+    expect(t).toMatchObject({ gross: 45600, disc: 5000, total: 40600, pct: 10.96 });
+    expect(totals([{ price: 4560, qty: 10 }], 2.5, 16)).toMatchObject({ disc: 1140, total: 44460, pct: 2.5 });
+    expect(overLimit(totals([{ price: 4560, qty: 10 }], { amount: 14000 }, 16))).toBe(true);
+    expect(overLimit(totals([{ price: 4560, qty: 10 }], { amount: 13680 }, 16))).toBe(false);
+    expect(pctOf(3000, 45600)).toBe(6.58);
   });
 });
 

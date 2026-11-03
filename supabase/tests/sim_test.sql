@@ -769,6 +769,39 @@ reset role;
 select t.ok(exists (select 1 from audit_log where action like 'Invoice ' || t.get('tno2') || '%changed from 9 120 CDF%'), 'the activity log shows the change at approval');
 select t.ok(exists (select 1 from audit_log where action like '%invoice ' || t.get('tno3') || ' printed at the till voided%'), 'rejecting voids the invoice printed at the till');
 
+-- ===== a discount as an amount (its percentage follows from the total) or as a percentage with decimals =====
+select t.put('sno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('sno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('sno3', (select 'GOM-' || code || '-' || lpad((last_seq + 3)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+create function t.dsale(no text, extra jsonb) returns jsonb language sql as $$
+  select jsonb_build_object('id', gen_random_uuid(), 'no', no, 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Tantine Mado',
+    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 10, 'price', 4560))) || extra $$;
+grant execute on function t.dsale(text, jsonb) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.submit_invoice(t.dsale(t.get('sno1'), '{"disc": 5000}'));
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '5000/40600/10.96', 'a discount of 5 000 CDF on 45 600: total 40 600, 10.96%');
+select t.fails(format($$select public.submit_invoice(t.dsale('%s', '{"disc": 14000}'))$$, t.get('sno2')), 'between 0% and 30%', 'a discount amount above 30% is refused');
+select public.submit_invoice(t.dsale(t.get('sno2'), '{"disc_pct": 2.5}'));
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno2')) = '1140/44460/2.50', 'a 2.5% discount: 1 140 CDF, rounded to 10 CDF');
+select public.edit_invoice((select id from invoices where no = t.get('sno1')), '[{"line_no":1,"qty":10}]', 0, 'Discount agreed with the customer', 3000);
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '3000/42600/6.58', 'editing the invoice to a 3 000 CDF discount');
+select t.fails(format($$select public.edit_invoice('%s', '[{"line_no":1,"qty":1}]', 0, 'Fewer items now', 3000)$$, (select id from invoices where no = t.get('sno1'))),
+  'between 0% and 30%', 'a discount amount above 30% of the new total is refused on an edit');
+select public.edit_invoice((select id from invoices where no = t.get('sno1')), '[{"line_no":1,"qty":10}]', 5, 'Back to a percentage');
+select t.ok((select disc || '/' || disc_pct from invoices where no = t.get('sno1')) = '2280/5.00', 'editing back to a percentage still works');
+reset role;
+-- an amount given while approving the till's invoice counts as a change
+select t.put('tno4', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('ord8', gen_random_uuid()::text);
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select public.submit_order(t.tord(t.get('ord8'), t.get('tno4'), 2));
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.submit_invoice(t.tord(t.get('ord8'), t.get('tno4'), 2) || jsonb_build_object('order_id', t.get('ord8'), 'disc', 1000))->>'revised') = 'true', 'a discount given at approval prints the corrected invoice');
+select t.ok((select disc || '/' || total || '/' || revised_from from invoices where no = t.get('tno4')) = '1000/8120/9120', 'the approved invoice keeps the discount and the total the till printed');
+reset role;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

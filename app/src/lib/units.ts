@@ -37,12 +37,20 @@ export function ctnTxt(p: Pick<Product, 'is_bundle' | 'per_carton'>, q: number) 
 }
 
 export interface CartLine { pid: string; ui: number; qty: number }
-/** Totals of a sale: discount rounded to 10 CDF, VAT included in the price. */
-export function totals(lines: { price: number; qty: number }[], dp: number, vatRate: number) {
+/** A discount on an invoice: a percentage, or an amount in CDF whose percentage follows from the total. */
+export type Disc = number | { amount: number };
+export const MAX_DISC = 30;
+/** The percentage of a discount amount, to 2 decimals, as the server stores it. */
+export const pctOf = (amount: number, gross: number) => (gross > 0 ? Math.round((amount * 10000) / gross) / 100 : 0);
+/** Totals of a sale: a percentage discount rounded to 10 CDF (or the amount given), VAT included in the price. */
+export function totals(lines: { price: number; qty: number }[], d: Disc, vatRate: number) {
   const gross = lines.reduce((s, l) => s + l.price * l.qty, 0);
-  const disc = Math.round((gross * (dp || 0)) / 1000) * 10, total = gross - disc, vat = Math.round((total * vatRate) / (100 + vatRate));
-  return { gross, disc, total, vat, ht: total - vat, count: lines.reduce((s, l) => s + l.qty, 0) };
+  const disc = typeof d === 'number' ? Math.round((gross * (d || 0)) / 1000) * 10 : Math.min(gross, Math.max(0, Math.round(d.amount)));
+  const total = gross - disc, vat = Math.round((total * vatRate) / (100 + vatRate));
+  return { gross, disc, total, vat, ht: total - vat, count: lines.reduce((s, l) => s + l.qty, 0), pct: typeof d === 'number' ? d || 0 : pctOf(disc, gross) };
 }
+/** The discount is over the 30% limit (an amount can be after lines are removed). */
+export const overLimit = (t: { gross: number; disc: number }) => t.disc * 100 > t.gross * MAX_DISC;
 export function cartPriced(cart: CartLine[], byId: Map<string, Product>, rate: number) {
   return cart.map((l) => { const p = byId.get(l.pid)!, u = unitsOf(p)[l.ui] ?? unitsOf(p)[0]; return { ...l, p, u, price: toCDF(u.usd, rate) }; });
 }

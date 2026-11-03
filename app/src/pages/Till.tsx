@@ -4,11 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { rpc, rows, supabase } from '../lib/supabase';
-import { cartPriced, cashNotes, hotSet, hotSort, payment, takeLocal, totals, unitLabel, unitNote, unitsOf, usdNotes, type CartLine, type PayIn } from '../lib/units';
+import { cartPriced, cashNotes, hotSet, hotSort, overLimit, payment, takeLocal, totals, unitLabel, unitNote, unitsOf, usdNotes, type CartLine, type Disc, type PayIn } from '../lib/units';
 import { catIcon, custName, findByCode } from '../lib/items';
 import { dt, fCDF, fNum, fUSD, ld, tm, toCDF, today } from '../lib/format';
 import { orderRef, printHTML, receiptHTML, saleCopies } from '../lib/print';
 import { Empty, Modal, Note, useAction, useToast } from '../components/ui';
+import { DiscFields, discProblem } from '../components/Discount';
 import { TicketsModal } from '../components/Tickets';
 import { useDeliveries, useOrders } from '../data/queries';
 import { getDevice, getParked, getSnapshot, nextInvoiceNo, outboxAll, outboxPut, setDevice, setParked, setSnapshot, type Device, type OutboxEntry, type Parked, type Snapshot } from '../offline/store';
@@ -27,9 +28,9 @@ const quotedPrices = (lines: Priced[], o: SaleOrder | null | undefined) => {
   return q.size ? lines.map((l) => { const p = q.get(unitKey(asItem(l))); return p ? { ...l, price: p } : l; }) : lines;
 };
 /** The shop admin changed the invoice printed at the till: other items, quantities, units or prices, or a discount. */
-const changedFrom = (o: SaleOrder, lines: Priced[], dp: number) => {
+const changedFrom = (o: SaleOrder, lines: Priced[], disc: number) => {
   const key = (x: { product_id: string; mult: number; piece: boolean; qty: number; price?: number }) => `${unitKey(x)}:${x.qty}:${x.price}`;
-  return dp > 0 || lines.map((l) => key(asItem(l))).sort().join() !== o.items.map(key).sort().join();
+  return disc > 0 || lines.map((l) => key(asItem(l))).sort().join() !== o.items.map(key).sort().join();
 };
 
 /** Loads the shop's catalogue from the server and keeps it on the device for offline selling. */
@@ -78,7 +79,7 @@ export default function Till() {
   const toast = useToast(), nav = useNavigate();
   const shopId = profile!.shop_id!, isAdmin = profile!.role === 'shopadmin';
   const [snap, setSnap] = useState<Snapshot | null>(null), [dev, setDev] = useState<Device | null>(null), [problem, setProblem] = useState('');
-  const [cart, setCart] = useState<CartLine[]>([]), [dp, setDp] = useState(0), [cat, setCat] = useState('All'), [q, setQ] = useState('');
+  const [cart, setCart] = useState<CartLine[]>([]), [dp, setDp] = useState<Disc>(0), [cat, setCat] = useState('All'), [q, setQ] = useState('');
   const [customer, setCustomer] = useState(''), [custDraft, setCustDraft] = useState(''), [editing, setEditing] = useState<SaleOrder | null>(null), [tickets, setTickets] = useState(false);
   const [pick, setPick] = useState<{ pid: string; k: string | null } | null>(null), [check, setCheck] = useState(false), [disc, setDisc] = useState(false), [reject, setReject] = useState<SaleOrder | null>(null);
   const [last, setLast] = useState<Invoice | null>(null), [view, setView] = useState<Invoice | null>(null), [outbox, setOutbox] = useState<OutboxEntry[]>([]), [flash, setFlash] = useState(false);
@@ -232,21 +233,22 @@ export default function Till() {
   // nothing prints unless the shop admin changed it (then the corrected invoice prints with the same number).
   // An order from a till with the old app has no invoice yet: it gets one from this till and prints here.
   // with the cash step on, pay is what the customer handed over (Francs and maybe dollars); otherwise the exact total in Francs
-  const sell = async (lines: CartLine[], disc: number, cust: string, order: SaleOrder | null, pay?: PayIn) => {
+  const sell = async (lines: CartLine[], disc: Disc, cust: string, order: SaleOrder | null, pay?: PayIn) => {
     if (busy.current || !snap || (!cust && !optCust)) return false;
     if (!dev) { toast('Connect to the internet once to register this till', 'bad'); return false; }
     const pr = quotedPrices(cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate), order);
     if (!pr.length) return false;
-    const tillInv = order?.invoice_no && order.device_id ? order : null, revised = !!tillInv && changedFrom(tillInv, pr, disc);
+    const S = totals(pr, disc, vat), tillInv = order?.invoice_no && order.device_id ? order : null, revised = !!tillInv && changedFrom(tillInv, pr, S.disc);
+    if (overLimit(S)) { toast(discProblem(disc, S.gross), 'warn'); return false; }
     busy.current = true;
     try {
-      const S = totals(pr, disc, vat), tend = pay?.tendered ?? S.total, usd = pay && pay.paid_usd > 0 ? pay : null;
+      const tend = pay?.tendered ?? S.total, usd = pay && pay.paid_usd > 0 ? pay : null;
       if (tend < S.total) { toast(`Cash received is less than the total, ${fCDF(S.total)}`, 'warn'); return false; }
       const no = tillInv ? tillInv.invoice_no! : await nextInvoiceNo(dev), id = tillInv ? tillInv.id : crypto.randomUUID(), t = new Date().toISOString();
       const items = pr.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
-      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: disc, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, paid_usd: usd?.paid_usd ?? 0, paid_cdf: usd ? usd.paid_cdf : tend, change_usd: usd?.change_usd ?? 0, change_cdf: tend - S.total - Math.round((usd?.change_usd ?? 0) * rate), printed: 2, items, edits: [], synced: false,
+      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: S.pct, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, paid_usd: usd?.paid_usd ?? 0, paid_cdf: usd ? usd.paid_cdf : tend, change_usd: usd?.change_usd ?? 0, change_cdf: tend - S.total - Math.round((usd?.change_usd ?? 0) * rate), printed: 2, items, edits: [], synced: false,
         customer: cust, order_id: order?.id ?? null, prepared_by_name: order?.created_by_name ?? null, revised_from: revised ? tillInv!.total ?? null : null };
-      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, disc_pct: disc, tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, mult, piece, qty, price }) => ({ product_id, mult, piece, qty, price })) } });
+      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(typeof disc === 'number' ? { disc_pct: disc } : { disc: S.disc }), tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, mult, piece, qty, price }) => ({ product_id, mult, piece, qty, price })) } });
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
@@ -266,10 +268,11 @@ export default function Till() {
     setCashFor({ total: T.total, info: `${custName(customer)} · ${T.count} ${T.count === 1 ? 'item' : 'items'}`, go: async (t) => { const ok = await sell(cart, dp, customer, null, t); if (ok) resetSale(); return ok; }, cancel: () => {} });
   };
   // approving an order: with the switch on, the cash received is asked first
-  const sellOrder = async (lines: CartLine[], d: number, o: SaleOrder) => {
+  const sellOrder = async (lines: CartLine[], d: Disc, o: SaleOrder) => {
     if (!cashStep) return sell(lines, d, o.customer, o);
-    const pr = quotedPrices(cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate), o), total = totals(pr, d, vat).total;
-    const prints = !o.invoice_no || changedFrom(o, pr, d);
+    const pr = quotedPrices(cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate), o), S = totals(pr, d, vat), total = S.total;
+    if (overLimit(S)) { toast(discProblem(d, S.gross), 'warn'); return false; }
+    const prints = !o.invoice_no || changedFrom(o, pr, S.disc);
     return new Promise<boolean>((done) => setCashFor({ total, prints, info: `${o.invoice_no ? 'Invoice ' + o.invoice_no : 'Order ' + orderRef(o.id)} for ${custName(o.customer)}`, go: async (t) => { const ok = await sell(lines, d, o.customer, o, t); if (ok) done(true); return ok; }, cancel: () => done(false) }));
   };
   // a parked sale waits on this till (it survives a restart) while the next customer is served
@@ -346,11 +349,11 @@ export default function Till() {
         : <Empty i={ready ? 'cart' : 'user'} t={ready ? (codes ? 'Scan or tap an item to add it' : 'Tap an item to add it') : 'Start with the customer name'} tall />}</div>
       <div className="totals">
         <div className="tsum"><div className="sumrows"><div className="row"><span>Subtotal</span><span>{fCDF(T.gross)}</span></div>
-          {T.disc ? <div className="row"><span>Discount {dp}%</span><span>- {fCDF(T.disc)}</span></div> : null}
+          {T.disc ? <div className={`row ${overLimit(T) ? 'bad' : ''}`}><span>Discount {T.pct}%</span><span>- {fCDF(T.disc)}</span></div> : null}
           <div className="row muted"><span>Incl. VAT {vat}%</span><span>{fCDF(T.vat)}</span></div></div>
           <div className="grand"><span>{sells ? 'To pay' : 'Order total'}</span><b>{fCDF(T.total)}</b></div></div>
         <div className={`cact ${isAdmin ? 'three' : ''}`}>
-          {isAdmin ? <button className={`btn ${dp ? 'primary' : ''}`} onClick={() => setDisc(true)} disabled={!cart.length} title="Discount on this invoice" aria-label="Discount on this invoice"><Icon n="tag" /><span>{dp ? `${dp}%` : 'Discount'}</span></button> : null}
+          {isAdmin ? <button className={`btn ${T.disc ? 'primary' : ''}`} onClick={() => setDisc(true)} disabled={!cart.length} title="Discount on this invoice, as a percentage or an amount" aria-label="Discount on this invoice"><Icon n="tag" /><span>{T.disc ? (typeof dp === 'number' ? `${dp}%` : fNum(T.disc)) : 'Discount'}</span></button> : null}
           <button id="park" className="btn" onClick={park} disabled={!priced.length} title="Put this sale aside and serve the next customer"><Icon n="pause" /><span>Park sale</span></button>
           {sells
             ? <button id="paybtn" className="paybtn cash" onClick={pay} disabled={!priced.length || !ready}><Icon n="cash" /> {cashStep ? 'Take payment' : 'Take cash and print'}</button>
@@ -399,7 +402,7 @@ export default function Till() {
           {p.is_bundle ? <Note i="tag">The piece price is the last price set by the Admin. It cannot be changed at the shop.</Note> : null}
         </Modal>); })() : null}
       {check ? <PriceCheck products={snap.products} stock={snap.stock} rate={rate} onClose={() => setCheck(false)} /> : null}
-      {disc ? <DiscModal v={dp} onApply={(v) => { setDp(v); setDisc(false); }} onClose={() => setDisc(false)} /> : null}
+      {disc ? <DiscModal v={dp} gross={T.gross} onApply={(v) => { setDp(v); setDisc(false); }} onClose={() => setDisc(false)} /> : null}
       {reject ? <RejectModal o={reject} onClose={() => setReject(null)} onDone={() => { if (editing?.id === reject.id) setEditing(null); setReject(null); void orders.refetch(); }} /> : null}
       {editing ? <OrderEditor o={editing} init={orderLines(editing)} byId={byId} snap={snap} onClose={() => setEditing(null)} onReject={() => { setReject(editing); }} onApprove={async (lines, d) => { if (await sellOrder(lines, d, editing)) setEditing(null); }} /> : null}
       {cashFor ? <CashModal total={cashFor.total} info={cashFor.info} prints={cashFor.prints !== false} rate={rate} usdPay={usdPay} onClose={() => { cashFor.cancel(); setCashFor(null); }} onPay={async (p) => { if (await cashFor.go(p)) setCashFor(null); }} /> : null}
@@ -480,30 +483,30 @@ function ParkedModal({ list, onResume, onDelete, onClose }: { list: Parked[]; on
 }
 /** The change as given: Francs, or whole dollars plus Francs. */
 const changeText = (inv: Invoice) => (inv.change_usd ? `$${inv.change_usd} + ${fCDF(inv.change_cdf ?? 0)}` : fCDF(inv.change));
-function DiscModal({ v, onApply, onClose }: { v: number; onApply: (v: number) => void; onClose: () => void }) {
-  const [x, setX] = useState(String(v)), [err, setErr] = useState('');
-  const apply = (n: number) => { if (n < 0 || n > 30 || n % 1) { setErr('Discount must be between 0% and 30%'); return; } onApply(n); };
+/** The discount on the sale being made: a percentage or an amount; typing one works out the other from the total. */
+function DiscModal({ v, gross, onApply, onClose }: { v: Disc; gross: number; onApply: (v: Disc) => void; onClose: () => void }) {
+  const [d, setD] = useState<Disc>(v), problem = discProblem(d, gross);
   return (
-    <Modal title="Discount on this invoice" icon="tag" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" onClick={() => apply(parseInt(x) || 0)}><Icon n="check" /> Apply</button></>}>
-      <p>The discount applies to this invoice only, not to any item price. Maximum 30%.</p>
-      <div className="quick">{[0, 5, 10, 15, 20].map((n) => <button key={n} className={v === n ? 'on' : ''} onClick={() => apply(n)}>{n ? n + '%' : 'None'}</button>)}</div>
-      <div className="field"><label>Or type %</label><input type="number" min="0" max="30" className="input" value={x} onChange={(e) => setX(e.target.value)} /></div><div className="lerr">{err}</div>
+    <Modal title="Discount on this invoice" icon="tag" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="dapply" disabled={!!problem} onClick={() => onApply(d)}><Icon n="check" /> Apply</button></>}>
+      <p>The discount applies to this invoice only, not to any item price. Type a percentage or an amount in CDF: the other is worked out from the total, <b style={{ whiteSpace: 'nowrap' }}>{fCDF(gross)}</b>.</p>
+      <div className="quick">{[0, 5, 10, 15, 20].map((n) => <button key={n} className={d === n ? 'on' : ''} onClick={() => onApply(n)}>{n ? n + '%' : 'None'}</button>)}</div>
+      <DiscFields gross={gross} value={d} onChange={setD} />
     </Modal>
   );
 }
 
 /** The shop admin checks and changes an order in its own window; the sale being made on the till stays as it is. */
-function OrderEditor({ o, init, byId, snap, onClose, onReject, onApprove }: { o: SaleOrder; init: { lines: CartLine[]; missing: string[] }; byId: Map<string, Product>; snap: Snapshot; onClose: () => void; onReject: () => void; onApprove: (lines: CartLine[], dp: number) => Promise<void> }) {
-  const [lines, setLines] = useState<CartLine[]>(init.lines), [dp, setDp] = useState(0), [q, setQ] = useState(''), [busy, setBusy] = useState(false);
+function OrderEditor({ o, init, byId, snap, onClose, onReject, onApprove }: { o: SaleOrder; init: { lines: CartLine[]; missing: string[] }; byId: Map<string, Product>; snap: Snapshot; onClose: () => void; onReject: () => void; onApprove: (lines: CartLine[], dp: Disc) => Promise<void> }) {
+  const [lines, setLines] = useState<CartLine[]>(init.lines), [dp, setDp] = useState<Disc>(0), [q, setQ] = useState(''), [busy, setBusy] = useState(false);
   const rate = snap.settings.rate, priced = quotedPrices(cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate), o), T = totals(priced, dp, snap.settings.vat);
-  const ref = o.invoice_no ? 'Invoice ' + o.invoice_no : 'Order ' + orderRef(o.id), prints = !o.invoice_no || changedFrom(o, priced, dp);
+  const ref = o.invoice_no ? 'Invoice ' + o.invoice_no : 'Order ' + orderRef(o.id), prints = !o.invoice_no || changedFrom(o, priced, T.disc), problem = discProblem(dp, T.gross);
   const ql = q.trim().toLowerCase(), found = ql ? snap.products.filter((p) => p.name.toLowerCase().includes(ql)).slice(0, 8) : [];
   const chg = (i: number, d: number) => setLines((c) => c.flatMap((l, k) => (k !== i ? [l] : l.qty + d <= 0 ? [] : [{ ...l, qty: l.qty + d }])));
   const unit = (i: number, ui: number) => setLines((c) => c.map((l, k) => (k === i ? { ...l, ui } : l)));
   const add = (p: Product) => { setLines((c) => { const l = c.find((x) => x.pid === p.id && x.ui === 0); return l ? c.map((x) => (x === l ? { ...x, qty: x.qty + 1 } : x)) : [...c, { pid: p.id, ui: 0, qty: 1 }]; }); setQ(''); };
   return (
     <Modal title={`${ref} for ${custName(o.customer)}`} icon="receipt" wide onClose={onClose} foot={<><button className="btn danger" onClick={onReject}><Icon n="x" /> Reject</button><span className="sp" /><button className="btn" onClick={onClose}>Close</button>
-      <button className="btn primary" id="oapprove" disabled={!priced.length || busy} onClick={() => { setBusy(true); void onApprove(lines, dp).finally(() => setBusy(false)); }}><Icon n={prints ? 'printer' : 'check'} /> {prints ? 'Approve and print' : 'Approve'} {fCDF(T.total)}</button></>}>
+      <button className="btn primary" id="oapprove" disabled={!priced.length || busy || !!problem} onClick={() => { setBusy(true); void onApprove(lines, dp).finally(() => setBusy(false)); }}><Icon n={prints ? 'printer' : 'check'} /> {prints ? 'Approve and print' : 'Approve'} {fCDF(T.total)}</button></>}>
       <p>{o.invoice_no
         ? <>Invoice {o.invoice_no}, printed at the till by {o.created_by_name} at {tm(o.created_at)}. Approved as it is, the sale is complete and nothing prints. If you change quantities or units, add or remove items or give a discount, the corrected invoice prints here with the same number and the copy printed at the till is void. The stock goes down on approval.</>
         : <>Order {orderRef(o.id)}, prepared by {o.created_by_name} at {tm(o.created_at)}. Change quantities or units, add or remove items, then approve: the invoice prints here and the stock goes down.</>}</p>
@@ -515,8 +518,8 @@ function OrderEditor({ o, init, byId, snap, onClose, onReject, onApprove }: { o:
       </tbody></table></div>
       <div className="search" style={{ maxWidth: 'none', margin: '12px 0 6px' }}><Icon n="search" /><input placeholder="Add an item" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       {found.length ? <div className="mchips">{found.map((p) => <button key={p.id} className="chip" onClick={() => add(p)}>+ {p.name}</button>)}</div> : null}
-      <div className="frow" style={{ marginTop: 12 }}><div className="field"><label>Discount on this invoice (%)</label><input className="input" type="number" min="0" max="30" value={dp || ''} placeholder="0" onChange={(e) => setDp(Math.min(30, Math.max(0, parseInt(e.target.value) || 0)))} /></div>
-        <div className="field"><label>Total</label><div style={{ fontSize: 22, fontWeight: 900 }}>{fCDF(T.total)}</div><span className="hint">{T.disc ? `after ${fCDF(T.disc)} discount, ` : ''}VAT included {fCDF(T.vat)}</span></div></div>
+      <div style={{ marginTop: 12 }}><DiscFields id="odisc" gross={T.gross} value={dp} onChange={setDp} /></div>
+      <div className="field" style={{ marginTop: 10 }}><label>Total</label><div style={{ fontSize: 22, fontWeight: 900 }}>{fCDF(T.total)}</div><span className="hint">{T.disc ? `after ${fCDF(T.disc)} discount (${T.pct}%), ` : ''}VAT included {fCDF(T.vat)}</span></div>
     </Modal>
   );
 }
