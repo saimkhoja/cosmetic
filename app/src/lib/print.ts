@@ -75,7 +75,8 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   const rccm = c.rccm ? (/^rccm/i.test(c.rccm) ? c.rccm : 'RCCM ' + c.rccm) : '';
   return `<div class="receipt inv"><div class="c"><div class="big">${esc((c.name || shop.name).toUpperCase())}</div>${rccm ? `<div>${esc(rccm)}</div>` : ''}${c.idnat ? `<div>ID NAT: ${esc(c.idnat)}</div>` : ''}${c.nif ? `<div>N° IMPOT: ${esc(c.nif)}</div>` : ''}<div>${esc((shop.address || c.address || '').toUpperCase())}</div>${c.phone ? `<div>Tél: ${esc(c.phone)}</div>` : ''}</div>
   <div class="c"><span class="rbox">INVOICE # : ${esc(inv.no)}</span></div>
-  <div class="c small">${opt.copy === 'shop' ? 'Copie magasin' : 'Copie client'}${opt.dup ? ' · DUPLICATA' : ''}${ed ? ' · FACTURE MODIFIÉE' : ''}</div>
+  <div class="c small">${opt.copy === 'shop' ? 'Copie magasin' : 'Copie client'}${opt.dup ? ' · DUPLICATA' : ''}${ed || inv.revised_from != null ? ' · FACTURE MODIFIÉE' : ''}</div>
+  ${inv.revised_from != null && !ed ? '<div class="c small">Remplace la facture imprimée à la caisse</div>' : ''}
   ${inv.customer ? `<div class="rl"><b>Customer:</b> ${esc(inv.customer.toUpperCase())}</div>` : ''}
   <div class="rl"><b>Date:</b> ${rDate(inv.t)}&nbsp;&nbsp; <b>Time:</b> ${rTime(inv.t)}</div>
   <table class="ritems"><thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">%</th><th class="r">Total</th></tr></thead>
@@ -175,21 +176,7 @@ export function ticketsHTML(items: { p: Product; copies: number }[], rate: numbe
   return pages.join('<div class="pagebreak"></div>');
 }
 
-/** Order slip printed at the till when the order is sent: the customer takes it to the shop admin, who prints the invoice. */
-type OrderSlip = { ref: string; customer: string; t: string; by: string; lines: { name: string; unit: string; qty: number; price: number }[]; total: number; vat?: number; ht?: number; vat_rate?: number };
-export function orderSlipHTML(o: OrderSlip, c: Company, shop: Shop, copy?: 'client' | 'shop') {
-  return `<div class="receipt"><div class="c"><div class="big">${esc(c.name)}</div><div>${esc(shop.name)}</div></div><hr>
-  <div class="c big">BON DE COMMANDE</div>${copy ? `<div class="c small">${copy === 'shop' ? 'Copie magasin' : 'Copie client'}</div>` : ''}<div class="c small">Ce bon n'est pas une facture. Payez à la caisse.</div><hr>
-  <table><tr><td>Réf.</td><td class="r"><b>${esc(o.ref)}</b></td></tr><tr><td>Date</td><td class="r">${dt(o.t)}</td></tr>${o.customer ? `<tr><td>Client</td><td class="r">${esc(o.customer)}</td></tr>` : ''}<tr><td>Préparé par</td><td class="r">${esc(o.by)}</td></tr></table><hr>
-  <table>${o.lines.map((l) => `<tr><td colspan="2">${esc(l.name)}</td></tr><tr><td>&nbsp;${l.qty} x ${esc(l.unit)} @ ${fCDF(l.price)}</td><td class="r">${fCDF(l.price * l.qty)}</td></tr>`).join('')}</table><hr>
-  ${o.vat_rate ? `<table><tr><td>Total H.T</td><td class="r">${fCDF(o.ht ?? 0)}</td></tr><tr><td>T.V.A ${o.vat_rate}%</td><td class="r">${fCDF(o.vat ?? 0)}</td></tr></table>` : ''}
-  <div class="rtotal"><span>TOTAL À PAYER</span><span>${fCDF(o.total)}</span></div>
-  <div class="c small">Articles : ${sum(o.lines, (l) => l.qty)}. TVA incluse. Montant indicatif ; la facture de la caisse fait foi.</div></div>`;
-}
-/** The order slip twice, customer and shop copies, one page each so the printer cuts between them. */
-export const orderSlipCopies = (o: OrderSlip, c: Company, shop: Shop) =>
-  orderSlipHTML(o, c, shop, 'client') + '<div class="pagebreak"></div>' + orderSlipHTML(o, c, shop, 'shop');
-/** Short reference of an order, the same on the till's slip and in the shop admin's review list. */
+/** Short reference of an order sent by a till with the old app, which printed no invoice for it. */
 export const orderRef = (id: string) => '#' + id.replace(/-/g, '').slice(0, 6).toUpperCase();
 
 /** Stock count sheet: what the system shows, with empty columns to write the physical count. */

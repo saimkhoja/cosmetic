@@ -193,10 +193,11 @@ test('a full day in SIM', async ({ browser }) => {
   await till.locator('.ubtn', { hasText: 'pcs' }).first().click();
   await till.locator('.ptile', { hasText: 'Matte lipstick' }).click();
   await till.locator('.ubtn', { hasText: 'dzn' }).click();
-  await till.getByRole('button', { name: 'Send to shop admin for approval' }).click();
-  await expect(till.getByText(/Order #\w{6} for Mama Nzuzi sent to the shop admin/)).toBeVisible();
-  const orderSlip = (await prints(till)).at(-1)!;                       // the till prints an order slip, not an invoice
-  expect(orderSlip).toContain('BON DE COMMANDE'); expect(orderSlip).toContain('Mama Nzuzi'); expect(orderSlip).not.toContain('FACTURE');
+  await till.getByRole('button', { name: 'Print invoice and send for approval' }).click();
+  await expect(till.getByText(/Invoice GOM-T\d-\d{6} for Mama Nzuzi, .* printed and sent to the shop admin for approval/)).toBeVisible();
+  const tillInv1 = (await prints(till)).at(-1)!;                        // the till prints the invoice itself, customer and shop copies
+  expect(tillInv1).toContain('Customer: MAMA NZUZI'); expect(tillInv1).toContain('Copie client'); expect(tillInv1).toContain('Copie magasin'); expect(tillInv1).not.toContain('BON DE COMMANDE');
+  const noMama = /INVOICE # : (GOM-T\d-\d{6})/.exec(tillInv1)![1];
   await expect(till.locator('.myorders')).toContainText('Waiting for approval', { timeout: 30000 });
   // a second order while offline is kept and sent later
   await tillCtx.setOffline(true);
@@ -205,16 +206,20 @@ test('a full day in SIM', async ({ browser }) => {
   await till.fill('#cust', 'Papa Lokwa'); await till.press('#cust', 'Enter');
   await till.locator('.ptile', { hasText: 'Shea body lotion' }).click();
   await till.locator('.ubtn', { hasText: 'half dzn' }).click();
-  await till.getByRole('button', { name: 'Send to shop admin for approval' }).click();
+  await till.getByRole('button', { name: 'Print invoice and send for approval' }).click();
   await expect(till.locator('.pill')).toContainText('1 saved on device');
   await expect(till.locator('.myorders')).toContainText('Not sent yet');
+  const tillInv2 = (await prints(till)).at(-1)!;                        // printed offline too, with the till's next number
+  const noPapa = /INVOICE # : (GOM-T\d-\d{6})/.exec(tillInv2)![1];
+  expect(tillInv2).toContain('HALF DZN'); expect(tillInv2).toMatch(/82650/); expect(tillInv2).toContain('Total T.T.C - CDF');
+  expect(tillInv2).toContain('Sales Person'); expect(tillInv2).toContain('Customer: PAPA LOKWA');
   await tillCtx.setOffline(false);
   await till.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect(till.locator('.pill')).toContainText('all synced', { timeout: 40000 });
   await till.fill('#cust', 'Tata Mbo'); await till.press('#cust', 'Enter');
   await till.locator('.ptile', { hasText: 'Shea body lotion' }).click();
   await till.locator('.ubtn', { hasText: 'pcs' }).first().click();
-  await till.getByRole('button', { name: 'Send to shop admin for approval' }).click();
+  await till.getByRole('button', { name: 'Print invoice and send for approval' }).click();
 
   // ---- the shop admin reviews from the panel without touching the sale being made:
   //      edits one order and approves it, approves one as it is, rejects one
@@ -227,14 +232,14 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.locator('.modal tbody tr')).toHaveCount(2);
   await shop.locator('.modal tr', { hasText: 'Shea body lotion' }).getByLabel('One more').click();
   await shop.click('#oapprove');
-  await expect(shop.getByText(/Order #\w{6} for Mama Nzuzi approved as GOM-T1-000001/)).toBeVisible();
-  const inv1 = (await prints(shop)).at(-1)!;                            // the shop admin prints the invoice on approval
-  expect(inv1).toContain('Customer: MAMA NZUZI'); expect(inv1).toContain('Grace Mbuyi'); expect(inv1).toContain('Copie magasin');
+  await expect(shop.getByText(new RegExp(`Invoice ${noMama} for Mama Nzuzi changed and approved, .* Printing the corrected invoice`))).toBeVisible();
+  const inv1 = (await prints(shop)).at(-1)!;                            // changed before approving: the corrected invoice prints, same number
+  expect(inv1).toContain(`INVOICE # : ${noMama}`); expect(inv1).toContain('FACTURE MODIFIÉE'); expect(inv1).toContain('Customer: MAMA NZUZI');
+  expect(inv1).toContain('Grace Mbuyi'); expect(inv1).toContain('Copie magasin');
+  const printedBefore = (await prints(shop)).length;
   await review.locator('.rcard', { hasText: 'Papa Lokwa' }).getByRole('button', { name: 'Approve order for Papa Lokwa' }).click();
-  await expect(shop.getByText(/Order #\w{6} for Papa Lokwa approved as GOM-T1-000002/)).toBeVisible();
-  const inv2 = (await prints(shop)).at(-1)!;                            // the invoice in the shop's receipt layout
-  expect(inv2).toContain('INVOICE # : GOM-T1-000002'); expect(inv2).toContain('HALF DZN'); expect(inv2).toMatch(/82650/);
-  expect(inv2).toContain('Total T.T.C - CDF'); expect(inv2).toContain('Sales Person'); expect(inv2).toContain('Customer: PAPA LOKWA');
+  await expect(shop.getByText(new RegExp(`Invoice ${noPapa} for Papa Lokwa approved, .* Sale complete, nothing to print`))).toBeVisible();
+  expect((await prints(shop)).length).toBe(printedBefore);              // approved as printed at the till: nothing prints again
   await expect(shop.locator('#custname')).toHaveText('Counter customer');   // the sale being made is untouched
   await expect(shop.locator('#cart .line')).toHaveCount(1);
   await shop.locator('#cart').getByLabel('Clear sale').click();
@@ -245,7 +250,7 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
   // the till operator sees what was decided
   await till.reload();
-  await expect(till.locator('.myorders')).toContainText('Rejected: Customer left', { timeout: 30000 });
+  await expect(till.locator('.myorders')).toContainText('Rejected, invoice void: Customer left', { timeout: 30000 });
   await expect(till.locator('.morow', { hasText: 'Mama Nzuzi' })).toContainText('Approved');
   // price tickets at the till, with the units chosen
   await till.getByRole('button', { name: 'Tickets' }).click();
@@ -266,7 +271,8 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.locator('.ptile', { hasText: 'Shea body lotion' }).click();
   await shop.locator('.ubtn', { hasText: 'carton' }).click();
   await shop.getByRole('button', { name: 'Take cash and print' }).click();
-  await expect(shop.getByText(/Sale GOM-T1-000003 for Walk-in customer done/)).toBeVisible();
+  await expect(shop.getByText(/Sale GOM-T\d-\d{6} for Walk-in customer done/)).toBeVisible();
+  const noWalk = /Sale (GOM-T\d-\d{6}) for Walk-in customer done/.exec((await shop.getByText(/Sale GOM-T\d-\d{6} for Walk-in customer done/).first().innerText()))![1];
   await expect(shop.locator('.pill')).toContainText('1 saved on device');
   await expect(shop.locator('.ptile', { hasText: 'Shea body lotion' })).toContainText('40 in shop'); // 72 - 2 - 6 - 24
   await shopCtx.setOffline(false);
@@ -290,8 +296,9 @@ test('a full day in SIM', async ({ browser }) => {
   // ---- correct the approved invoice, then the day end report
   await shop.getByRole('link', { name: 'Invoices' }).click();
   await expect(shop.locator('main table.t tbody tr')).toHaveCount(3);
-  await expect(shop.locator('tr', { hasText: 'GOM-T1-000001' })).toContainText('Mama Nzuzi');
-  await shop.locator('tr', { hasText: 'GOM-T1-000001' }).getByTitle('Edit invoice').click();
+  await expect(shop.locator('tr', { hasText: noMama })).toContainText('Mama Nzuzi');
+  await expect(shop.locator('tr', { hasText: noMama })).toContainText('Changed at approval');
+  await shop.locator('tr', { hasText: noMama }).getByTitle('Edit invoice').click();
   await shop.locator('.modal tr', { hasText: 'Matte lipstick' }).locator('input').fill('0');   // customer gave the dozen back
   await expect(shop.locator('.modal')).toContainText('Give back to the customer: 94 050 CDF');
   await shop.fill('#ereason', 'Customer returned the lipsticks');
@@ -330,7 +337,7 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(op.locator('#sttable')).toContainText('RET-0001');
   await shop.getByRole('link', { name: 'Statements' }).click();
   await shop.selectOption('#stacc', { label: 'Cash – SIM Beauté Gombe (CDF)' });
-  await expect(shop.locator('#sttable')).toContainText('GOM-T1-000003');
+  await expect(shop.locator('#sttable')).toContainText(noWalk);
   await expect(shop.locator('#stclose')).toContainText('Dr');
 
   // ---- the shop admin orders stock; the warehouse edits and approves one request and rejects another
@@ -372,18 +379,18 @@ test('a full day in SIM', async ({ browser }) => {
 
   // ---- the shop admin changes a line's unit, deletes an invoice and prints a stock count sheet
   await shop.getByRole('link', { name: 'Invoices' }).click();
-  await shop.locator('tr', { hasText: 'GOM-T1-000003' }).getByTitle('Edit invoice').click();
+  await shop.locator('tr', { hasText: noWalk }).getByTitle('Edit invoice').click();
   await shop.locator('.modal select[data-eu="0"]').selectOption({ label: 'dzn (12)' });
   await shop.locator('.modal input[data-eq="0"]').fill('2');
   await expect(shop.locator('.modal')).toContainText('New total 324 900 CDF');      // 2 dozen at 162 450 CDF instead of 1 carton
   await shop.fill('#ereason', 'Customer took 2 dozen');
   await shop.getByRole('button', { name: 'Save changes' }).click();
   await expect(shop.getByText('Invoice updated')).toBeVisible();
-  await expect(shop.locator('tr', { hasText: 'GOM-T1-000003' })).toContainText('324 900 CDF');
-  await shop.locator('tr', { hasText: 'GOM-T1-000002' }).getByTitle('Delete invoice').click();
+  await expect(shop.locator('tr', { hasText: noWalk })).toContainText('324 900 CDF');
+  await shop.locator('tr', { hasText: noPapa }).getByTitle('Delete invoice').click();
   await shop.fill('#dreason', 'Customer cancelled');
   await shop.click('#delbtn');
-  await expect(shop.getByText('Invoice GOM-T1-000002 deleted')).toBeVisible();
+  await expect(shop.getByText(`Invoice ${noPapa} deleted`)).toBeVisible();
   await expect(shop.locator('main table.t tbody tr')).toHaveCount(2);
   await shop.getByRole('link', { name: 'Stock', exact: true }).click();
   await expect(shop.locator('tr', { hasText: 'Shea body lotion' })).toContainText('68');     // 38 + 24 requested + the 6 pcs of the deleted invoice
@@ -504,7 +511,7 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.locator('#cart .line.on')).toContainText('Shea body lotion');
   await expect(shop.locator('#parked')).toHaveCount(0);
   await shop.getByRole('button', { name: 'Take cash and print' }).click();
-  await expect(shop.getByText(/Sale GOM-T1-\d+ for Walk-in done/)).toBeVisible();
+  await expect(shop.getByText(/Sale GOM-T\d-\d+ for Walk-in done/)).toBeVisible();
   expect((await prints(shop)).at(-1)).not.toContain('Customer:');
   // ---- the till operator sells directly once the Admin allows it
   await admin.getByRole('link', { name: 'Settings' }).click();
@@ -570,7 +577,7 @@ test('a full day in SIM', async ({ browser }) => {
 
   // ---- the Admin sees the activity; disabling the till ends its access
   await admin.getByRole('link', { name: 'Activity' }).click();
-  await expect(admin.getByText(/Invoice GOM-T1-000001 edited/)).toBeVisible();
+  await expect(admin.getByText(new RegExp(`Invoice ${noMama} edited`))).toBeVisible();
   await expect(admin.getByText(/Delivery DEL-0002 received/)).toBeVisible();
   await admin.getByRole('link', { name: 'Users' }).click();
   await admin.locator('tr', { hasText: 'till.gombe' }).getByTitle('Disable account').click();

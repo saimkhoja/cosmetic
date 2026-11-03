@@ -11,8 +11,12 @@ export interface SalePayload {
   customer: string; order_id: string | null;
   items: { product_id: string; mult: number; piece: boolean; qty: number; price: number }[];
 }
-export interface OrderPayload { id: string; customer: string; t: string; items: { product_id: string; mult: number; piece: boolean; qty: number }[] }
-/** A completed sale (shop admin) or an order waiting to reach the shop admin (till operator). */
+/** An order with the invoice the till operator printed: its number, till, rates and the printed prices. */
+export interface OrderPayload {
+  id: string; customer: string; t: string; no: string; device_id: string; rate: number; vat_rate: number;
+  items: { product_id: string; mult: number; piece: boolean; qty: number; price: number }[];
+}
+/** A completed sale (shop admin) or an order, with the invoice printed for it, waiting to reach the shop admin (till operator). */
 export type OutboxEntry =
   | { kind?: 'sale'; id: string; t: string; shop_id: string; payload: SalePayload; invoice: Invoice; error?: string; tries: number }
   | { kind: 'order'; id: string; t: string; shop_id: string; payload: OrderPayload; total: number; created_by: string; error?: string; tries: number };

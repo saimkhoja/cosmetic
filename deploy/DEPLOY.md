@@ -37,8 +37,9 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    15. `supabase/migrations/20261024000001_supplier_returns.sql` (returns to suppliers, and claims for goods a bill charges for but the warehouse did not receive)
    16. `supabase/migrations/20261025000001_one_per_carton.sql` (an item can come one pc per carton: pcs in one carton takes 1 or more)
    17. `supabase/migrations/20261026000001_multi_barcodes.sql` (an item can have several barcodes when Barcode scanning is on; also fixes the Admin's values of returns to suppliers)
+   18. `supabase/migrations/20261103000001_till_invoices.sql` (the till operator's till prints the invoice when sending an order, with its own number, instead of the order slip; the shop admin's approval completes that same invoice without printing it again, unless the order was changed first)
 
-   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 17). Run it **before** the new app goes live. They keep your data:
+   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
@@ -156,7 +157,7 @@ If the update has new files in `supabase/migrations/`, run `supabase db push` fr
 - **One-tap printing**: by default the browser shows its print dialog. To print straight to the receipt printer, set it as the Windows default printer and start Chrome with `--kiosk-printing`, for example a desktop shortcut to
   `"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing --app=https://your-domain/till`
   Close every Chrome window before using the shortcut: the flag only takes effect when Chrome starts fresh.
-- **Auto-cut**: invoices, order slips and day end slips print on an 80 mm page as long as the receipt, one page per copy (customer and shop). Install the printer maker's Windows driver (not "Generic / Text Only") and in the printer's **Printing preferences** set the paper to the 80 mm roll and **Paper cut** to cut at the end of each page (on some drivers "Cut each page" or "Page end cut"; on Xprinter, *Printer Settings → Paper Cutter: Cut paper per page* and *Paper Saving: Both*, set under Advanced → Printing Defaults so it applies to every Windows user). Each copy is a page, so cutting per job would leave the copies joined. Each copy then prints and is cut just under its last line, with no print window.
+- **Auto-cut**: invoices and day end slips print on an 80 mm page as long as the receipt, one page per copy (customer and shop). Install the printer maker's Windows driver (not "Generic / Text Only") and in the printer's **Printing preferences** set the paper to the 80 mm roll and **Paper cut** to cut at the end of each page (on some drivers "Cut each page" or "Page end cut"; on Xprinter, *Printer Settings → Paper Cutter: Cut paper per page* and *Paper Saving: Both*, set under Advanced → Printing Defaults so it applies to every Windows user). Each copy is a page, so cutting per job would leave the copies joined. Each copy then prints and is cut just under its last line, with no print window.
 - **Without internet** the till keeps selling and printing. Sales are kept on the till and sent automatically when the connection returns; the pill at the top shows how many are waiting. Do not clear the browser data on a till that shows sales waiting.
 
 ## 6. Another client (a separate installation)

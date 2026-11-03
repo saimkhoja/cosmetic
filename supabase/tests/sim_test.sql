@@ -721,6 +721,54 @@ select t.fails($$select public.save_rate('sales', 3000)$$, 'permission', 'only t
 reset role;
 update settings set rate = 2850, book_rate = 2850;
 
+-- ===== the till operator prints the invoice; the shop admin's approval completes it without a second invoice =====
+-- the till operator's till (T1) numbers the invoice; the order keeps the number, till, rates and printed prices
+select t.put('tno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('tno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('tno3', (select 'GOM-' || code || '-' || lpad((last_seq + 3)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('stk0', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid));
+select t.put('ord5', gen_random_uuid()::text), t.put('ord6', gen_random_uuid()::text), t.put('ord7', gen_random_uuid()::text);
+create function t.tord(id text, no text, qty int) returns jsonb language sql as $$
+  select jsonb_build_object('id', id, 'customer', 'Maman Ngalula', 'no', no, 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16, 't', now(),
+    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', qty, 'price', 4560))) $$;
+grant execute on function t.tord(text, text, int) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.ok((public.submit_order(t.tord(t.get('ord5'), t.get('tno1'), 2))->>'status') = 'ok', 'till operator sends the order with the invoice it printed');
+select t.ok((public.submit_order(t.tord(t.get('ord5'), t.get('tno1'), 2))->>'status') = 'duplicate', 'the same order sent twice is saved once');
+select t.fails(format($$select public.submit_order(t.tord('%s', '%s', 1))$$, gen_random_uuid(), t.get('tno1')), 'already used', 'an invoice number is used once');
+select t.fails(format($$select public.submit_order(t.tord('%s', 'GOM-T9-000001', 1))$$, gen_random_uuid()), 'does not match', 'the number must be this till''s');
+select t.fails(format($$select public.submit_order(t.tord('%s', '%s', 1) || jsonb_build_object('items', jsonb_build_array(jsonb_build_object('product_id', '%s', 'mult', 1, 'qty', 1))))$$, gen_random_uuid(), t.get('tno2'), t.get('lotion')),
+  'Price missing', 'the printed invoice needs a price on every line');
+select public.submit_order(t.tord(t.get('ord6'), t.get('tno2'), 2));
+select public.submit_order(t.tord(t.get('ord7'), t.get('tno3'), 1));
+reset role;
+select t.ok((select invoice_no || '/' || total || '/' || rate from sale_orders where id = t.get('ord5')::uuid) = t.get('tno1') || '/9120/2850.00', 'the order keeps the invoice number, the printed total and the rate');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('stk0')::int, 'printing the invoice at the till takes no stock');
+select t.ok(not exists (select 1 from invoices where no in (t.get('tno1'), t.get('tno2'), t.get('tno3'))), 'no invoice until the shop admin approves');
+select t.ok((select last_seq from devices where id = t.get('dev1')::uuid) = right(t.get('tno3'), 6)::int, 'the till''s invoice counter is remembered on the server');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+-- approving with another number (the shop admin's own till) is refused: the order already has its invoice
+select t.fails(format($$select public.submit_invoice(t.tord('%s', 'GOM-T2-000099', 2) || jsonb_build_object('device_id', '%s', 'order_id', '%s'))$$, gen_random_uuid(), t.get('dev2'), t.get('ord5')),
+  'printed at the till as invoice', 'approving uses the number printed at the till');
+-- approved as printed: the sale is complete, nothing is marked changed
+select t.ok((public.submit_invoice(t.tord(t.get('ord5'), t.get('tno1'), 2) || jsonb_build_object('order_id', t.get('ord5')))->>'revised') = 'false', 'shop admin approves the order as printed');
+select t.ok((select status || '/' || (invoice_id = t.get('ord5')::uuid)::text from sale_orders where id = t.get('ord5')::uuid) = 'approved/true', 'the order is approved and linked to its invoice');
+select t.ok((select count(*) || '/' || bool_and(revised_from is null) || '/' || min(prepared_by_name) || '/' || min(cashier_name) from invoices where no = t.get('tno1')) = '1/true/Grace Mbuyi/Patrick Kabongo',
+  'one invoice with the till''s number, prepared by the till operator, cashed by the shop admin');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('stk0')::int - 2, 'the stock goes down on approval');
+-- changed at approval (2 pcs to 3): the same number, one invoice, marked changed with the total the till printed
+select t.ok((public.submit_invoice(t.tord(t.get('ord6'), t.get('tno2'), 3) || jsonb_build_object('order_id', t.get('ord6')))->>'revised') = 'true', 'shop admin changes the order and approves it');
+select t.ok((select count(*) || '/' || min(revised_from) || '/' || min(total) from invoices where no = t.get('tno2')) = '1/9120/13680', 'changed at approval: one invoice, same number, the printed total kept');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('stk0')::int - 5, 'the stock follows the changed invoice');
+-- rejected: the number printed at the till is void and never becomes an invoice
+select public.reject_order(t.get('ord7')::uuid, 'Customer left');
+select t.ok(not exists (select 1 from invoices where no = t.get('tno3')), 'a rejected order makes no invoice');
+reset role;
+select t.ok(exists (select 1 from audit_log where action like 'Invoice ' || t.get('tno2') || '%changed from 9 120 CDF%'), 'the activity log shows the change at approval');
+select t.ok(exists (select 1 from audit_log where action like '%invoice ' || t.get('tno3') || ' printed at the till voided%'), 'rejecting voids the invoice printed at the till');
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
