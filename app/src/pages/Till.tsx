@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { rpc, rows, supabase } from '../lib/supabase';
-import { cartPriced, cashNotes, hotSet, hotSort, overLimit, payment, takeLocal, totals, unitLabel, unitNote, unitsOf, usdNotes, type CartLine, type Disc, type PayIn } from '../lib/units';
+import { CARTON_PARTS, cartPriced, cashNotes, hotSet, hotSort, overLimit, payment, takeLocal, totals, unitLabel, unitNote, unitsOf, usdNotes, type CartLine, type Disc, type PayIn } from '../lib/units';
 import { catIcon, custName, findByCode } from '../lib/items';
 import { dt, fCDF, fNum, fUSD, ld, tm, toCDF, today } from '../lib/format';
 import { orderRef, printHTML, receiptHTML, saleCopies } from '../lib/print';
@@ -16,12 +16,16 @@ import { getDevice, getParked, getSnapshot, nextInvoiceNo, outboxAll, outboxPut,
 import { isNetworkError, startSync, syncOutbox } from '../offline/sync';
 import type { Category, Invoice, Product, Rank, SaleOrder, Settings, Shop, StockRow } from '../lib/types';
 
-const SHORT: Record<string, string> = { 'half dzn': '½ dz', dzn: 'dz', carton: 'ctn' };
+const SHORT: Record<string, string> = { 'half dzn': '½ dz', dzn: 'dz', carton: 'ctn', 'half ctn': '½ ctn', 'quarter ctn': '¼ ctn' };
 /** A line of the sale: one item in one unit. */
 const keyOf = (l: { pid: string; ui: number }) => l.pid + ':' + l.ui;
 type Priced = ReturnType<typeof cartPriced>[number];
-const unitKey = (x: { product_id: string; mult: number; piece: boolean }) => `${x.product_id}:${x.piece ? 0 : x.mult}:${!!x.piece}`;
-const asItem = (l: Priced) => ({ product_id: l.pid, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price });
+// a unit by its name: a half carton can be as many pcs as a dozen (lines saved without a name fall back to their pcs)
+const unitKey = (x: { product_id: string; mult: number; piece: boolean; unit?: string }) => `${x.product_id}:${x.piece ? 'piece' : x.unit ?? 'x' + x.mult}`;
+const asItem = (l: Priced) => ({ product_id: l.pid, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price });
+/** The unit of an order line among the item's units today: by name, or by pcs for lines saved without one. */
+const unitIndex = (p: Product, it: { mult: number; piece: boolean; unit?: string }) =>
+  unitsOf(p).findIndex((u) => (it.piece ? !!u.piece : !u.piece && (it.unit ? u.u === it.unit : u.mult === it.mult && !CARTON_PARTS.includes(u.u))));
 /** A line of an order keeps the price printed on the till operator's invoice while it is in the same item and unit. */
 const quotedPrices = (lines: Priced[], o: SaleOrder | null | undefined) => {
   const q = new Map((o?.items ?? []).filter((i) => i.price).map((i) => [unitKey(i), i.price!]));
@@ -29,7 +33,7 @@ const quotedPrices = (lines: Priced[], o: SaleOrder | null | undefined) => {
 };
 /** The shop admin changed the invoice printed at the till: other items, quantities, units or prices, or a discount. */
 const changedFrom = (o: SaleOrder, lines: Priced[], disc: number) => {
-  const key = (x: { product_id: string; mult: number; piece: boolean; qty: number; price?: number }) => `${unitKey(x)}:${x.qty}:${x.price}`;
+  const key = (x: { product_id: string; mult: number; piece: boolean; unit?: string; qty: number; price?: number }) => `${unitKey(x)}:${x.qty}:${x.price}`;
   return disc > 0 || lines.map((l) => key(asItem(l))).sort().join() !== o.items.map(key).sort().join();
 };
 
@@ -150,7 +154,7 @@ export default function Till() {
   const approvedHere = new Set(outbox.flatMap((e) => (e.kind !== 'order' && e.payload.order_id ? [e.payload.order_id] : [])));
   const toReview = (orders.data ?? []).filter((o) => o.status === 'pending' && !approvedHere.has(o.id));
   const toReceive = (dels.data ?? []).filter((d) => d.status === 'pending').length;
-  const orderTotal = (o: SaleOrder) => o.total ?? o.items.reduce((s, it) => { const p = byId.get(it.product_id); if (!p) return s; const u = unitsOf(p).find((x) => (it.piece ? !!x.piece : !x.piece && x.mult === it.mult)); return s + (u ? toCDF(u.usd, rate) * it.qty : 0); }, 0);
+  const orderTotal = (o: SaleOrder) => o.total ?? o.items.reduce((s, it) => { const p = byId.get(it.product_id); if (!p) return s; const u = unitsOf(p)[unitIndex(p, it)]; return s + (u ? toCDF(u.usd, rate) * it.qty : 0); }, 0);
 
   const startCustomer = () => { const c = custDraft.trim().replace(/\s+/g, ' ').slice(0, 60); if (!c) { if (optCust) scan.current?.focus(); else toast('Type the customer name, then press Enter', 'warn'); return; } setCustomer(c); setCustDraft(''); setTimeout(() => scan.current?.focus(), 50); };
   const resetSale = () => { setCart([]); setDp(0); setCustomer(''); setSel(null); };
@@ -203,7 +207,7 @@ export default function Till() {
     const lines: CartLine[] = [], missing: string[] = [];
     for (const it of o.items) {
       const p = byId.get(it.product_id); if (!p) { missing.push('an item no longer sold'); continue; }
-      const ui = unitsOf(p).findIndex((u) => (it.piece ? !!u.piece : !u.piece && u.mult === it.mult));
+      const ui = unitIndex(p, it);
       if (ui < 0) missing.push(p.name); else lines.push({ pid: p.id, ui, qty: it.qty });
     }
     return { lines, missing };
@@ -221,7 +225,7 @@ export default function Till() {
       const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: T.gross, disc_pct: 0, disc: 0, total: T.total, vat: T.vat, ht: T.ht,
         tendered: T.total, change: 0, printed: 2, items, edits: [], synced: false, customer, order_id: id, prepared_by_name: null };
       await outboxPut({ kind: 'order', id, t, shop_id: shopId, tries: 0, total: T.total, created_by: profile!.id,
-        payload: { id, customer, t, no, device_id: dev.id, rate, vat_rate: vat, items: items.map(({ product_id, mult, piece, qty, price }) => ({ product_id, mult, piece, qty, price })) } });
+        payload: { id, customer, t, no, device_id: dev.id, rate, vat_rate: vat, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
       printHTML(saleCopies(inv, snap.settings.company, snap.shop));
       toast(`Invoice ${no} for ${custName(customer)}, ${fCDF(T.total)}, printed and sent to the shop admin for approval.`);
       resetSale(); void syncOutbox();
@@ -248,7 +252,7 @@ export default function Till() {
       const items = pr.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
       const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: S.pct, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, paid_usd: usd?.paid_usd ?? 0, paid_cdf: usd ? usd.paid_cdf : tend, change_usd: usd?.change_usd ?? 0, change_cdf: tend - S.total - Math.round((usd?.change_usd ?? 0) * rate), printed: 2, items, edits: [], synced: false,
         customer: cust, order_id: order?.id ?? null, prepared_by_name: order?.created_by_name ?? null, revised_from: revised ? tillInv!.total ?? null : null };
-      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(typeof disc === 'number' ? { disc_pct: disc } : { disc: S.disc }), tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, mult, piece, qty, price }) => ({ product_id, mult, piece, qty, price })) } });
+      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(typeof disc === 'number' ? { disc_pct: disc } : { disc: S.disc }), tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
@@ -398,7 +402,7 @@ export default function Till() {
       {pick ? (() => { const p = byId.get(pick.pid)!, s = st(p); return (
         <Modal title={pick.k ? 'Change the unit' : 'How is it sold?'} icon={p.is_bundle ? 'gift' : 'layers'} onClose={() => setPick(null)} foot={<button className="btn" onClick={() => setPick(null)}>Cancel</button>}>
           <p><b>{p.name}</b><br /><span className="code">{s.qty >= 0 ? s.qty : Math.abs(s.qty) + ' on order'} {p.stock_unit} in the shop{p.is_bundle ? `, ${s.open_pieces} pieces sold from an open set` : ''}</span></p>
-          <div className="ugrid">{unitsOf(p).map((u, i) => <button key={i} className="ubtn" onClick={() => { setPick(null); if (pick.k) setUnit(pick.k, i); else add(pick.pid, i); }}><b>{unitLabel(u)}</b><span>{unitNote(p, u)}</span><em>{fCDF(toCDF(u.usd, rate))}</em></button>)}</div>
+          <div className="ugrid">{unitsOf(p).map((u, i) => ({ u, i })).sort((a, b) => a.u.mult - b.u.mult).map(({ u, i }) => <button key={i} className="ubtn" onClick={() => { setPick(null); if (pick.k) setUnit(pick.k, i); else add(pick.pid, i); }}><b>{unitLabel(u)}</b><span>{unitNote(p, u)}</span><em>{fCDF(toCDF(u.usd, rate))}</em></button>)}</div>
           {p.is_bundle ? <Note i="tag">The piece price is the last price set by the Admin. It cannot be changed at the shop.</Note> : null}
         </Modal>); })() : null}
       {check ? <PriceCheck products={snap.products} stock={snap.stock} rate={rate} onClose={() => setCheck(false)} /> : null}

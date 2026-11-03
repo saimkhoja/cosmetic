@@ -145,7 +145,7 @@ function EditInvoice({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
   const line = (k: number) => {
     const it = inv.items[k], p = byId.get(it.product_id), u = ui[k] >= 0 ? opts(p)[ui[k]] : undefined;
     const price = u ? toCDF(u.usd, inv.rate) : it.price, q = Math.max(0, parseInt(qty[k]) || 0);
-    return { ...it, unit: u ? (u.piece ? 'piece' : u.u) : it.unit, mult: u ? (u.piece ? 0 : u.mult) : it.mult, piece: u ? !!u.piece : it.piece, price, qty: q, changed: !!u && (!!u.piece !== it.piece || (u.piece ? 0 : u.mult) !== it.mult) };
+    return { ...it, unit: u ? (u.piece ? 'piece' : u.u) : it.unit, mult: u ? (u.piece ? 0 : u.mult) : it.mult, piece: u ? !!u.piece : it.piece, price, qty: q, changed: !!u && ((u.piece ? 'piece' : u.u) !== (it.piece ? 'piece' : it.unit) || (u.piece ? 0 : u.mult) !== it.mult) };
   };
   const lines = inv.items.map((_, k) => line(k)).filter((l) => l.qty > 0);
   const T = totals(lines, dp, inv.vat_rate), d = T.total - inv.total;
@@ -153,7 +153,7 @@ function EditInvoice({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
     if (!lines.length) throw new Error('Keep at least one line on the invoice');
     if (reason.trim().length < 4) throw new Error('Write a short reason for the change');
     const problem = discProblem(dp, T.gross); if (problem) throw new Error(problem);
-    await rpc('edit_invoice', { p_id: inv.id, p_lines: inv.items.map((it, k) => { const l = line(k); return l.changed ? { line_no: it.line_no, qty: l.qty, mult: l.mult, piece: l.piece } : { line_no: it.line_no, qty: l.qty }; }), p_disc: typeof dp === 'number' ? dp : 0, ...(typeof dp === 'number' ? {} : { p_disc_amount: T.disc }), p_reason: reason });
+    await rpc('edit_invoice', { p_id: inv.id, p_lines: inv.items.map((it, k) => { const l = line(k); return l.changed ? { line_no: it.line_no, qty: l.qty, unit: l.unit, mult: l.mult, piece: l.piece } : { line_no: it.line_no, qty: l.qty }; }), p_disc: typeof dp === 'number' ? dp : 0, ...(typeof dp === 'number' ? {} : { p_disc_amount: T.disc }), p_reason: reason });
     await refresh('invoices', 'stock', 'report', 'audit'); toast('Invoice updated. Print a duplicate if the customer needs it.'); onClose();
   });
   return (

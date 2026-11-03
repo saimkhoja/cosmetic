@@ -2,14 +2,21 @@ import type { Product, Rank } from './types';
 import { toCDF } from './format';
 
 export interface Unit { u: string; mult: number; piece?: boolean; usd: number }
+/** Parts of a carton: sold at that part of the carton price, carried by name (a half carton can be as many pcs as a dozen). */
+export const CARTON_PARTS = ['half ctn', 'quarter ctn'];
 
-/** Selling units for an item, in the same order the server checks them. */
+/** Selling units for an item. The parts of a carton come last so the units of a sale kept on the till stay the same,
+ *  and only when they are a different number of pcs from the units the item already sells (a half carton of 24 is a dozen). */
 export function unitsOf(p: Product): Unit[] {
   if (p.is_bundle) return [{ u: 'set', mult: 1, usd: p.price_usd }, { u: 'piece', mult: 0, piece: true, usd: p.piece_usd }];
   const u: Unit[] = p.price_usd > 0 ? [{ u: 'pcs', mult: 1, usd: p.price_usd }] : [];
   if (p.half_dozen_usd > 0 && p.per_carton !== 6) u.push({ u: 'half dzn', mult: 6, usd: p.half_dozen_usd });
   if (p.dozen_usd > 0 && p.per_carton !== 12) u.push({ u: 'dzn', mult: 12, usd: p.dozen_usd });
   if (p.carton_usd > 0) u.push({ u: 'carton', mult: p.per_carton, usd: p.carton_usd });
+  // a half carton needs an even number of pcs to the carton, a quarter carton a multiple of 4; mirrors app.unit_named
+  const sold = new Set(u.map((x) => x.mult)), half = p.per_carton / 2, quarter = p.per_carton / 4;
+  if (p.carton_usd > 0 && p.per_carton >= 2 && p.per_carton % 2 === 0 && !sold.has(half)) u.push({ u: 'half ctn', mult: half, usd: p.carton_usd / 2 });
+  if (p.carton_usd > 0 && p.per_carton >= 4 && p.per_carton % 4 === 0 && !sold.has(quarter)) u.push({ u: 'quarter ctn', mult: quarter, usd: p.carton_usd / 4 });
   return u;
 }
 export const unitLabel = (u: Unit) => (u.piece ? '1 piece' : u.u);

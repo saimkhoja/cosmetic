@@ -802,6 +802,60 @@ select t.ok((public.submit_invoice(t.tord(t.get('ord8'), t.get('tno4'), 2) || js
 select t.ok((select disc || '/' || total || '/' || revised_from from invoices where no = t.get('tno4')) = '1000/8120/9120', 'the approved invoice keeps the discount and the total the till printed');
 reset role;
 
+-- ===== half and quarter cartons: half and a quarter of the carton price, only when a different number of pcs =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('cream', public.save_product('{"name":"Test cream","category":"Skin care","carton_cost":36,"per_carton":36,"pc":1.5,"dzn":16,"ctn":50,"reorder":0}')::text);
+reset role;
+select t.put('hp', (select app.unit_price(p, 'half ctn', 2850)::text from products p where id = t.get('cream')::uuid));
+select t.put('qp', (select app.unit_price(p, 'quarter ctn', 2850)::text from products p where id = t.get('cream')::uuid));
+select t.ok(t.get('hp')::bigint = 71250 and t.get('qp')::bigint = 35630, 'half carton 71 250 and quarter carton 35 630 CDF: half and a quarter of 142 500, rounded to 10 CDF');
+select t.put('cno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('cno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('stk1', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cream')::uuid));
+create function t.csale(no text, lines jsonb) returns jsonb language sql as $$
+  select jsonb_build_object('id', gen_random_uuid(), 'no', no, 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Maman Ngalula', 'items', lines) $$;
+grant execute on function t.csale(text, jsonb) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+-- 36 to the carton: a half carton is 18 pcs and a quarter carton 9, sold beside the dozen
+select public.submit_invoice(t.csale(t.get('cno1'), jsonb_build_array(
+  jsonb_build_object('product_id', t.get('cream'), 'unit', 'half ctn', 'mult', 18, 'qty', 1, 'price', t.get('hp')::bigint),
+  jsonb_build_object('product_id', t.get('cream'), 'unit', 'quarter ctn', 'mult', 9, 'qty', 2, 'price', t.get('qp')::bigint),
+  jsonb_build_object('product_id', t.get('cream'), 'mult', 12, 'qty', 1, 'price', 45600))));
+select t.ok((select string_agg(i.unit || ':' || i.mult || ':' || i.price, ',' order by i.line_no) from invoice_items i join invoices v on v.id = i.invoice_id where v.no = t.get('cno1'))
+  = 'half ctn:18:' || t.get('hp') || ',quarter ctn:9:' || t.get('qp') || ',dzn:12:45600', 'half carton, quarter carton and dozen on one invoice, each at its own price');
+select t.ok(not (select price_flag from invoices where no = t.get('cno1')), 'half and quarter carton prices match the price list');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cream')::uuid) = t.get('stk1')::int - 18 - 18 - 12, 'stock goes down by the pcs of each part of a carton');
+select t.fails(format($$select public.submit_invoice(t.csale('%s', jsonb_build_array(jsonb_build_object('product_id', '%s', 'unit', 'half ctn', 'mult', 12, 'qty', 1, 'price', 1000))))$$, t.get('cno2'), t.get('cream')),
+  'cannot be sold by the half carton', 'a half carton must be half the pcs of a carton');
+-- 24 to the carton (the lotion): a half carton is the dozen and a quarter carton the half dozen, so neither is sold
+select t.fails(format($$select public.submit_invoice(t.csale('%s', jsonb_build_array(jsonb_build_object('product_id', '%s', 'unit', 'half ctn', 'mult', 12, 'qty', 1, 'price', 1000))))$$, t.get('cno2'), t.get('lotion')),
+  'sell it by the dozen', 'no half carton when it is a dozen');
+select t.fails(format($$select public.submit_invoice(t.csale('%s', jsonb_build_array(jsonb_build_object('product_id', '%s', 'unit', 'quarter ctn', 'mult', 6, 'qty', 1, 'price', 1000))))$$, t.get('cno2'), t.get('lotion')),
+  'sell it by the half dozen', 'no quarter carton when it is a half dozen');
+select t.fails(format($$select public.submit_invoice(t.csale('%s', jsonb_build_array(jsonb_build_object('product_id', '%s', 'unit', 'quarter ctn', 'mult', 1, 'qty', 1, 'price', 1000))))$$, t.get('cno2'), t.get('brush')),
+  'not sold by the carton', 'a mixed set is not sold by the carton');
+-- an invoice line changed from the dozen to a half carton: 18 pcs at the half carton price
+select public.edit_invoice((select id from invoices where no = t.get('cno1')), '[{"line_no":1,"qty":1},{"line_no":2,"qty":2},{"line_no":3,"qty":1,"unit":"half ctn","mult":18}]', 0, 'Sold as a half carton');
+select t.ok((select i.unit || ':' || i.mult || ':' || i.price from invoice_items i join invoices v on v.id = i.invoice_id where v.no = t.get('cno1') and i.line_no = 3) = 'half ctn:18:' || t.get('hp'), 'an invoice line can change from a dozen to a half carton');
+reset role;
+-- the till operator's invoice keeps the unit's name; approving it as printed changes nothing
+select t.put('tno5', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('ord9', gen_random_uuid()::text);
+create function t.hord(id text, no text) returns jsonb language sql as $$
+  select jsonb_build_object('id', id, 'customer', 'Maman Ngalula', 'no', no, 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16,
+    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cream'), 'unit', 'half ctn', 'mult', 18, 'qty', 1, 'price', t.get('hp')::bigint))) $$;
+grant execute on function t.hord(text, text) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select public.submit_order(t.hord(t.get('ord9'), t.get('tno5')));
+select t.ok((select items->0->>'unit' from sale_orders where id = t.get('ord9')::uuid) = 'half ctn', 'the order keeps the half carton by name');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.submit_invoice(t.hord(t.get('ord9'), t.get('tno5')) || jsonb_build_object('order_id', t.get('ord9')))->>'revised') = 'false', 'a half carton approved as printed is not a change');
+select t.ok((select i.unit from invoice_items i join invoices v on v.id = i.invoice_id where v.no = t.get('tno5')) = 'half ctn', 'the approved invoice sells the half carton');
+reset role;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

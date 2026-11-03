@@ -31,7 +31,7 @@ export interface Delivery {
   status: 'pending' | 'received' | 'cancelled'; received_at: string | null; received_by_name: string | null; received_note: string | null;
   delivery_items: DeliveryItem[]; delivery_edits: DeliveryEdit[];
 }
-export interface OrderItem { product_id: string; mult: number; piece: boolean; qty: number; price?: number }
+export interface OrderItem { product_id: string; mult: number; piece: boolean; qty: number; price?: number; unit?: string }
 export interface SaleOrder {
   id: string; shop_id: string; customer: string; items: OrderItem[]; status: 'pending' | 'approved' | 'rejected';
   created_by: string; created_by_name: string; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null; reason: string | null; invoice_id: string | null;

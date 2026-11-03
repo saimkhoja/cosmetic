@@ -11,12 +11,12 @@ export interface SalePayload {
   /** the discount: a percentage, or an amount in CDF */
   disc_pct?: number; disc?: number;
   customer: string; order_id: string | null;
-  items: { product_id: string; mult: number; piece: boolean; qty: number; price: number }[];
+  items: { product_id: string; unit?: string; mult: number; piece: boolean; qty: number; price: number }[];
 }
 /** An order with the invoice the till operator printed: its number, till, rates and the printed prices. */
 export interface OrderPayload {
   id: string; customer: string; t: string; no: string; device_id: string; rate: number; vat_rate: number;
-  items: { product_id: string; mult: number; piece: boolean; qty: number; price: number }[];
+  items: { product_id: string; unit?: string; mult: number; piece: boolean; qty: number; price: number }[];
 }
 /** A completed sale (shop admin) or an order, with the invoice printed for it, waiting to reach the shop admin (till operator). */
 export type OutboxEntry =
