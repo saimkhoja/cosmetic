@@ -255,7 +255,7 @@ main.posmain{padding:14px;max-width:none}
 .ptile:active{transform:scale(.97)}
 .ptile:disabled{opacity:.45;cursor:not-allowed}
 /* the current sale: one row per line, # · item · qty · price · amount · remove */
-.cart{--lcols:24px minmax(0,1fr) 104px 66px 84px 32px;container-type:inline-size;background:var(--card);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;box-shadow:var(--shadow)}
+.cart{--lcols:24px minmax(0,1fr) 124px 66px 84px 32px;container-type:inline-size;background:var(--card);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;box-shadow:var(--shadow)}
 .cart-h{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
 .cart-h b{display:flex;gap:8px;align-items:center;font-size:17px;margin-right:auto;white-space:nowrap}
 .cart-h b svg{color:var(--blue)}
@@ -280,9 +280,12 @@ main.posmain{padding:14px;max-width:none}
 .qty{display:flex;align-items:center;gap:6px}
 .qty button{width:44px;height:44px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);font-size:21px;display:grid;place-items:center}
 .qty b{min-width:34px;text-align:center;font-size:19px}
+.qty .qin{width:58px;height:44px;padding:0 2px;text-align:center;font:inherit;font-size:19px;font-weight:800;color:var(--text);background:var(--card);border:1.5px solid var(--line);border-radius:12px}
+.qty .qin:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-l)}
 .line .qty{gap:3px;justify-content:center}
 .line .qty button{width:34px;height:34px;border-radius:10px;font-size:17px;background:var(--card)}
 .line .qty b{min-width:28px;font-size:17px}
+.line .qty .qin{width:48px;height:34px;font-size:17px;border-radius:10px}
 .rm{justify-self:end;width:32px;height:32px;border-radius:10px;border:0;background:var(--bad-l);color:var(--bad);display:grid;place-items:center;font-size:17px}
 /* a narrow sale panel: each line on two rows (name and amount, then qty, price and remove) */
 @container (max-width:480px){

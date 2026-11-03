@@ -10,6 +10,7 @@ import { dt, fCDF, fNum, fUSD, ld, tm, toCDF, today } from '../lib/format';
 import { orderRef, printHTML, receiptHTML, saleCopies } from '../lib/print';
 import { Empty, Modal, Note, useAction, useToast } from '../components/ui';
 import { DiscFields, discProblem } from '../components/Discount';
+import { QtyBox } from '../components/QtyBox';
 import { TicketsModal } from '../components/Tickets';
 import { useDeliveries, useOrders } from '../data/queries';
 import { getDevice, getParked, getSnapshot, nextInvoiceNo, outboxAll, outboxPut, setDevice, setParked, setSnapshot, type Device, type OutboxEntry, type Parked, type Snapshot } from '../offline/store';
@@ -189,6 +190,8 @@ export default function Till() {
     if (l.qty + d <= 0) { remove(k); return; }
     setCart((c) => c.map((x) => (keyOf(x) === k ? { ...x, qty: x.qty + d } : x))); hi(k);
   };
+  // a quantity typed in the line's box, for an item bought many at a time
+  const setQty = (k: string, n: number) => { setCart((c) => c.map((x) => (keyOf(x) === k ? { ...x, qty: n } : x))); hi(k); };
   const setUnit = (k: string, ui: number) => {
     const l = cart.find((x) => keyOf(x) === k); if (!l || l.ui === ui) return;
     const nk = keyOf({ pid: l.pid, ui });
@@ -346,7 +349,7 @@ export default function Till() {
         <div key={k} id={'ln-' + k} className={`line ${on ? 'on' : ''} ${on && flash ? 'flash' : ''}`} onClick={() => { if (!on) setSel({ k, n: (sel?.n ?? 0) + 1 }); }}>
           <span className="no">{i + 1}</span>
           <div className="li"><div className="ln">{l.p.name}</div>{many || short || l.u.u !== 'pcs' ? <div className="lp">{many ? <button className="uchip" onClick={() => setPick({ pid: l.pid, k })} title="Change unit">{unitLabel(l.u)} <Icon n="edit" /></button> : l.u.u !== 'pcs' ? <span className="uchip">{unitLabel(l.u)}</span> : null}{short ? <span className="chip warn">on order</span> : null}</div> : null}</div>
-          <div className="qty"><button onClick={() => step(k, -1)} aria-label="One less"><Icon n="minus" /></button><b>{l.qty}</b><button onClick={() => step(k, 1)} aria-label="One more"><Icon n="plus" /></button></div>
+          <div className="qty"><button onClick={() => step(k, -1)} aria-label="One less"><Icon n="minus" /></button><QtyBox qty={l.qty} label={`Quantity of ${l.p.name}`} onSet={(n) => setQty(k, n)} onDone={() => scan.current?.focus()} /><button onClick={() => step(k, 1)} aria-label="One more"><Icon n="plus" /></button></div>
           <span className="lpr"><small>× </small>{fNum(l.price)}</span>
           <b className="lt">{fNum(l.price * l.qty)}</b>
           <button className="rm" onClick={(e) => { e.stopPropagation(); remove(k); }} title="Remove from the sale" aria-label="Remove item"><Icon n="x" /></button></div>); })
@@ -518,7 +521,7 @@ function OrderEditor({ o, init, byId, snap, onClose, onReject, onApprove }: { o:
       <div className="tw"><table className="t"><thead><tr><th>Item</th><th>Unit</th><th className="r">Price</th><th style={{ width: 150 }}>Qty</th><th className="r">Line</th></tr></thead><tbody>
         {priced.map((l, i) => <tr key={l.pid + ':' + l.ui}><td><b>{l.p.name}</b><div className="code">{snap.stock[l.pid]?.qty ?? 0} in shop</div></td>
           <td><select className="input" style={{ minHeight: 40 }} value={l.ui} onChange={(e) => unit(i, Number(e.target.value))} aria-label="Unit">{unitsOf(l.p).map((u, k) => <option key={k} value={k}>{unitLabel(u)}</option>)}</select></td>
-          <td className="r">{fCDF(l.price)}</td><td><div className="qty"><button onClick={() => chg(i, -1)} aria-label="One less"><Icon n="minus" /></button><b>{l.qty}</b><button onClick={() => chg(i, 1)} aria-label="One more"><Icon n="plus" /></button></div></td><td className="r"><b>{fCDF(l.price * l.qty)}</b></td></tr>)}
+          <td className="r">{fCDF(l.price)}</td><td><div className="qty"><button onClick={() => chg(i, -1)} aria-label="One less"><Icon n="minus" /></button><QtyBox qty={l.qty} label={`Quantity of ${l.p.name}`} onSet={(n) => setLines((c) => c.map((x, j) => (j === i ? { ...x, qty: n } : x)))} /><button onClick={() => chg(i, 1)} aria-label="One more"><Icon n="plus" /></button></div></td><td className="r"><b>{fCDF(l.price * l.qty)}</b></td></tr>)}
       </tbody></table></div>
       <div className="search" style={{ maxWidth: 'none', margin: '12px 0 6px' }}><Icon n="search" /><input placeholder="Add an item" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       {found.length ? <div className="mchips">{found.map((p) => <button key={p.id} className="chip" onClick={() => add(p)}>+ {p.name}</button>)}</div> : null}

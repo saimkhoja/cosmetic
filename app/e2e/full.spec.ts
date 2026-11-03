@@ -496,9 +496,15 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.fill('#scan', '6001234567890'); await shop.press('#scan', 'Enter');               // scanned again: the same line, highlighted
   await expect(shop.locator('#cart .line')).toHaveCount(1);
   await expect(shop.locator('#cart .line.on')).toContainText('Shea body lotion');
-  await expect(shop.locator('#cart .line.on .qty b')).toHaveText('2');
+  await expect(shop.locator('#cart .line.on .qty input')).toHaveValue('2');
   await shop.locator('#cart .line.on').getByLabel('One less').click();
-  await expect(shop.locator('#cart .line.on .qty b')).toHaveText('1');
+  await expect(shop.locator('#cart .line.on .qty input')).toHaveValue('1');
+  // a quantity can be typed: Enter goes back to the search box
+  await shop.locator('#cart .line.on .qty input').fill('24'); await shop.locator('#cart .line.on .qty input').press('Enter');
+  await expect(shop.locator('#cart .line.on .qty input')).toHaveValue('24'); await expect(shop.locator('#scan')).toBeFocused();
+  await shop.locator('#cart .line.on').getByLabel('One less').click();
+  await shop.locator('#cart .line.on .qty input').fill('1'); await shop.locator('#cart .line.on .qty input').press('Enter');
+  await expect(shop.locator('#cart .line.on .qty input')).toHaveValue('1');
   await shop.fill('#scan', '9999999999'); await shop.press('#scan', 'Enter');
   await expect(shop.getByText('No item has the barcode 9999999999')).toBeVisible();
   // park the sale, serve nobody, and bring it back
