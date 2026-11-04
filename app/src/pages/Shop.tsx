@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useDeliveries, useInvoices, useOrders, useProducts, useRanks, useRefresh, useReport, useSettings, useShops, useStock, useStockRequests } from '../data/queries';
@@ -11,6 +11,7 @@ import { printHTML, receiptHTML, stockCountHTML } from '../lib/print';
 import { Dual2, Empty, Head, Kpi, Modal, Note, Tile, useAction, useToast } from '../components/ui';
 import { DiscFields, discProblem } from '../components/Discount';
 import { outboxAll } from '../offline/store';
+import { MIN_QUERY, serverTerm } from '../lib/search';
 import type { Invoice, Product } from '../lib/types';
 
 export function ShopHome() {
@@ -72,16 +73,21 @@ export function ShopStock() {
 export function Invoices() {
   const { profile } = useAuth();
   const sid = profile!.shop_id!;
-  const [f, setF] = useState<'today' | 'week' | 'all'>('today'), [s, setS] = useState(''), [view, setView] = useState<Invoice | null>(null), [edit, setEdit] = useState<Invoice | null>(null), [del, setDel] = useState<Invoice | null>(null);
+  // opened from the global search: every date, and the box holds the invoice number
+  const [params] = useSearchParams();
+  const [f, setF] = useState<'today' | 'week' | 'all'>(params.get('f') === 'all' ? 'all' : 'today'), [s, setS] = useState(params.get('s') ?? ''), [view, setView] = useState<Invoice | null>(null), [edit, setEdit] = useState<Invoice | null>(null), [del, setDel] = useState<Invoice | null>(null);
   const since = f === 'all' ? null : new Date(f === 'today' ? new Date(today() + 'T00:00:00').getTime() : Date.now() - 7 * 864e5).toISOString();
-  const inv = useInvoices(sid, since), shops = useShops(), settings = useSettings(), refresh = useRefresh(), toast = useToast();
+  // a search looks through every invoice of the shop on the server, not only the newest ones loaded
+  const [find, setFind] = useState(serverTerm(s));
+  useEffect(() => { const t = setTimeout(() => setFind(serverTerm(s)), 300); return () => clearTimeout(t); }, [s]);
+  const inv = useInvoices(sid, since, find.length >= MIN_QUERY ? find : ''), shops = useShops(), settings = useSettings(), refresh = useRefresh(), toast = useToast();
   const [waiting, setWaiting] = useState<Invoice[]>([]);
   useEffect(() => { const upd = () => void outboxAll().then((l) => setWaiting(l.flatMap((e) => (e.shop_id === sid && e.kind !== 'order' ? [e.invoice] : [])))); upd(); addEventListener('sim-outbox', upd); return () => removeEventListener('sim-outbox', upd); }, [sid]);
   const shop = shops.data?.find((x) => x.id === sid);
   const q = s.trim().toLowerCase();
   const list = useMemo(() => {
     const server = inv.data ?? [], ids = new Set(server.map((i) => i.id));
-    return [...waiting.filter((w) => !ids.has(w.id) && (f === 'all' || ld(w.t) >= ld(since!))), ...server].filter((i) => !q || i.no.toLowerCase().includes(q) || i.cashier_name.toLowerCase().includes(q));
+    return [...waiting.filter((w) => !ids.has(w.id) && (f === 'all' || ld(w.t) >= ld(since!))), ...server].filter((i) => !q || i.no.toLowerCase().includes(q) || i.cashier_name.toLowerCase().includes(q) || (i.customer ?? '').toLowerCase().includes(q));
   }, [inv.data, waiting, q, f, since]);
   const pending = list.filter((i) => !i.synced).length, edited = list.filter((i) => i.edits?.length).length;
   const dup = async (i: Invoice) => {

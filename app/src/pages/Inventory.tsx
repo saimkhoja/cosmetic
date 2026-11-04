@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useCategories, useCosts, useProducts, useRanks, useRefresh, useSettings } from '../data/queries';
@@ -20,14 +21,15 @@ export default function Inventory() {
   const isAdmin = profile!.role === 'admin';
   const products = useProducts(), costs = useCosts(isAdmin), settings = useSettings(), ranks = useRanks(null), refresh = useRefresh(), toast = useToast();
   const [q, setQ] = useState(''), [edit, setEdit] = useState<Product | 'new' | null>(null), [recv, setRecv] = useState<Product | 'any' | null>(null), [imp, setImp] = useState(false);
-  const [cats, setCats] = useState(false), [archived, setArchived] = useState(false), [count, setCount] = useState<Product | null>(null);
+  const [params] = useSearchParams();
+  const [cats, setCats] = useState(false), [archived, setArchived] = useState(params.get('arch') === '1'), [count, setCount] = useState<Product | null>(null);
   const rate = settings.data?.rate ?? 1, book = bookRate(settings.data), [rateEdit, setRateEdit] = useState(false);
   const costOf = useMemo(() => new Map((costs.data ?? []).map((c) => [c.product_id, c])), [costs.data]);
   const live = (products.data ?? []).filter((p) => p.active), gone = (products.data ?? []).filter((p) => !p.active);
   const hot = hotSet(ranks.data);
   // items in store first (best sellers first), then the ones with none left, A to Z
   const sorted = hotSort(archived ? gone : live, ranks.data);
-  const list = [...sorted.filter((p) => p.wh_qty > 0), ...sorted.filter((p) => p.wh_qty <= 0).sort((a, b) => a.name.localeCompare(b.name))].filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category + ' ' + barcodesOf(p).join(' ')).toLowerCase().includes(q.toLowerCase()));
+  const list = [...sorted.filter((p) => p.wh_qty > 0), ...sorted.filter((p) => p.wh_qty <= 0).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))].filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category + ' ' + barcodesOf(p).join(' ')).toLowerCase().includes(q.toLowerCase()));
   const del = async (p: Product) => {
     if (!confirm(`Delete ${p.name}? An item that was ever received, sent or sold is archived instead, so its history stays.`)) return;
     try { const r = await rpc<string>('delete_product', { p_id: p.id }); await refresh('products', 'costs', 'stock', 'audit'); toast(r === 'deleted' ? `${p.name} deleted` : `${p.name} archived. Find it under Archived items.`, 'warn'); }

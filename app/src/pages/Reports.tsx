@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useCategories, useReport, useSettings, useShops } from '../data/queries';
@@ -10,7 +11,9 @@ import { CategoryChart, unitsText } from '../components/CategoryChart';
 export default function Reports() {
   const { profile } = useAuth();
   const isAdmin = profile!.role === 'admin';
-  const [from, setFrom] = useState(ld(Date.now() - 6 * 864e5)), [to, setTo] = useState(today()), [shop, setShop] = useState('all');
+  // opened from the global search on an invoice: that day and that shop
+  const [params] = useSearchParams(), day = /^\d{4}-\d{2}-\d{2}$/.test(params.get('day') ?? '') ? params.get('day')! : null;
+  const [from, setFrom] = useState(day ?? ld(Date.now() - 6 * 864e5)), [to, setTo] = useState(day ?? today()), [shop, setShop] = useState(params.get('shop') ?? 'all');
   const [doc, setDoc] = useState<{ title: string; html: string; slip: boolean } | null>(null), [cat, setCat] = useState<CategorySales | null>(null);
   const settings = useSettings(), shops = useShops(), cats = useCategories();
   const sid = isAdmin ? (shop === 'all' ? null : shop) : profile!.shop_id;
