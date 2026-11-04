@@ -13,10 +13,10 @@ export function unitsOf(p: Product): Unit[] {
   if (p.half_dozen_usd > 0 && p.per_carton !== 6) u.push({ u: 'half dzn', mult: 6, usd: p.half_dozen_usd });
   if (p.dozen_usd > 0 && p.per_carton !== 12) u.push({ u: 'dzn', mult: 12, usd: p.dozen_usd });
   if (p.carton_usd > 0) u.push({ u: 'carton', mult: p.per_carton, usd: p.carton_usd });
-  // a half carton needs an even number of pcs to the carton, a quarter carton a multiple of 4; mirrors app.unit_named
-  const sold = new Set(u.map((x) => x.mult)), half = p.per_carton / 2, quarter = p.per_carton / 4;
+  // a half carton needs an even number of pcs to the carton; mirrors app.unit_named. The quarter carton is no longer
+  // offered; the server still takes it so sales already made with it (or waiting on a till) go through.
+  const sold = new Set(u.map((x) => x.mult)), half = p.per_carton / 2;
   if (p.carton_usd > 0 && p.per_carton >= 2 && p.per_carton % 2 === 0 && !sold.has(half)) u.push({ u: 'half ctn', mult: half, usd: p.carton_usd / 2 });
-  if (p.carton_usd > 0 && p.per_carton >= 4 && p.per_carton % 4 === 0 && !sold.has(quarter)) u.push({ u: 'quarter ctn', mult: quarter, usd: p.carton_usd / 4 });
   return u;
 }
 export const unitLabel = (u: Unit) => (u.piece ? '1 piece' : u.u);

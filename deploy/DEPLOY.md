@@ -39,7 +39,7 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    17. `supabase/migrations/20261026000001_multi_barcodes.sql` (an item can have several barcodes when Barcode scanning is on; also fixes the Admin's values of returns to suppliers)
    18. `supabase/migrations/20261103000001_till_invoices.sql` (the till operator's till prints the invoice when sending an order, with its own number, instead of the order slip; the shop admin's approval completes that same invoice without printing it again, unless the order was changed first)
    19. `supabase/migrations/20261103000002_discount_amount.sql` (a discount can be given as an amount in CDF as well as a percentage; the percentage of an amount is worked out from the total)
-   20. `supabase/migrations/20261103000003_carton_parts.sql` (items with a carton price also sell by the half and the quarter carton, at that part of the carton price, when it is a different number of pcs from their other units)
+   20. `supabase/migrations/20261103000003_carton_parts.sql` (items with a carton price also sell by the half carton, at half the carton price, when it is a different number of pcs from their other units)
    21. `supabase/migrations/20261103000004_category_sales.sql` (the sales report lists each category's sales and the items sold in it, for the category chart on the Reports page)
 
    **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 to 21). Run it **before** the new app goes live. They keep your data:
