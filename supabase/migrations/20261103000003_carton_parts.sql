@@ -5,6 +5,13 @@
 -- lines without one are read from their pcs as before.
 -- Already running QuickSales? Run this file once, after 20261103000002_discount_amount.sql, BEFORE the new app goes live.
 
+-- stop at once if the update before this one was not run (supabase/scripts/check_migrations.sql lists what is missing)
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'invoices' and column_name = 'disc_pct' and data_type = 'numeric') then
+    raise exception 'Run supabase/migrations/20261103000002_discount_amount.sql first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
+  end if;
+end $$;
+
 -- the unit of a line from its name when it is a part of a carton, otherwise from its pcs (as before)
 create or replace function app.unit_named(pr public.products, p_unit text, mult int, piece boolean) returns text
 language plpgsql stable as $$

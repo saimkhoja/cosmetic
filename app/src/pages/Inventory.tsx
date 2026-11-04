@@ -25,7 +25,9 @@ export default function Inventory() {
   const costOf = useMemo(() => new Map((costs.data ?? []).map((c) => [c.product_id, c])), [costs.data]);
   const live = (products.data ?? []).filter((p) => p.active), gone = (products.data ?? []).filter((p) => !p.active);
   const hot = hotSet(ranks.data);
-  const list = hotSort(archived ? gone : live, ranks.data).filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category + ' ' + barcodesOf(p).join(' ')).toLowerCase().includes(q.toLowerCase()));
+  // items in store first (best sellers first), then the ones with none left, A to Z
+  const sorted = hotSort(archived ? gone : live, ranks.data);
+  const list = [...sorted.filter((p) => p.wh_qty > 0), ...sorted.filter((p) => p.wh_qty <= 0).sort((a, b) => a.name.localeCompare(b.name))].filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category + ' ' + barcodesOf(p).join(' ')).toLowerCase().includes(q.toLowerCase()));
   const del = async (p: Product) => {
     if (!confirm(`Delete ${p.name}? An item that was ever received, sent or sold is archived instead, so its history stays.`)) return;
     try { const r = await rpc<string>('delete_product', { p_id: p.id }); await refresh('products', 'costs', 'stock', 'audit'); toast(r === 'deleted' ? `${p.name} deleted` : `${p.name} archived. Find it under Archived items.`, 'warn'); }
@@ -42,7 +44,7 @@ export default function Inventory() {
           {isAdmin ? <button className="btn primary" onClick={() => setEdit('new')}><Icon n="plus" /> Add new item</button> : null}</>} />
       <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Search by name, code or category" value={q} onChange={(e) => setQ(e.target.value)} /></div><span className="chip">{live.length} items</span>
         {isAdmin && gone.length ? <div className="seg"><button className={archived ? '' : 'on'} onClick={() => setArchived(false)}>Active</button><button className={archived ? 'on' : ''} onClick={() => setArchived(true)}>Archived ({gone.length})</button></div> : null}
-        {isAdmin ? null : <span className="chip warn"><Icon n="lock" /> Cost prices hidden for your role</span>}<span className="hint">Best sellers of the last 30 days come first; seasonal items out of season come last.</span></div>
+        {isAdmin ? null : <span className="chip warn"><Icon n="lock" /> Cost prices hidden for your role</span>}<span className="hint">Best sellers of the last 30 days come first; seasonal items out of season come after them. Items with none in store are listed last, A to Z.</span></div>
       <div className="card p0"><div className="tw">
         {products.isLoading ? <Empty i="refresh" t="Loading items" /> : !list.length ? <Empty i="search" t={products.data?.length ? 'No items match your search' : 'No items yet. Add one or import from Excel.'} /> :
           <table className="t"><thead><tr><th>Item</th><th>Category</th><th className="r">In store</th>{isAdmin ? <th>Cost</th> : null}<th>Selling prices</th>{isAdmin ? <th className="r" title="Mark-up on cost: cost + margin % = selling price">Margin on cost</th> : null}<th /></tr></thead><tbody>

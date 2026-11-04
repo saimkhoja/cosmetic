@@ -6,6 +6,15 @@
 -- Already running QuickSales? Run this file once, after 20261026000001_multi_barcodes.sql, BEFORE the new
 -- app goes live. It keeps your data; orders sent from tills with the old app still work as before.
 
+-- stop at once if the update before this one was not run (supabase/scripts/check_migrations.sql lists what is missing)
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'invoices' and column_name = 'paid_usd')
+     or not exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'supplier_returns')
+     or not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'products' and column_name = 'barcodes') then
+    raise exception 'Run supabase/migrations/20261026000001_multi_barcodes.sql (and every earlier file) first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
+  end if;
+end $$;
+
 alter table public.sale_orders add column if not exists invoice_no text;
 alter table public.sale_orders add column if not exists device_id uuid references public.devices(id);
 alter table public.sale_orders add column if not exists rate numeric(12,2);
