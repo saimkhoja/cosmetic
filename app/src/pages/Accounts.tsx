@@ -2,6 +2,7 @@
 // debit and credit notes), ledgers in groups, statements, day book, trial balance, profit and loss,
 // balance sheet and money owed to suppliers. Every entry is in USD or CDF; reports are in USD.
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
@@ -27,7 +28,8 @@ function useDoc() {
 }
 
 export default function Accounts() {
-  const [tab, setTab] = useState('suppliers');
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(params.get('tab') ?? 'suppliers');
   const tabs: [string, string][] = [['suppliers', 'Suppliers'], ['bills', 'Bills & payables'], ['vouchers', 'Vouchers & day book'], ['statement', 'Statements'], ['ledgers', 'Ledgers'], ['tb', 'Trial balance'], ['pl', 'Profit & loss'], ['bs', 'Balance sheet']];
   const ledgers = useLedgers();
   return (
@@ -43,7 +45,7 @@ export default function Accounts() {
 // ---------- suppliers ----------
 function Suppliers() {
   const suppliers = useSuppliers(), pay = usePayables(), products = useProducts(), refresh = useRefresh(), toast = useToast();
-  const [open, setOpen] = useState<Supplier | 'new' | null>(null), [q, setQ] = useState(''), [inactive, setInactive] = useState(false);
+  const [open, setOpen] = useState<Supplier | 'new' | null>(null), [q, setQ] = useState(''), [params] = useSearchParams(), [inactive, setInactive] = useState(params.get('inactive') === '1');
   const owed = new Map((pay.data ?? []).map((p) => [p.id, p]));
   const gone = (suppliers.data ?? []).filter((s) => !s.active).length;
   const list = (suppliers.data ?? []).filter((s) => s.active !== inactive && (!q || (s.name + ' ' + s.phone + ' ' + s.contact).toLowerCase().includes(q.toLowerCase())));

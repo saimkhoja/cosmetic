@@ -25,19 +25,22 @@ export const useDeliveries = (shopId?: string | null, enabled = true) => useQuer
   queryKey: ['deliveries', shopId ?? 'all'], enabled, refetchInterval: 30000,
   queryFn: async () => { let q = supabase.from('deliveries').select('*, delivery_items(product_id,qty,price_usd,received_qty), delivery_edits(at,by_name,reason)').order('created_at', { ascending: false }).limit(400); if (shopId) q = q.eq('shop_id', shopId); return rows<Delivery>(await q); },
 });
-export const useInvoices = (shopId: string, sinceISO: string | null) => useQuery({
-  queryKey: ['invoices', shopId, sinceISO],
+/** A shop's newest 500 invoices (since a date, if given); with a search, the newest 500 whose number, customer or
+ *  sales person has it, however old, so an old invoice can still be found. */
+export const useInvoices = (shopId: string, sinceISO: string | null, find = '') => useQuery({
+  queryKey: ['invoices', shopId, sinceISO, find],
   queryFn: async () => {
     let q = supabase.from('invoices').select('*, items:invoice_items(line_no,product_id,name,unit,mult,piece,qty,price,line), edits:invoice_edits(at,by_name,reason,from_total,to_total)').eq('shop_id', shopId).order('t', { ascending: false }).limit(500);
     if (sinceISO) q = q.gte('t', sinceISO);
+    if (find) q = q.or(`no.ilike.%${find}%,customer.ilike.%${find}%,cashier_name.ilike.%${find}%`);
     const list = rows<Invoice>(await q);
     list.forEach((i) => { i.items.sort((a, b) => (a.line_no ?? 0) - (b.line_no ?? 0)); i.edits?.sort((a, b) => a.at.localeCompare(b.at)); i.synced = true; });
     return list;
   },
 });
 export const useUsers = (enabled: boolean) => useQuery({ queryKey: ['users'], enabled, queryFn: async () => rows<Profile>(await supabase.from('profiles').select('*').order('created_at')) });
-export const useAudit = () => useQuery({ queryKey: ['audit'], queryFn: async () => rows<{ id: number; at: string; username: string; action: string }>(await supabase.from('audit_log').select('*').order('id', { ascending: false }).limit(300)) });
-export const useUpkeep = () => useQuery({ queryKey: ['upkeep'], queryFn: async () => rows<{ id: string; date: string; category: string; description: string; amount_usd: number; by_name: string; at: string }>(await supabase.from('upkeep').select('*').order('date', { ascending: false }).order('at', { ascending: false }).limit(500)) });
+export const useAudit = (enabled = true) => useQuery({ queryKey: ['audit'], enabled, queryFn: async () => rows<{ id: number; at: string; username: string; action: string }>(await supabase.from('audit_log').select('*').order('id', { ascending: false }).limit(300)) });
+export const useUpkeep = (enabled = true) => useQuery({ queryKey: ['upkeep'], enabled, queryFn: async () => rows<{ id: string; date: string; category: string; description: string; amount_usd: number; by_name: string; at: string }>(await supabase.from('upkeep').select('*').order('date', { ascending: false }).order('at', { ascending: false }).limit(500)) });
 export const useReport = (from: string, to: string, shop: string | null, enabled = true) => useQuery({
   queryKey: ['report', from, to, shop], enabled, queryFn: () => rpc<Report>('sales_report', { p_from: from, p_to: to, p_shop: shop }),
 });
@@ -61,7 +64,7 @@ export const useSupplierReturnValues = (enabled = true) => useQuery({ queryKey: 
 /** Ledgers the signed-in user may open, with balances in USD (Dr positive). */
 export const useLedgers = (enabled = true) => useQuery({ queryKey: ['ledgers'], enabled, queryFn: () => rpc<Ledger[]>('ledger_list') });
 /** Stock requests from the shops: the shop admin sees the shop's, the warehouse and Admin all (RLS). */
-export const useStockRequests = () => useQuery({ queryKey: ['requests'], refetchInterval: 30000, queryFn: async () => rows<StockRequest>(await supabase.from('stock_requests').select('*, stock_request_items(product_id,qty,approved_qty)').order('created_at', { ascending: false }).limit(300)) });
+export const useStockRequests = (enabled = true) => useQuery({ queryKey: ['requests'], enabled, refetchInterval: 30000, queryFn: async () => rows<StockRequest>(await supabase.from('stock_requests').select('*, stock_request_items(product_id,qty,approved_qty)').order('created_at', { ascending: false }).limit(300)) });
 /** After a change, refresh everything that may show it. */
 export function useRefresh() {
   const qc = useQueryClient();
