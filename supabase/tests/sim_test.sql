@@ -781,13 +781,16 @@ set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
 select public.submit_invoice(t.dsale(t.get('sno1'), '{"disc": 5000}'));
 select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '5000/40600/10.96', 'a discount of 5 000 CDF on 45 600: total 40 600, 10.96%');
-select t.fails(format($$select public.submit_invoice(t.dsale('%s', '{"disc": 14000}'))$$, t.get('sno2')), 'between 0% and 30%', 'a discount amount above 30% is refused');
+select t.fails(format($$select public.submit_invoice(t.dsale('%s', '{"disc": 14600}'))$$, t.get('sno2')), 'between 0% and 32%', 'a discount amount above 32% is refused (14 600 on 45 600)');
+select t.fails(format($$select public.submit_invoice(t.dsale('%s', '{"disc_pct": 32.5}'))$$, t.get('sno2')), 'between 0% and 32%', 'a discount above 32% is refused');
 select public.submit_invoice(t.dsale(t.get('sno2'), '{"disc_pct": 2.5}'));
 select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno2')) = '1140/44460/2.50', 'a 2.5% discount: 1 140 CDF, rounded to 10 CDF');
+select public.submit_invoice(t.dsale(t.get('sno3'), '{"disc": 14590}'));
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno3')) = '14590/31010/32.00', 'a discount of up to 32% is given: 14 590 CDF on 45 600');
 select public.edit_invoice((select id from invoices where no = t.get('sno1')), '[{"line_no":1,"qty":10}]', 0, 'Discount agreed with the customer', 3000);
 select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '3000/42600/6.58', 'editing the invoice to a 3 000 CDF discount');
 select t.fails(format($$select public.edit_invoice('%s', '[{"line_no":1,"qty":1}]', 0, 'Fewer items now', 3000)$$, (select id from invoices where no = t.get('sno1'))),
-  'between 0% and 30%', 'a discount amount above 30% of the new total is refused on an edit');
+  'between 0% and 32%', 'a discount amount above 32% of the new total is refused on an edit');
 select public.edit_invoice((select id from invoices where no = t.get('sno1')), '[{"line_no":1,"qty":10}]', 5, 'Back to a percentage');
 select t.ok((select disc || '/' || disc_pct from invoices where no = t.get('sno1')) = '2280/5.00', 'editing back to a percentage still works');
 reset role;
