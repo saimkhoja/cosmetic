@@ -530,6 +530,13 @@ select t.ok((public.import_products('[{"row":2,"name":"Scan cream B","category":
 select t.ok((select barcodes from products where name = 'Scan cream B') = '{333333,444444}', 'import saves every barcode of the row');
 select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,'barcode','222222'));
 select t.ok((select barcodes = '{222222}' and barcode = '222222' from products where id = t.get('scan')::uuid), 'removing one barcode keeps the other');
+-- up to 60 barcodes per item
+select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,
+  'barcode', (select string_agg((700000 + g)::text, ';') from generate_series(1, 60) g)));
+select t.ok((select cardinality(barcodes) = 60 and barcode = '700001' from products where id = t.get('scan')::uuid), 'an item can have 60 barcodes');
+select t.fails(format($$select public.save_product(jsonb_build_object('id', '%s', 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,
+  'barcode', (select string_agg((700000 + g)::text, ';') from generate_series(1, 61) g)))$$, t.get('scan')), 'at most 60 barcodes', 'a 61st barcode is refused');
+select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,'barcode','222222'));
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');

@@ -41,13 +41,14 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    19. `supabase/migrations/20261103000002_discount_amount.sql` (a discount can be given as an amount in CDF as well as a percentage; the percentage of an amount is worked out from the total)
    20. `supabase/migrations/20261103000003_carton_parts.sql` (items with a carton price also sell by the half carton, at half the carton price, when it is a different number of pcs from their other units)
    21. `supabase/migrations/20261103000004_category_sales.sql` (the sales report lists each category's sales and the items sold in it, for the category chart on the Reports page)
+   22. `supabase/migrations/20261107000001_more_barcodes.sql` (an item can have up to 60 barcodes instead of 10)
 
-   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 to 21). Run it **before** the new app goes live. They keep your data:
+   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 to 22). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
 
-   **Check what an installation has.** Run `supabase/scripts/check_migrations.sql` in the SQL Editor: it lists files 10 to 21 as done or MISSING and changes nothing. Never skip a file: each one rebuilds some functions from the newest version it knows, and those use what the earlier files added (for example the Reports page fails with "column inv.paid_usd does not exist", and sales fail too, when 14 was skipped). Files 18 to 21 stop with a message naming the file to run first. If one was missed, run it and then every later file again, in order (they are safe to run twice): with 14 to 17 missing, run 14, 15, 16, 17, then 18, 19, 20, 21.
+   **Check what an installation has.** Run `supabase/scripts/check_migrations.sql` in the SQL Editor: it lists files 10 to 22 as done or MISSING and changes nothing. Never skip a file: each one rebuilds some functions from the newest version it knows, and those use what the earlier files added (for example the Reports page fails with "column inv.paid_usd does not exist", and sales fail too, when 14 was skipped). Files 18 to 21 stop with a message naming the file to run first. If one was missed, run it and then every later file again, in order (they are safe to run twice): with 14 to 17 missing, run 14, 15, 16, 17, then 18, 19, 20, 21.
 
    To check, run this in a new query. It should return `32 tables, 49 functions`:
    ```sql

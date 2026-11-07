@@ -1,5 +1,5 @@
 // Excel (.xlsx) and CSV reading/writing with no outside library, so import works offline.
-import { itemProblem, splitBarcodes } from './items';
+import { itemProblem, MAX_BARCODES, splitBarcodes } from './items';
 
 export const IMPCOLS = ['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per half dozen USD', 'Price per dozen USD', 'Price per carton USD', 'Opening cartons', 'Opening pcs', 'Reorder at (pcs)', 'SKU', 'Barcode'];
 const IMPKEYS: Record<string, string[]> = {
@@ -145,7 +145,7 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
     else if (sku && skus.has(sku.toLowerCase())) { row.status = 'skip'; row.msg = 'Code already exists'; }
     else if (bl.some((b) => codes.has(b))) { row.status = 'skip'; row.msg = `Barcode already exists (${bl.find((b) => codes.has(b))})`; }
     else if (bl.some((b) => !/^[A-Za-z0-9-]{3,32}$/.test(b))) { row.status = 'bad'; row.msg = 'Each barcode must be 3 to 32 letters or digits; separate several with ;'; }
-    else if (bl.length > 10) { row.status = 'bad'; row.msg = 'At most 10 barcodes per item'; }
+    else if (bl.length > MAX_BARCODES) { row.status = 'bad'; row.msg = `At most ${MAX_BARCODES} barcodes per item`; }
     else {
       const p = itemProblem({ ...o, is_bundle: false, set_cost: 0, set_price: 0, pcs: 0, piece: 0 });
       if (p) { row.status = 'bad'; row.msg = p; }
