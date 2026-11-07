@@ -35,6 +35,8 @@ const CATICON: Record<string, string> = { all: 'grid', skin: 'lotion', hair: 'co
 export const catIcon = (c: string) => { const k = c.toLowerCase(); const hit = Object.keys(CATICON).find((x) => k.startsWith(x) || k.includes(' ' + x)); return hit ? CATICON[hit] : 'box'; };
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const UPCATS = ['Rent', 'Electricity & fuel', 'Security', 'Salaries', 'Transport', 'Maintenance', 'Taxes & licences', 'Other'];
+/** The most barcodes one item can have (the database allows the same, in app.barcode_list). */
+export const MAX_BARCODES = 60;
 /** An item's barcodes: all of them, or the single one an older database keeps. */
 export const barcodesOf = (p: { barcode?: string | null; barcodes?: string[] | null }) => (p.barcodes?.length ? p.barcodes : p.barcode ? [p.barcode] : []);
 /** Barcodes as typed or imported: separated by , ; or | (or new lines), spaces removed, repeats dropped. */

@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { useCategories, useCosts, useProducts, useRanks, useRefresh, useSettings } from '../data/queries';
 import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSet, hotSort, marginPct, pcValue, unitLabel, unitsOf } from '../lib/units';
-import { barcodesOf, itemProblem, MONTHS, type ItemInput } from '../lib/items';
+import { barcodesOf, itemProblem, MAX_BARCODES, MONTHS, type ItemInput } from '../lib/items';
 import { ReceiveGoodsModal } from './Stores';
 import { bookRate, fCDF, fUSD, toCDF } from '../lib/format';
 import { Dual, Empty, Head, Modal, Note, num, useAction, useToast } from '../components/ui';
@@ -109,8 +109,8 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
         {codes.map((c, i) => <div key={i} className="barrow"><input id={`ibar${i}`} className="input" value={c} maxLength={32} inputMode="numeric" autoComplete="off" autoFocus={i > 0 && i === codes.length - 1 && !c}
           onChange={(e) => setCode(i, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }} placeholder={i ? 'Scan or type another barcode' : 'Scan the item or type the number under the bars'} aria-label={`Barcode ${i + 1}`} />
           {codes.length > 1 ? <button type="button" className="iconbtn" title="Remove this barcode" aria-label={`Remove barcode ${i + 1}`} onClick={() => setCodes((x) => x.filter((_, k) => k !== i))}><Icon n="x" /></button> : null}</div>)}
-        {codes.length < 10 ? <button type="button" id="addbar" className="btn ghost sm" style={{ marginTop: 6 }} onClick={() => setCodes((x) => [...x, ''])}><Icon n="plus" /> Add another barcode</button> : null}
-        <span className="hint" style={{ display: 'block' }}>Optional. Scanning any of them at the till adds 1 pc to the sale. One article can have several barcodes (new pack, another supplier); each barcode belongs to one item only.</span></div> : null}
+        {codes.length < MAX_BARCODES ? <button type="button" id="addbar" className="btn ghost sm" style={{ marginTop: 6 }} onClick={() => setCodes((x) => [...x, ''])}><Icon n="plus" /> Add another barcode</button> : null}
+        <span className="hint" style={{ display: 'block' }}>Optional. Scanning any of them at the till adds 1 pc to the sale. One article can have up to {MAX_BARCODES} barcodes (new pack, another supplier); each barcode belongs to one item only.{codes.length > 1 ? ` ${codes.filter((x) => x.trim()).length} of ${MAX_BARCODES} used.` : ''}</span></div> : null}
       <label className="switch"><input type="checkbox" id="ibundle" checked={f.is_bundle} onChange={set('is_bundle')} /><span>This is a mixed set sold together, for example assorted brushes or clips</span></label>
       {!f.is_bundle ? <>
         <div className="frow"><div className="field"><label>Cost of one carton (USD)</label><input id="icc" className="input" type="number" min="0" step="0.01" value={f.carton_cost} onChange={set('carton_cost')} /></div>
