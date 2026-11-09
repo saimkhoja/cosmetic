@@ -15,7 +15,8 @@ export function TicketsModal({ products, rate, shopName, onClose }: { products: 
   const ql = q.trim().toLowerCase();
   const copies = (id: string) => Math.max(0, Math.min(200, parseInt(n[id]) || 0));
   const chosen = products.filter((p) => copies(p.id) > 0 && has(p)), skipped = products.filter((p) => copies(p.id) > 0 && !has(p));
-  const list = products.filter((p) => copies(p.id) > 0 || !ql || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql)).slice(0, 120);
+  // every item is listed (no cap), so "1 of each shown" can take the whole catalogue; the search narrows it
+  const list = products.filter((p) => copies(p.id) > 0 || !ql || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql));
   const total = chosen.reduce((s, p) => s + copies(p.id), 0);
   const html = chosen.length ? ticketsHTML(chosen.map((p) => ({ p, copies: copies(p.id) })), rate, layout, shopName, units) : '';
   const prev = useRef<HTMLDivElement>(null);
@@ -27,7 +28,8 @@ export function TicketsModal({ products, rate, shopName, onClose }: { products: 
         <button className="btn sm" onClick={() => setN(Object.fromEntries(list.map((p) => [p.id, '1'])))}>1 of each shown</button>{chosen.length ? <button className="btn sm" onClick={() => setN({})}>Clear</button> : null}</div>
       <div className="field"><label>Prices on the ticket</label><div className="mchips" id="tunits">{([['pcs', 'Pcs'], ['half dzn', 'Half dozen'], ['dzn', 'Dozen'], ['carton', 'Carton']] as [TicketUnit, string][]).map(([u, l]) => <label key={u} className="chip" style={{ padding: '8px 12px', fontSize: 14, ...(units.includes(u) ? { background: 'var(--btn)', color: '#fff' } : {}) }}><input type="checkbox" checked={units.includes(u)} onChange={() => toggle(u)} /> {l}</label>)}</div>
         <span className="hint">Tick one or more. Each ticket shows only the ticked prices the item has.</span></div>
-      <div className="search" style={{ maxWidth: 'none', marginBottom: 10 }}><Icon n="search" /><input placeholder="Find items" value={q} onChange={(e) => setQ(e.target.value)} autoFocus /></div>
+      <div className="toolbar" style={{ marginBottom: 10 }}><div className="search" style={{ maxWidth: 'none' }}><Icon n="search" /><input placeholder="Find items" value={q} onChange={(e) => setQ(e.target.value)} autoFocus /></div>
+        <span className="chip" id="tcount">{ql ? `${list.length} of ${products.length} items` : `All ${products.length} items`}</span></div>
       <div className="tw" style={{ maxHeight: '36vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}>
         {list.length ? <table className="t"><thead><tr><th>Item</th><th>Prices</th><th style={{ width: 110 }}>Tickets</th></tr></thead><tbody>
           {list.map((p) => <tr key={p.id}><td><b>{p.name}</b><div className="code">{p.sku}</div></td><td className="code">{unitsOf(p).map((u) => `${unitLabel(u)} ${fCDF(toCDF(u.usd, rate))}`).join(' · ')}</td>
