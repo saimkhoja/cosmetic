@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useAudit, useCosts, useLedgers, useProducts, useRefresh, useReport, useSettings, useShops, useStock, useUpkeep, useUsers } from '../data/queries';
+import { useAudit, useCosts, useLedgers, usePasscodes, useProducts, useRefresh, useReport, useSettings, useShops, useStock, useUpkeep, useUsers } from '../data/queries';
 import { invoke, rpc } from '../lib/supabase';
 import { bookRate, dt, fCDF, fUSD, sum, today } from '../lib/format';
 import { UPCATS } from '../lib/items';
@@ -74,7 +74,8 @@ const genPw = () => { const a = 'abcdefghjkmnpqrstuvwxyz', d = '23456789', r = (
 export function Users() {
   const { profile } = useAuth();
   const users = useUsers(true), shops = useShops(), refresh = useRefresh(), toast = useToast();
-  const [open, setOpen] = useState<Profile | 'new' | null>(null), [reset, setReset] = useState<Profile | null>(null), [shown, setShown] = useState<{ u: string; p: string; name: string } | null>(null);
+  const [open, setOpen] = useState<Profile | 'new' | null>(null), [reset, setReset] = useState<Profile | null>(null), [shown, setShown] = useState<{ u: string; p: string; name: string } | null>(null), [codes, setCodes] = useState<Profile | null>(null);
+  const passcodes = usePasscodes(true);
   const toggle = async (u: Profile) => {
     try { await invoke('admin-users', { action: 'set_active', user_id: u.id, active: !u.active }); await refresh('users', 'audit'); toast(u.active ? 'Account disabled. They can no longer sign in.' : 'Account enabled', u.active ? 'warn' : 'ok'); }
     catch (e) { toast((e as Error).message, 'bad'); }
@@ -84,12 +85,13 @@ export function Users() {
       <Head t="Users and logins" s="Create logins for the store operator, shop admins and till operators, reset passwords or disable an account. Only the Admin can do this." a={<button className="btn primary" onClick={() => setOpen('new')}><Icon n="plus" /> Create login</button>} />
       <div className="card p0"><div className="tw"><table className="t"><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Workplace</th><th>Status</th><th /></tr></thead><tbody>
         {(users.data ?? []).map((u) => <tr key={u.id}><td><b>{u.name}</b></td><td>{u.username}</td><td><span className="chip">{R[u.role]}</span></td><td>{u.shop_id ? shops.data?.find((s) => s.id === u.shop_id)?.name : 'Central store'}</td>
-          <td>{u.active ? (u.must_change_password ? <span className="chip warn">Must choose a password</span> : <span className="chip ok">Active</span>) : <span className="chip bad">Disabled</span>}</td>
-          <td><div className="act"><button title="Edit name, role or shop" onClick={() => setOpen(u)}><Icon n="edit" /></button><button title="Reset password" onClick={() => setReset(u)}><Icon n="key" /></button>{u.id !== profile!.id ? <button title={u.active ? 'Disable account' : 'Enable account'} onClick={() => void toggle(u)}><Icon n={u.active ? 'lock' : 'unlock'} /></button> : null}</div></td></tr>)}
+          <td>{u.role === 'shopadmin' && (passcodes.data ?? []).filter((c) => c.user_id === u.id).length < 2 ? <><span className="chip warn" title="Without a passcode from you the Shop Admin cannot open the Invoices tab or print the shift end report">{(passcodes.data ?? []).some((c) => c.user_id === u.id) ? 'A passcode is missing' : 'No passcodes yet'}</span> </> : null}{u.active ? (u.must_change_password ? <span className="chip warn">Must choose a password</span> : <span className="chip ok">Active</span>) : <span className="chip bad">Disabled</span>}</td>
+          <td><div className="act"><button title="Edit name, role or shop" onClick={() => setOpen(u)}><Icon n="edit" /></button><button title="Reset password" onClick={() => setReset(u)}><Icon n="key" /></button>{u.role === 'shopadmin' ? <button title="Passcodes: Invoices and shift end report" onClick={() => setCodes(u)}><Icon n="shield" /></button> : null}{u.id !== profile!.id ? <button title={u.active ? 'Disable account' : 'Enable account'} onClick={() => void toggle(u)}><Icon n={u.active ? 'lock' : 'unlock'} /></button> : null}</div></td></tr>)}
       </tbody></table></div></div>
-      <Note i="shield"><span>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives goods from a chosen supplier, reviews the shops' stock requests (approve, edit or reject), receives returns from the shops, sees every shop's stock, sends and corrects deliveries, and reads the stock statements of the store and each shop; no cost prices per item and no price changes. <b>Shop Admin</b>: approves, rejects or edits the till operators' orders (approving takes the stock and completes the invoice the till printed; it prints again only if changed), takes the cash, sells directly, discount on an invoice, edits (quantities, units) or deletes an invoice with a reason, reprints, prints the stock count sheet, orders stock from the central store, receives deliveries, sends returns to the store, prints price tickets, and reads the shop's cash, sales and stock statements and reports. <b>Till Operator</b>: types the customer name, picks the items (pcs, half dozen, dozen, carton), sends the order for approval and prints its invoice for the customer, and prints price tickets; no cash, no invoice list and no reports.</span></Note>
+      <Note i="shield"><span>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives goods from a chosen supplier, reviews the shops' stock requests (approve, edit or reject), receives returns from the shops, sees every shop's stock, sends and corrects deliveries, and reads the stock statements of the store and each shop; no cost prices per item and no price changes. <b>Shop Admin</b>: approves, rejects or edits the till operators' orders (approving takes the stock and completes the invoice the till printed; it prints again only if changed), takes the cash, sells directly, discount on an invoice, edits (quantities, units) or deletes an invoice with a reason, reprints, prints the stock count sheet, orders stock from the central store, receives deliveries, sends returns to the store, prints price tickets and reads the shop's reports; the Invoices tab and the shift end report each open with a passcode you give (the shield button on their row). <b>Till Operator</b>: types the customer name, picks the items (pcs, half dozen, dozen, carton), sends the order for approval and prints its invoice for the customer, and prints price tickets; no cash, no invoice list and no reports.</span></Note>
       <Note><span>Passwords are stored only as secure hashes by Supabase Auth; nobody, not even the Admin, can read them. A new or reset login must choose its own password at first sign-in. The screen locks after 15 minutes without activity.</span></Note>
       {open ? <UserModal u={open === 'new' ? null : open} onClose={() => setOpen(null)} onCreated={(x) => setShown(x)} /> : null}
+      {codes ? <PasscodeModal u={codes} set={(passcodes.data ?? []).filter((c) => c.user_id === codes.id)} onClose={() => setCodes(null)} /> : null}
       {reset ? <ResetModal u={reset} onClose={() => setReset(null)} onDone={(p) => setShown({ u: reset.username, p, name: reset.name })} /> : null}
       {shown ? <Modal title="Give these details" icon="check" onClose={() => setShown(null)} foot={<button className="btn primary" onClick={() => setShown(null)}>Done</button>}><p>Give these details to <b>{shown.name}</b>. The password will not be shown again; they choose their own at first sign-in.</p><div className="card" style={{ fontSize: 18, margin: 0 }}><div>Username: <b>{shown.u}</b></div><div>Password: <b>{shown.p}</b></div></div></Modal> : null}
     </>
@@ -112,6 +114,33 @@ function UserModal({ u, onClose, onCreated }: { u: Profile | null; onClose: () =
         <div className="field"><label>First password</label><div style={{ display: 'flex', gap: 8 }}><input id="up" className="input" maxLength={72} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /><button className="btn ghost" title="Make a password" onClick={() => setF({ ...f, password: genPw() })}><Icon n="refresh" /></button></div><span className="hint">10+ characters with letters and numbers. They change it at first sign-in.</span></div></div>}
       <div className="frow"><div className="field"><label>Role</label><select id="ur" className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })}><option value="till">Till Operator</option><option value="shopadmin">Shop Admin</option><option value="whop">Warehouse Operator</option><option value="admin">Admin</option></select></div>
         {needShop ? <div className="field"><label>Shop</label><select id="us" className="input" value={f.shop || shops.data?.[0]?.id} onChange={(e) => setF({ ...f, shop: e.target.value })}>{(shops.data ?? []).filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div> : null}</div>
+      <div className="lerr">{a.err}</div>
+    </Modal>
+  );
+}
+/** The Admin gives a Shop Admin two passcodes: one opens their Invoices tab, the other prints the shift end report. */
+function PasscodeModal({ u, set, onClose }: { u: Profile; set: { kind: 'invoices' | 'day_end'; set_at: string }[]; onClose: () => void }) {
+  const refresh = useRefresh(), toast = useToast(), a = useAction();
+  const [v, setV] = useState({ invoices: '', day_end: '' });
+  const KINDS = [['invoices', 'Invoices passcode', 'Opens the Invoices tab: every invoice of the shop, to view, edit, delete or reprint.'], ['day_end', 'Shift end report passcode', 'Prints the shift end (day end) report, with every sale of the day.']] as const;
+  const gen = () => String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+  const save = () => a.run(async () => {
+    const todo = KINDS.filter(([k]) => v[k].trim());
+    if (!todo.length) throw new Error('Type a passcode first');
+    for (const [k, l] of todo) if (!/^\d{4,12}$/.test(v[k].trim())) throw new Error(`${l}: 4 to 12 digits`);
+    for (const [k] of todo) await rpc('set_passcode', { p_user: u.id, p_kind: k, p_code: v[k].trim() });
+    await refresh('passcodes', 'audit'); toast(`Passcode saved. Give it to ${u.name}.`); onClose();
+  });
+  const remove = (k: 'invoices' | 'day_end') => a.run(async () => { await rpc('set_passcode', { p_user: u.id, p_kind: k, p_code: '' }); await refresh('passcodes', 'audit'); toast('Passcode removed. It stays locked until you set a new one.', 'warn'); });
+  return (
+    <Modal title={'Passcodes for ' + u.name} icon="shield" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Close</button><button className="btn primary" id="pcsave" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Save passcodes</button></>}>
+      <p>Give these passcodes to <b>{u.name}</b> ({u.username}). Without a passcode the Invoices tab stays locked and the shift end report cannot be printed. A passcode is not shown again: write it down, or set a new one at any time.</p>
+      {KINDS.map(([k, l, h]) => { const cur = set.find((c) => c.kind === k); return <div className="field" key={k}><label htmlFor={'pc-' + k}>{l}</label>
+        <div style={{ display: 'flex', gap: 8 }}><input id={'pc-' + k} className="input" inputMode="numeric" autoComplete="off" maxLength={12} placeholder={cur ? 'Type a new one to change it' : '4 to 12 digits'} value={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.value.replace(/\D/g, '') })} />
+          <button className="btn ghost" title="Make a passcode" onClick={() => setV({ ...v, [k]: gen() })}><Icon n="refresh" /></button>
+          {cur ? <button className="btn ghost" title="Remove this passcode" disabled={a.busy} onClick={() => void remove(k)}><Icon n="trash" /></button> : null}</div>
+        <span className="hint">{h} {cur ? <b>Set on {dt(cur.set_at)}.</b> : <b>Not set: locked.</b>}</span></div>; })}
+      <Note i="shield">Five wrong tries block a passcode for 10 minutes; a new passcode from you lifts the block. Each use is in the activity log.</Note>
       <div className="lerr">{a.err}</div>
     </Modal>
   );

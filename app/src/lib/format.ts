@@ -10,9 +10,5 @@ export const tm = (t: string | number) => new Date(t).toLocaleTimeString('en-GB'
 export const shortCDF = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(Math.round(n)));
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 export const sum = <T,>(a: T[], f: (x: T) => number) => a.reduce((s, x) => s + f(x), 0);
-/** A sale worth more than the limit on the sales shown to the Shop Admin (USD, at the rate of the sale). The server
- *  leaves these out of the Shop Admin's invoices and reports; this is for sales still waiting on the device. */
-export const aboveShopLimit = (i: { total: number; rate: number }, s?: { shop_sales_limit_usd?: number | null } | null) =>
-  s?.shop_sales_limit_usd != null && Number(i.rate) > 0 && Number(i.total) / Number(i.rate) > Number(s.shop_sales_limit_usd);
 /** The internal rate (suppliers, expenses, vouchers); an installation without it uses the sales rate. */
 export const bookRate = (s?: { rate?: number; book_rate?: number } | null) => Number(s?.book_rate || s?.rate || 1);

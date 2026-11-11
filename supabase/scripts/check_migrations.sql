@@ -1,4 +1,4 @@
--- QuickSales: which database updates (migrations 10 to 24) this installation has.
+-- QuickSales: which database updates (migrations 10 to 25) this installation has.
 -- Paste it into the Supabase SQL Editor and click Run. It only reads; it changes nothing.
 -- Each "MISSING" file must be run, in order. A migration re-creates functions from the newest version it knows, so
 -- after running a missing older file, run every later file again too (they are safe to run twice). For example,
@@ -18,5 +18,6 @@ select step, case when ok then 'done' else 'MISSING: run this file' end as statu
   (21, '20261103000004_category_sales.sql',   exists (select 1 from pg_proc where proname = 'sales_report' and pg_get_functiondef(oid) like '%by_category%')),
   (22, '20261107000001_more_barcodes.sql',    exists (select 1 from pg_proc where proname = 'barcode_list' and pg_get_functiondef(oid) like '%at most 60 barcodes%')),
   (23, '20261111000001_profit_on_margin.sql', exists (select 1 from pg_proc where proname = 'sales_report' and pg_get_functiondef(oid) like '%(1 - vat_rate / 100)%')),
-  (24, '20261111000002_shop_sales_limit.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'settings' and column_name = 'shop_sales_limit_usd'))
+  (24, '20261111000002_shop_sales_limit.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'settings' and column_name = 'shop_sales_limit_usd')),
+  (25, '20261111000003_shop_passcodes.sql',   exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'shop_passcodes'))
 ) as m(n, step, ok) order by n;

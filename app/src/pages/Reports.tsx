@@ -4,8 +4,9 @@ import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useCategories, useReport, useSettings, useShops } from '../data/queries';
 import { bookRate, dt, fCDF, fUSD, ld, shortCDF, today } from '../lib/format';
-import { printHTML, reportHTML, shiftSlipHTML, type CategorySales } from '../lib/print';
-import { Bars, Dual2, Empty, Head, HList, Kpi, Modal } from '../components/ui';
+import { printHTML, reportHTML, shiftSlipHTML, type CategorySales, type Slip } from '../lib/print';
+import { Bars, Dual2, Empty, Head, HList, Kpi, Modal, Note, useAction } from '../components/ui';
+import { rpc } from '../lib/supabase';
 import { CategoryChart, unitsText } from '../components/CategoryChart';
 
 export default function Reports() {
@@ -21,8 +22,19 @@ export default function Reports() {
   const r = rep.data, single = from === to;
   const shopName = (id: string) => shops.data?.find((s) => s.id === id)?.name ?? '';
   const setRange = (k: string) => { const n = Date.now(), D = 864e5; setTo(today()); setFrom(k === 'today' ? today() : k === '7' ? ld(n - 6 * D) : k === '30' ? ld(n - 29 * D) : today().slice(0, 8) + '01'); };
+  // the Shop Admin prints the shift end report with the passcode the Admin gave: the slip then has every sale of the day
+  const [ask, setAsk] = useState(false), [code, setCode] = useState(''), pa = useAction();
+  const printSlip = () => pa.run(async () => {
+    if (!code.trim()) throw new Error('Enter the passcode');
+    const res = await rpc<{ ok: boolean; error?: string; slip?: Slip }>('day_end_report', { p_day: from, p_code: code });
+    setCode('');
+    if (!res.ok || !res.slip) throw new Error(res.error ?? 'Wrong passcode');
+    const html = shiftSlipHTML(res.slip, profile!.username, from, settings.data?.rate ?? 0);
+    setAsk(false); setDoc({ title: 'Day end report', html, slip: true }); setTimeout(() => printHTML(html), 400);
+  });
   const print = () => {
     if (!r) return;
+    if (single && !isAdmin) { pa.setErr(''); setCode(''); setAsk(true); return; }
     if (single) {
       // day end report: one slip per shop (all shops plus a total for the Admin)
       const slips = r.slips.map((s) => shiftSlipHTML(s, profile!.username, from, settings.data?.rate ?? 0));
@@ -36,7 +48,7 @@ export default function Reports() {
   };
   return (
     <>
-      <Head t="Sales report" s="Pick the dates, then print. A single day, such as Today, prints the day end report for the shop." a={<button className="btn primary" disabled={!r} onClick={print}><Icon n="printer" /> {single ? 'Print day end report' : 'Print or save as PDF'}</button>} />
+      <Head t="Sales report" s={isAdmin ? 'Pick the dates, then print. A single day, such as Today, prints the day end report for the shop.' : 'Pick the dates, then print. A single day, such as Today, prints the shift end report for the shop, with the passcode the Admin gave you.'} a={<button className="btn primary" disabled={!r} onClick={print}><Icon n="printer" /> {single ? 'Print day end report' : 'Print or save as PDF'}</button>} />
       <div className="card"><div className="rangebar">
         <div className="field"><label>From</label><input type="date" className="input" value={from} max={today()} onChange={(e) => setFrom(e.target.value)} /></div>
         <div className="field"><label>To</label><input type="date" className="input" value={to} max={today()} onChange={(e) => setTo(e.target.value)} /></div>
@@ -69,6 +81,12 @@ export default function Reports() {
             <td className="r">{it.pcs}{it.pieces ? <div className="code">+ {it.pieces} piece{it.pieces > 1 ? 's' : ''}</div> : null}</td>
             <td className="r nw"><b>{fCDF(it.val)}</b></td><td className="r">{cat.val ? Math.round((it.val * 1000) / cat.val) / 10 : 0}%</td></tr>)}
         </tbody></table></div>
+      </Modal> : null}
+      {ask ? <Modal title="Shift end report" icon="lock" onClose={() => setAsk(false)} foot={<><button className="btn" onClick={() => setAsk(false)}>Cancel</button><button className="btn primary" id="slipbtn" disabled={pa.busy} onClick={() => void printSlip()}><Icon n="printer" /> Print shift end report</button></>}>
+        <p>Enter the Shift end report passcode the Admin gave you to print the report of <b>{dt(from + 'T12:00:00').split(',')[0]}</b>.</p>
+        <div className="field"><label htmlFor="slipcode">Passcode</label><input id="slipcode" className="input" type="password" inputMode="numeric" autoComplete="off" maxLength={12} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') void printSlip(); }} autoFocus /></div>
+        <div className="lerr">{pa.err}</div>
+        <Note i="shield">It needs the connection.</Note>
       </Modal> : null}
       {doc ? <Modal title={doc.title} icon="doc" wide={!doc.slip} onClose={() => setDoc(null)} foot={<><button className="btn" onClick={() => setDoc(null)}>Close</button><button className="btn primary" onClick={() => printHTML(doc.html)}><Icon n="printer" /> Print</button></>}>
         <div className={doc.slip ? 'rwrap' : ''} id="slips" style={doc.slip ? { display: 'grid', gap: 14 } : undefined} dangerouslySetInnerHTML={{ __html: doc.html }} /></Modal> : null}
