@@ -547,7 +547,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":true,"barcode":true,"other":true}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
@@ -566,7 +566,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false}'::jsonb, 'saving settings without the switches turns them off');
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false}'::jsonb, 'saving settings without the switches turns them off');
 reset role;
 
 -- ===== till operators sell directly when the Admin turns it on =====
@@ -1044,6 +1044,82 @@ select t.ok(exists (select 1 from audit_log where action like '%discount%with th
 reset role;
 update settings set features = features - 'till_sells' where id = 1;
 select t.ok(t.unbalanced() = 0, 'the books still balance');
+
+-- ===== shift end reports: a printed shift closes, the next one starts fresh; combined or per till =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'day_end', '2468');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.shift_end_report('1111')->>'error') = 'Wrong passcode', 'a shift end report needs the passcode');
+select t.fails(format($$select public.shift_end_report('2468', 'close', '%s')$$, gen_random_uuid()), 'not in your shop', 'only the tills of the shop');
+select t.put('day0', public.shift_end_report('2468', 'day', null, current_date)::text);
+-- the first shift of the day has every sale of the day so far, like the whole-day report
+select t.put('shf1', public.shift_end_report('2468')::text);
+select t.ok((t.get('shf1')::jsonb->>'shift_no')::int = 1 and (t.get('shf1')::jsonb->'slip'->>'n')::int = (t.get('day0')::jsonb->'slip'->>'n')::int
+  and (t.get('shf1')::jsonb->'slip'->>'value_fc')::bigint = (t.get('day0')::jsonb->'slip'->>'value_fc')::bigint, 'shift 1 has the sales of the day so far');
+-- printed again at once: a fresh shift with nothing in it
+select t.put('shf2', public.shift_end_report('2468')::text);
+select t.ok((t.get('shf2')::jsonb->>'shift_no')::int = 2 and (t.get('shf2')::jsonb->'slip'->>'n')::int = 0 and (t.get('shf2')::jsonb->'slip'->>'value_fc')::bigint = 0,
+  'the next shift end report starts fresh');
+-- a sale on till 2 and one on till 1 (the till operator selling directly)
+reset role;
+update settings set features = features || '{"till_sells": true}' where id = 1;
+select t.put('sno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('sno2', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+set role authenticated;
+select public.submit_invoice(t.csale(t.get('sno1'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 1, 'price', 25650))));
+select t.as('00000000-0000-0000-0000-00000000000d');
+select public.submit_invoice(t.dord(gen_random_uuid()::text, t.get('sno2'), '{}'));
+select t.as('00000000-0000-0000-0000-00000000000c');
+-- an invoice of shift 1 corrected now: the money given back counts in this shift
+select public.edit_invoice(t.get('lat')::uuid, '[{"line_no":1,"qty":1}]', 10, 'Discount after the sale');
+select t.put('back', ((select from_total - to_total from invoice_edits where invoice_id = t.get('lat')::uuid order by id desc limit 1))::text);
+-- till 1 alone: only its sale; its own shift 1
+select t.put('d1', public.shift_end_report('2468', 'day', t.get('dev1')::uuid, current_date)::text);
+select t.put('t1', public.shift_end_report('2468', 'close', t.get('dev1')::uuid)::text);
+select t.ok((t.get('t1')::jsonb->>'shift_no')::int = 1 and (t.get('t1')::jsonb->>'till') = (select code from devices where id = t.get('dev1')::uuid)
+  and (t.get('t1')::jsonb->'slip'->>'n') = (t.get('d1')::jsonb->'slip'->>'n') and (t.get('t1')::jsonb->'slip'->>'value_fc') = (t.get('d1')::jsonb->'slip'->>'value_fc')
+  and (t.get('d1')::jsonb->'slip'->>'n')::int < (t.get('day0')::jsonb->'slip'->>'n')::int + 2, 'a till''s first shift has that till''s sales of the day, not the others''');
+-- combined: both sales since shift 2, and the correction
+select t.put('shf3', public.shift_end_report('2468')::text);
+select t.ok((t.get('shf3')::jsonb->>'shift_no')::int = 3 and (t.get('shf3')::jsonb->'slip'->>'n')::int = 2 and (t.get('shf3')::jsonb->'slip'->>'value_fc')::bigint = 25650 + 51300,
+  'printing one till does not close the combined shift');
+select t.ok((t.get('shf3')::jsonb->'slip'->>'returned')::bigint = t.get('back')::bigint and t.get('back')::bigint > 0
+  and (t.get('shf3')::jsonb->'slip'->>'collected')::bigint = 25650 + 51300, 'a correction counts in the shift it was made in');
+select t.ok((public.shift_end_report('2468', 'close', t.get('dev1')::uuid)->'slip'->>'n')::int = 0, 'the till''s next shift starts fresh');
+-- the day keeps every shift together
+select t.ok((public.shift_end_report('2468', 'day', null, current_date)->'slip'->>'n')::int = (t.get('day0')::jsonb->'slip'->>'n')::int + 2, 'the day end report still has the whole day');
+-- reprint: the same as printed, even after more sales
+select t.ok((public.shift_end_report('2468', 'reprint', null, null, (select id from shift_closes where shift_no = 1 and device_id is null and shop_id = t.get('gom')::uuid))->'slip')
+  = (t.get('shf1')::jsonb->'slip'), 'a printed shift prints again the same');
+select t.ok((select count(*) from shift_closes) = 5, 'the Shop Admin sees the list of printed shifts');
+select t.fails($$select slip from public.shift_closes$$, 'permission denied', 'but not their amounts without the passcode');
+select t.as('00000000-0000-0000-0000-00000000000e');
+select t.ok((select count(*) from shift_closes) = 0, 'another shop''s shifts are not shown');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok(exists (select 1 from audit_log where action like 'Shift end report 3 of % (all tills) printed, 2 invoices%'), 'each shift printed is in the activity log');
+reset role;
+update settings set features = features - 'till_sells' where id = 1;
+
+-- ===== one copy of each invoice (a switch in Settings, off by default) =====
+select t.ok((select copies || '/' || printed from invoices where no = t.get('sno1')) = '2/2', 'by default an invoice prints two copies');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features || '{"one_copy": true}') from settings));
+select t.ok((select (features->>'one_copy')::boolean from settings), 'the Admin turns on one copy');
+reset role;
+select t.put('cno9', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.submit_invoice(t.csale(t.get('cno9'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 1, 'price', 25650))));
+select t.ok((select copies || '/' || printed from invoices where no = t.get('cno9')) = '1/1', 'with it on, an invoice is made with one copy');
+select public.record_reprint((select id from invoices where no = t.get('cno9')));
+select t.ok((select printed - copies from invoices where no = t.get('cno9')) = 1, 'a duplicate counts as one duplicate');
+select t.ok((select copies from invoices where no = t.get('sno1')) = 2, 'invoices made before keep their two copies');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features - 'one_copy') from settings));
+select t.ok(not (select (features->>'one_copy')::boolean from settings), 'and back to two copies');
+reset role;
 
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;

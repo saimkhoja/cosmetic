@@ -218,6 +218,8 @@ export default function Till() {
     return { lines, missing };
   };
 
+  // the Admin's Settings: one copy of each invoice (the customer's) instead of two
+  const oneCopy = !!snap?.settings.features?.one_copy;
   // a till operator's discount goes with the token of their Discount passcode entry; no discount, nothing is sent
   const tillDisc = (d: Disc, amount: number) => (amount > 0 ? { ...(typeof d === 'number' ? { disc_pct: d } : { disc: amount }), discount_token: tok ?? undefined } : {});
   // till operator: the invoice prints here (customer and shop copies) and goes to the shop admin with the order;
@@ -231,10 +233,10 @@ export default function Till() {
       const id = crypto.randomUUID(), t = new Date().toISOString(), no = await nextInvoiceNo(dev);
       const items = priced.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
       const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: T.gross, disc_pct: T.pct, disc: T.disc, total: T.total, vat: T.vat, ht: T.ht,
-        tendered: T.total, change: 0, printed: 2, items, edits: [], synced: false, customer, order_id: id, prepared_by_name: null };
+        tendered: T.total, change: 0, copies: oneCopy ? 1 : 2, printed: oneCopy ? 1 : 2, items, edits: [], synced: false, customer, order_id: id, prepared_by_name: null };
       await outboxPut({ kind: 'order', id, t, shop_id: shopId, tries: 0, total: T.total, created_by: profile!.id,
         payload: { id, customer, t, no, device_id: dev.id, rate, vat_rate: vat, ...tillDisc(dp, T.disc), items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
-      printHTML(saleCopies(inv, snap.settings.company, snap.shop));
+      printHTML(saleCopies(inv, snap.settings.company, snap.shop, false, oneCopy));
       toast(`Invoice ${no} for ${custName(customer)}, ${fCDF(T.total)}, printed and sent to the shop admin for approval.`);
       resetSale(); void syncOutbox();
     } finally { busy.current = false; }
@@ -258,13 +260,13 @@ export default function Till() {
       if (tend < S.total) { toast(`Cash received is less than the total, ${fCDF(S.total)}`, 'warn'); return false; }
       const no = tillInv ? tillInv.invoice_no! : await nextInvoiceNo(dev), id = tillInv ? tillInv.id : crypto.randomUUID(), t = new Date().toISOString();
       const items = pr.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
-      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: S.pct, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, paid_usd: usd?.paid_usd ?? 0, paid_cdf: usd ? usd.paid_cdf : tend, change_usd: usd?.change_usd ?? 0, change_cdf: tend - S.total - Math.round((usd?.change_usd ?? 0) * rate), printed: 2, items, edits: [], synced: false,
+      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: S.pct, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, paid_usd: usd?.paid_usd ?? 0, paid_cdf: usd ? usd.paid_cdf : tend, change_usd: usd?.change_usd ?? 0, change_cdf: tend - S.total - Math.round((usd?.change_usd ?? 0) * rate), copies: oneCopy ? 1 : 2, printed: oneCopy ? 1 : 2, items, edits: [], synced: false,
         customer: cust, order_id: order?.id ?? null, prepared_by_name: order?.created_by_name ?? null, revised_from: revised ? tillInv!.total ?? null : null };
       await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(isAdmin ? (typeof disc === 'number' ? { disc_pct: disc } : { disc: S.disc }) : tillDisc(disc, S.disc)), tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
-      if (!tillInv || revised) printHTML(saleCopies(inv, snap.settings.company, snap.shop, cashStep));
+      if (!tillInv || revised) printHTML(saleCopies(inv, snap.settings.company, snap.shop, cashStep, oneCopy));
       setLast(inv);
       const chg = inv.change > 0 ? ` Change ${changeText(inv)}.` : '';
       toast(tillInv ? (revised ? `Invoice ${no} for ${custName(cust)} changed and approved, ${fCDF(S.total)}.${chg} Printing the corrected invoice; the copy printed at the till is void.` : `Invoice ${no} for ${custName(cust)} approved, ${fCDF(S.total)}.${chg} Sale complete, nothing to print.`)

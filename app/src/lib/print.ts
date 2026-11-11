@@ -89,8 +89,9 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   ${ed ? `<div class="small">Modifiée le ${dt(ed.at)} par ${esc(ed.by_name)}</div>` : ''}
   <div class="rnb">${c.footer ? `<div class="c">${esc(c.footer)}</div>` : ''}${NB}</div></div>`;
 }
-export const saleCopies = (inv: Invoice, c: Company, shop: Shop, cash = false) =>
-  receiptHTML(inv, c, shop, { copy: 'client', cash }) + '<div class="pagebreak"></div>' + receiptHTML(inv, c, shop, { copy: 'shop', cash });
+/** The copies of a new invoice: customer and shop, or only the customer's when the Admin chose one copy in Settings. */
+export const saleCopies = (inv: Invoice, c: Company, shop: Shop, cash = false, one = false) =>
+  receiptHTML(inv, c, shop, { copy: 'client', cash }) + (one ? '' : '<div class="pagebreak"></div>' + receiptHTML(inv, c, shop, { copy: 'shop', cash }));
 
 /** Return note for goods sent back to a supplier: the driver signs it. No prices (the warehouse prints it). */
 export function supplierReturnNoteHTML(r: { no: string; kind: string; reason: string; note: string; created_at: string; created_by_name: string; supplier_return_items: { product_id: string; qty: number }[] }, supplier: string, c: Company, products: Map<string, Product>) {
@@ -115,7 +116,8 @@ export function deliveryNoteHTML(d: Delivery, shop: Shop, c: Company, products: 
 
 export interface Slip { shop_name: string; n: number; value_fc: number; value_usd: number; collected: number; returned: number; collected_usd?: number; collected_cdf?: number }
 /** Day end slip in the shop's shift end format. Collected USD is what was paid in dollars (when USD payment is on); returns are in CDF. */
-export function shiftSlipHTML(s: Slip, user: string, day: string, rate: number) {
+/** extra: the till (combined when absent) and the shift (number and times) of a shift end report. */
+export function shiftSlipHTML(s: Slip, user: string, day: string, rate: number, extra?: { till?: string | null; shift?: string }) {
   const d = new Date(), isToday = day === today();
   const ddmm = day.slice(8, 10) + '-' + day.slice(5, 7) + '-' + day.slice(0, 4);
   const when = isToday ? `${ddmm} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}` : ddmm;
@@ -124,7 +126,7 @@ export function shiftSlipHTML(s: Slip, user: string, day: string, rate: number) 
   const cu = Number(s.collected_usd ?? 0), cc = Number(s.collected_cdf ?? s.collected);
   const hr = '<tr><td colspan="2"><hr></td></tr>', bold = (a: string, b: string) => row(a, b).replace('<tr>', '<tr style="font-weight:700;font-size:13.5px">');
   return `<div class="receipt slip"><div class="c" style="font-size:19px;font-weight:700;letter-spacing:.04em;margin:4px 0 6px">Shift End Report</div><table>${hr}
-  ${row('Date', when)}${row('User', esc(user))}${row('Shop', esc(s.shop_name))}${row('TAUX', fc(rate))}${hr}
+  ${row('Date', when)}${row('User', esc(user))}${row('Shop', esc(s.shop_name))}${extra ? row('Till', esc(extra.till ? 'Till ' + extra.till : 'All tills')) : ''}${extra?.shift ? row('Shift', esc(extra.shift)) : ''}${row('TAUX', fc(rate))}${hr}
   ${row('Total Invoice', s.n)}${row('Invoice Value USD', u3(s.value_usd))}${row('Invoice Value CDF', fc(s.value_fc))}${hr}
   ${row('Collected USD', u3(cu))}${row('Collected CDF', fc(cc))}${row('Return USD', u3(0))}${row('Return CDF', fc(s.returned))}${hr}
   ${bold('Balance USD', u3(cu))}${bold('Balance CDF', fc(cc - s.returned))}</table></div>`;

@@ -35,6 +35,12 @@ async function openInvoices(page: Page, code = '4821') {
   await expect(page.locator('#invlock')).toContainText('Invoices are locked');
   await page.fill('#pcode', code); await page.click('#pcodebtn');
 }
+/** Opens a group of options on the Settings page, if it is closed. */
+async function openGroup(page: Page, id: string) {
+  const g = page.locator('#og-' + id);
+  if ((await g.getAttribute('open')) === null) await g.locator('summary').click();
+  await expect(g).toHaveAttribute('open', '');
+}
 const prints = (page: Page) => page.evaluate(() => (window as unknown as { __prints: string[] }).__prints);
 
 test('a full day in SIM', async ({ browser }) => {
@@ -497,7 +503,11 @@ test('a full day in SIM', async ({ browser }) => {
 
   // ---- supermarket switches: walk-in sales without a name and barcode scanning
   await admin.getByRole('link', { name: 'Settings' }).click();
+  await expect(admin.locator('#og-selling')).toContainText('0 of 2 on');                   // the options come in groups that open and close
+  await expect(admin.locator('#s-customer_optional')).toBeHidden();
+  await openGroup(admin, 'selling'); await openGroup(admin, 'scanning');
   await admin.check('#s-customer_optional'); await admin.check('#s-barcode');
+  await expect(admin.locator('#og-selling')).toContainText('1 of 2 on');
   await admin.getByRole('button', { name: 'Save settings' }).click();
   await expect(admin.getByText('Settings saved')).toBeVisible();
   await admin.getByRole('link', { name: 'Inventory' }).click();
@@ -593,6 +603,7 @@ test('a full day in SIM', async ({ browser }) => {
   expect((await prints(shop)).length).toBe(printedDisc);
   // ---- the till operator sells directly once the Admin allows it
   await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'selling'); await openGroup(admin, 'payment');
   await admin.check('#s-till_sells'); await admin.check('#s-cash_change');
   await admin.getByRole('button', { name: 'Save settings' }).click();
   await expect(admin.getByText('Settings saved')).toBeVisible();
@@ -619,6 +630,7 @@ test('a full day in SIM', async ({ browser }) => {
   expect(cashRcpt).toContain('Grace Mbuyi'); expect(cashRcpt).toMatch(/Cash received\s*20,000\.00/); expect(cashRcpt).toMatch(/Change\s*5,750\.00/);
   // ---- payment in USD: $20 for 14 250 CDF at 2 850, change given as whole dollars
   await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'payment');
   await admin.check('#s-usd_pay');
   await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
   await till.goto('/till');
@@ -647,6 +659,31 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done, 13 000 CDF/)).toBeVisible();
   await expect(till.locator('.pill')).toContainText('all synced', { timeout: 40000 });      // the server took the discount
 
+  // ---- one copy of each invoice: the Admin turns it on in Settings, the next sale prints the customer copy only
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'printing');
+  await expect(admin.locator('#s-one_copy')).not.toBeChecked();                           // off by default: two copies
+  await admin.check('#s-one_copy');
+  await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
+  await shop.goto('/till');
+  await shop.fill('#cust', 'One copy customer'); await shop.press('#cust', 'Enter');
+  await shop.locator('.ptile', { hasText: 'Shea body lotion' }).click();
+  await shop.locator('.ubtn', { hasText: 'pcs' }).first().click();
+  const before1 = (await prints(shop)).length;
+  await shop.getByRole('button', { name: 'Take payment' }).click();
+  await shop.fill('#cashin', '20000');
+  await shop.locator('.modal').getByRole('button', { name: 'Take cash and print' }).click();
+  await expect.poll(async () => (await prints(shop)).length).toBe(before1 + 1);
+  const oneCopy = (await prints(shop)).at(-1)!;
+  expect(oneCopy).toContain('Copie client'); expect(oneCopy).not.toContain('Copie magasin');
+  await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
+  await openInvoices(shop);
+  await expect(shop.locator('main tr', { hasText: 'One copy customer' })).toContainText('1 copy');
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'printing');
+  await admin.uncheck('#s-one_copy');
+  await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
+
   // ---- two rates: the internal rate for expenses, the sales rate for item prices (changed from the Items page)
   await admin.getByRole('link', { name: 'Settings' }).click();
   await expect(admin.locator('#sbook')).toHaveValue('2850');
@@ -668,6 +705,15 @@ test('a full day in SIM', async ({ browser }) => {
 
   // ---- the sales on the Shop Admin's screens stop at 347 USD a sale: 3 cartons (324 USD at 3 000) show, 4 cartons (432 USD) do not.
   // The Invoices tab, opened with its passcode, lists both and edits either; the shift end report, with its passcode, has both; the Admin sees both
+  // a shift end report closes the shift: print one now, so the next shift holds only the two sales below
+  await shop.getByRole('link', { name: 'Reports' }).click();
+  await shop.getByRole('button', { name: 'Today' }).click();
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
+  await expect(shop.locator('#slipshift')).toContainText('New: shift 2, sales since');
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
+  await expect(shop.locator('#slips')).toContainText('Shift End Report');
+  await expect(shop.locator('#slips')).toContainText('All tills');
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
   for (const [cust, cartons] of [['Within the limit', 3], ['Above the limit', 4]] as const) {
     await shop.goto('/till');
     await shop.fill('#cust', cust); await shop.press('#cust', 'Enter');
@@ -695,10 +741,33 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
   await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toHaveCount(0);
   const shown = Number(/(\d+) invoices/.exec(await shop.locator('.kpi', { hasText: 'Sales, VAT included' }).innerText())![1]);   // the report is loaded: its rows are there
-  await shop.getByRole('button', { name: 'Print day end report' }).click();                // the printed shift end report has every sale
+  expect(shown).toBeGreaterThan(1);
+  // the shift end report starts fresh after the last one: shift 3 has the two sales, also the one above the limit
+  const total = async () => Number(/Total Invoice\s*:\s*(\d+)/.exec(await shop.locator('#slips').innerText())![1]);
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
   await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
   await expect(shop.locator('#slips')).toContainText('Shift End Report');
-  expect(Number(/Total Invoice\s*:\s*(\d+)/.exec(await shop.locator('#slips').innerText())![1])).toBe(shown + 1);
+  await expect(shop.locator('#slips')).toContainText(/Shift\s*:\s*3,/);
+  expect(await total()).toBe(2);
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+  await expect(shop.locator('.kpi', { hasText: 'Sales, VAT included' })).toContainText(`${shown} invoices`);   // the day keeps every shift
+  // printed again: the same shift 3, marked as a copy
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
+  await expect(shop.locator('#slipshift')).toContainText('New: shift 4');
+  await expect(shop.locator('#slipshift option').nth(1)).toContainText('Print again: shift 3');
+  await shop.selectOption('#slipshift', { index: 1 });
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
+  await expect(shop.locator('#slips')).toContainText(/Shift\s*:\s*3,.*\(copy\)/);
+  expect(await total()).toBe(2);
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+  // one till only: its own shift 1, since the start of the day
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
+  const tillLabel = (await shop.locator('#sliptill option').nth(1).innerText()).trim();
+  await shop.selectOption('#sliptill', { index: 1 });
+  await expect(shop.locator('#slipshift')).toContainText('New: shift 1, sales since the start of the day');
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
+  await expect(shop.locator('#slips')).toContainText(tillLabel);
+  await expect(shop.locator('#slips')).toContainText(/Shift\s*:\s*1,/);
   await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
   await shop.getByRole('link', { name: 'Invoices' }).click();                              // locked again, and the search does not find it
   await expect(shop.locator('#invlock')).toBeVisible();
