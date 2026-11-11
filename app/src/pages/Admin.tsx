@@ -12,6 +12,7 @@ import { QtyCell } from './Inventory';
 import { stockValue } from '../lib/units';
 import { DeliveryModal } from './Deliveries';
 import type { Profile, Role, Shop } from '../lib/types';
+import type { PasscodeKind } from '../data/queries';
 
 export function AdminHome() {
   const nav = useNavigate();
@@ -86,9 +87,9 @@ export function Users() {
       <div className="card p0"><div className="tw"><table className="t"><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Workplace</th><th>Status</th><th /></tr></thead><tbody>
         {(users.data ?? []).map((u) => <tr key={u.id}><td><b>{u.name}</b></td><td>{u.username}</td><td><span className="chip">{R[u.role]}</span></td><td>{u.shop_id ? shops.data?.find((s) => s.id === u.shop_id)?.name : 'Central store'}</td>
           <td>{u.role === 'shopadmin' && (passcodes.data ?? []).filter((c) => c.user_id === u.id).length < 2 ? <><span className="chip warn" title="Without a passcode from you the Shop Admin cannot open the Invoices tab or print the shift end report">{(passcodes.data ?? []).some((c) => c.user_id === u.id) ? 'A passcode is missing' : 'No passcodes yet'}</span> </> : null}{u.active ? (u.must_change_password ? <span className="chip warn">Must choose a password</span> : <span className="chip ok">Active</span>) : <span className="chip bad">Disabled</span>}</td>
-          <td><div className="act"><button title="Edit name, role or shop" onClick={() => setOpen(u)}><Icon n="edit" /></button><button title="Reset password" onClick={() => setReset(u)}><Icon n="key" /></button>{u.role === 'shopadmin' ? <button title="Passcodes: Invoices and shift end report" onClick={() => setCodes(u)}><Icon n="shield" /></button> : null}{u.id !== profile!.id ? <button title={u.active ? 'Disable account' : 'Enable account'} onClick={() => void toggle(u)}><Icon n={u.active ? 'lock' : 'unlock'} /></button> : null}</div></td></tr>)}
+          <td><div className="act"><button title="Edit name, role or shop" onClick={() => setOpen(u)}><Icon n="edit" /></button><button title="Reset password" onClick={() => setReset(u)}><Icon n="key" /></button>{u.role === 'shopadmin' ? <button title="Passcodes: Invoices and shift end report" onClick={() => setCodes(u)}><Icon n="shield" /></button> : u.role === 'till' ? <button title="Passcode: discount on an invoice" onClick={() => setCodes(u)}><Icon n="shield" /></button> : null}{u.id !== profile!.id ? <button title={u.active ? 'Disable account' : 'Enable account'} onClick={() => void toggle(u)}><Icon n={u.active ? 'lock' : 'unlock'} /></button> : null}</div></td></tr>)}
       </tbody></table></div></div>
-      <Note i="shield"><span>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives goods from a chosen supplier, reviews the shops' stock requests (approve, edit or reject), receives returns from the shops, sees every shop's stock, sends and corrects deliveries, and reads the stock statements of the store and each shop; no cost prices per item and no price changes. <b>Shop Admin</b>: approves, rejects or edits the till operators' orders (approving takes the stock and completes the invoice the till printed; it prints again only if changed), takes the cash, sells directly, discount on an invoice, edits (quantities, units) or deletes an invoice with a reason, reprints, prints the stock count sheet, orders stock from the central store, receives deliveries, sends returns to the store, prints price tickets and reads the shop's reports; the Invoices tab and the shift end report each open with a passcode you give (the shield button on their row). <b>Till Operator</b>: types the customer name, picks the items (pcs, half dozen, dozen, carton), sends the order for approval and prints its invoice for the customer, and prints price tickets; no cash, no invoice list and no reports.</span></Note>
+      <Note i="shield"><span>What each role can do. <b>Admin</b>: everything, including cost prices, selling prices and piece prices. <b>Warehouse Operator</b>: sees item names, units and quantities, receives goods from a chosen supplier, reviews the shops' stock requests (approve, edit or reject), receives returns from the shops, sees every shop's stock, sends and corrects deliveries, and reads the stock statements of the store and each shop; no cost prices per item and no price changes. <b>Shop Admin</b>: approves, rejects or edits the till operators' orders (approving takes the stock and completes the invoice the till printed; it prints again only if changed), takes the cash, sells directly, discount on an invoice, edits (quantities, units) or deletes an invoice with a reason, reprints, prints the stock count sheet, orders stock from the central store, receives deliveries, sends returns to the store, prints price tickets and reads the shop's reports; the Invoices tab and the shift end report each open with a passcode you give (the shield button on their row). <b>Till Operator</b> (a discount on an invoice only with the Discount passcode you give, the shield button on their row): types the customer name, picks the items (pcs, half dozen, dozen, carton), sends the order for approval and prints its invoice for the customer, and prints price tickets; no cash, no invoice list and no reports.</span></Note>
       <Note><span>Passwords are stored only as secure hashes by Supabase Auth; nobody, not even the Admin, can read them. A new or reset login must choose its own password at first sign-in. The screen locks after 15 minutes without activity.</span></Note>
       {open ? <UserModal u={open === 'new' ? null : open} onClose={() => setOpen(null)} onCreated={(x) => setShown(x)} /> : null}
       {codes ? <PasscodeModal u={codes} set={(passcodes.data ?? []).filter((c) => c.user_id === codes.id)} onClose={() => setCodes(null)} /> : null}
@@ -118,11 +119,15 @@ function UserModal({ u, onClose, onCreated }: { u: Profile | null; onClose: () =
     </Modal>
   );
 }
-/** The Admin gives a Shop Admin two passcodes: one opens their Invoices tab, the other prints the shift end report. */
-function PasscodeModal({ u, set, onClose }: { u: Profile; set: { kind: 'invoices' | 'day_end'; set_at: string }[]; onClose: () => void }) {
+/** The Admin gives a Shop Admin two passcodes (one opens their Invoices tab, the other prints the shift end report)
+ *  and a till operator one: it unlocks the Discount button on their till, for one invoice per entry. */
+function PasscodeModal({ u, set, onClose }: { u: Profile; set: { kind: PasscodeKind; set_at: string }[]; onClose: () => void }) {
   const refresh = useRefresh(), toast = useToast(), a = useAction();
-  const [v, setV] = useState({ invoices: '', day_end: '' });
-  const KINDS = [['invoices', 'Invoices passcode', 'Opens the Invoices tab: every invoice of the shop, to view, edit, delete or reprint.'], ['day_end', 'Shift end report passcode', 'Prints the shift end (day end) report, with every sale of the day.']] as const;
+  const [v, setV] = useState<Record<PasscodeKind, string>>({ invoices: '', day_end: '', discount: '' });
+  const till = u.role === 'till';
+  const KINDS: readonly (readonly [PasscodeKind, string, string])[] = till
+    ? [['discount', 'Discount passcode', 'Unlocks the Discount button on their till: a discount on one invoice per entry, 30% at most.']]
+    : [['invoices', 'Invoices passcode', 'Opens the Invoices tab: every invoice of the shop, to view, edit, delete or reprint.'], ['day_end', 'Shift end report passcode', 'Prints the shift end (day end) report, with every sale of the day.']];
   const gen = () => String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
   const save = () => a.run(async () => {
     const todo = KINDS.filter(([k]) => v[k].trim());
@@ -131,10 +136,10 @@ function PasscodeModal({ u, set, onClose }: { u: Profile; set: { kind: 'invoices
     for (const [k] of todo) await rpc('set_passcode', { p_user: u.id, p_kind: k, p_code: v[k].trim() });
     await refresh('passcodes', 'audit'); toast(`Passcode saved. Give it to ${u.name}.`); onClose();
   });
-  const remove = (k: 'invoices' | 'day_end') => a.run(async () => { await rpc('set_passcode', { p_user: u.id, p_kind: k, p_code: '' }); await refresh('passcodes', 'audit'); toast('Passcode removed. It stays locked until you set a new one.', 'warn'); });
+  const remove = (k: PasscodeKind) => a.run(async () => { await rpc('set_passcode', { p_user: u.id, p_kind: k, p_code: '' }); await refresh('passcodes', 'audit'); toast('Passcode removed. It stays locked until you set a new one.', 'warn'); });
   return (
-    <Modal title={'Passcodes for ' + u.name} icon="shield" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Close</button><button className="btn primary" id="pcsave" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Save passcodes</button></>}>
-      <p>Give these passcodes to <b>{u.name}</b> ({u.username}). Without a passcode the Invoices tab stays locked and the shift end report cannot be printed. A passcode is not shown again: write it down, or set a new one at any time.</p>
+    <Modal title={(till ? 'Discount passcode for ' : 'Passcodes for ') + u.name} icon="shield" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Close</button><button className="btn primary" id="pcsave" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> {till ? 'Save passcode' : 'Save passcodes'}</button></>}>
+      <p>{till ? <>Give this passcode to <b>{u.name}</b> ({u.username}). Without it the Discount button on their till stays locked.</> : <>Give these passcodes to <b>{u.name}</b> ({u.username}). Without a passcode the Invoices tab stays locked and the shift end report cannot be printed.</>} A passcode is not shown again: write it down, or set a new one at any time.</p>
       {KINDS.map(([k, l, h]) => { const cur = set.find((c) => c.kind === k); return <div className="field" key={k}><label htmlFor={'pc-' + k}>{l}</label>
         <div style={{ display: 'flex', gap: 8 }}><input id={'pc-' + k} className="input" inputMode="numeric" autoComplete="off" maxLength={12} placeholder={cur ? 'Type a new one to change it' : '4 to 12 digits'} value={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.value.replace(/\D/g, '') })} />
           <button className="btn ghost" title="Make a passcode" onClick={() => setV({ ...v, [k]: gen() })}><Icon n="refresh" /></button>
@@ -207,7 +212,7 @@ export function SettingsPage() {
       <div className="card"><h3><Icon n="cart" /> Till options</h3>
         {sw('customer_optional', 'The customer name is optional: walk-in customers are sold to without typing a name')}
         {sw('barcode', 'Barcode scanning: items have barcodes (several per item if needed), and scanning any of them at the till adds 1 pc to the sale')}
-        {sw('till_sells', 'Till operators sell directly: they take the cash and print the invoice without the shop admin approving the order (only the shop admin gives discounts)')}
+        {sw('till_sells', 'Till operators sell directly: they take the cash and print the invoice without the shop admin approving the order (a discount only with the Discount passcode you give them under Users)')}
         {sw('cash_change', 'Enter the cash received: the till shows the change to give and prints the cash received and the change on the receipt')}
         {sw('usd_pay', 'Accept payment in USD (and CDF): the cashier enters the dollars and Francs received at the sales rate; change is in CDF, or whole dollars plus CDF')}
         <Note>A USB barcode scanner works like a keyboard: scan into the till search box. Barcodes are entered in the item form or in the Excel import. Saved with the button below.</Note></div>

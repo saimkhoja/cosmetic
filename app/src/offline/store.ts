@@ -10,12 +10,15 @@ export interface SalePayload {
   id: string; no: string; device_id: string; cashier_id: string; t: string; rate: number; vat_rate: number; tendered: number;
   /** the discount: a percentage, or an amount in CDF */
   disc_pct?: number; disc?: number;
+  /** a till operator's discount: the token of their Discount passcode entry */
+  discount_token?: string;
   customer: string; order_id: string | null;
   items: { product_id: string; unit?: string; mult: number; piece: boolean; qty: number; price: number }[];
 }
 /** An order with the invoice the till operator printed: its number, till, rates and the printed prices. */
 export interface OrderPayload {
   id: string; customer: string; t: string; no: string; device_id: string; rate: number; vat_rate: number;
+  disc_pct?: number; disc?: number; discount_token?: string;
   items: { product_id: string; unit?: string; mult: number; piece: boolean; qty: number; price: number }[];
 }
 /** A completed sale (shop admin) or an order, with the invoice printed for it, waiting to reach the shop admin (till operator). */
@@ -35,7 +38,7 @@ export const kvDel = async (k: string) => { await (await db()).delete('kv', k); 
 export const getSnapshot = (shopId: string) => kvGet<Snapshot>('snap:' + shopId);
 export const setSnapshot = (s: Snapshot) => kvSet('snap:' + s.shop.id, s);
 /** A sale put aside at the till, to serve another customer and finish it later. Kept on this device only. */
-export interface Parked { id: string; t: string; customer: string; lines: CartLine[]; dp: Disc; total: number; count: number; by: string }
+export interface Parked { id: string; t: string; customer: string; lines: CartLine[]; dp: Disc; total: number; count: number; by: string; tok?: string | null }
 export const getParked = async (shopId: string) => (await kvGet<Parked[]>('parked:' + shopId)) ?? [];
 export const setParked = (shopId: string, l: Parked[]) => kvSet('parked:' + shopId, l);
 export const getDevice = (shopId: string) => kvGet<Device>('device:' + shopId);

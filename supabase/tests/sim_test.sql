@@ -987,6 +987,64 @@ select t.as('00000000-0000-0000-0000-00000000000c');
 select t.ok((public.day_end_report(current_date, '990011')->>'error') ilike '%Ask the Admin%', 'a removed passcode locks the report');
 reset role;
 
+-- ===== a till operator gives a discount with the Discount passcode from the Admin =====
+select t.put('dno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('dno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('dno3', (select 'GOM-' || code || '-' || lpad((last_seq + 3)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('dno4', (select 'GOM-' || code || '-' || lpad((last_seq + 4)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
+select t.put('dord1', gen_random_uuid()::text), t.put('dord2', gen_random_uuid()::text), t.put('dinv', gen_random_uuid()::text);
+-- an order of 2 shampoos at 25 650 printed at the till, with what the test adds (a discount, a token)
+create function t.dord(id text, no text, extra jsonb) returns jsonb language sql as $$
+  select jsonb_build_object('id', id, 'customer', 'Papa Ilunga', 'no', no, 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16,
+    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 2, 'price', 25650))) || extra $$;
+grant execute on function t.dord(text, text, jsonb) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.fails($$select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'discount', '1234')$$, 'Till Operator', 'the Discount passcode is for till operators');
+select t.fails($$select public.set_passcode('00000000-0000-0000-0000-00000000000d', 'invoices', '1234')$$, 'Shop Admin', 'the other passcodes stay for Shop Admins');
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.ok((public.open_discount('5566')->>'error') ilike '%Ask the Admin%', 'with no Discount passcode set the discount stays locked');
+select t.fails(format($$select public.submit_order(t.dord('%s', '%s', '{"disc_pct": 10}'))$$, t.get('dord1'), t.get('dno1')), 'Discount passcode', 'a till operator cannot discount an order without the passcode');
+select t.fails(format($$select public.submit_order(t.dord('%s', '%s', '{"disc_pct": 10, "discount_token": "11111111-1111-1111-1111-111111111111"}'))$$, t.get('dord1'), t.get('dno1')), 'Discount passcode', 'nor with a made up token');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.set_passcode('00000000-0000-0000-0000-00000000000d', 'discount', '5566');
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.ok((public.open_discount('0000')->>'error') = 'Wrong passcode', 'a wrong Discount passcode is refused');
+select t.put('dtok', public.open_discount('5566')->>'token');
+select t.ok(t.get('dtok') is not null, 'the right passcode unlocks a discount');
+select t.fails(format($$select public.submit_order(t.dord('%s', '%s', '{"disc_pct": 40, "discount_token": "%s"}'))$$, t.get('dord1'), t.get('dno1'), t.get('dtok')), '30%', 'the discount is 30% at most');
+select public.submit_order(t.dord(t.get('dord1'), t.get('dno1'), jsonb_build_object('disc_pct', 10, 'discount_token', t.get('dtok'))));
+select t.ok((select disc || '/' || total from sale_orders where id = t.get('dord1')::uuid) = '5130/46170', 'the order keeps the discount printed at the till: 10% of 51 300');
+select t.ok((public.submit_order(t.dord(t.get('dord1'), t.get('dno1'), jsonb_build_object('disc_pct', 10, 'discount_token', t.get('dtok'))))->>'status') = 'duplicate', 'an order sent twice is saved once');
+select t.fails(format($$select public.submit_order(t.dord('%s', '%s', '{"disc": 5000, "discount_token": "%s"}'))$$, t.get('dord2'), t.get('dno2'), t.get('dtok')), 'Discount passcode', 'one passcode entry covers one invoice');
+select t.put('dtok2', public.open_discount('5566')->>'token');
+select public.submit_order(t.dord(t.get('dord2'), t.get('dno2'), jsonb_build_object('disc', 5000, 'discount_token', t.get('dtok2'))));
+select t.ok((select disc || '/' || total from sale_orders where id = t.get('dord2')::uuid) = '5000/46300', 'a discount as an amount in CDF');
+-- the Shop Admin approves the first as printed (nothing changed), and the second without its discount (changed)
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.submit_invoice(t.dord(t.get('dord1'), t.get('dno1'), jsonb_build_object('order_id', t.get('dord1'), 'disc', 5130)))->>'revised') = 'false', 'approving an order with its discount is not a change');
+select t.ok((select disc || '/' || total || '/' || (revised_from is null)::text from invoices where id = t.get('dord1')::uuid) = '5130/46170/true', 'the approved invoice has the till operator''s discount');
+select t.ok((public.submit_invoice(t.dord(t.get('dord2'), t.get('dno2'), jsonb_build_object('order_id', t.get('dord2'))))->>'revised') = 'true', 'approving it without the discount is a change');
+select t.ok((select total || '/' || revised_from from invoices where id = t.get('dord2')::uuid) = '51300/46300', 'the corrected invoice shows what the till printed');
+-- selling directly (the Admin's switch): the same passcode
+reset role;
+update settings set features = features || '{"till_sells": true}' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.fails(format($$select public.submit_invoice(t.dord('%s', '%s', '{"disc_pct": 5}'))$$, t.get('dinv'), t.get('dno3')), 'Discount passcode', 'a till operator selling directly cannot discount without the passcode');
+select t.fails(format($$select public.submit_invoice(t.dord('%s', '%s', '{"disc_pct": 5, "discount_token": "%s"}'))$$, t.get('dinv'), t.get('dno3'), t.get('dtok')), 'Discount passcode', 'nor with a token already used');
+select t.ok((public.submit_invoice(t.dord(gen_random_uuid()::text, t.get('dno3'), '{}'))->>'status') = 'ok', 'without a discount the till operator sells as before');
+select t.put('dtok3', public.open_discount('5566')->>'token');
+select t.ok((public.submit_invoice(t.dord(t.get('dinv'), t.get('dno4'), jsonb_build_object('disc_pct', 5, 'discount_token', t.get('dtok3'))))->>'total')::bigint = 51300 - 2570, 'with the passcode the till operator sells with a discount: 5% of 51 300, rounded to 10');
+select t.ok((public.submit_invoice(t.dord(t.get('dinv'), t.get('dno4'), jsonb_build_object('disc_pct', 5, 'discount_token', t.get('dtok3'))))->>'status') = 'duplicate', 'a sale sent twice is saved once');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails($$select public.open_discount('5566')$$, 'permission', 'the Discount passcode is the till operator''s');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok(exists (select 1 from audit_log where action like '%discount%with the passcode%') and exists (select 1 from audit_log where action = 'Discount passcode set for till.gombe'), 'discounts given with the passcode are in the activity log');
+reset role;
+update settings set features = features - 'till_sells' where id = 1;
+select t.ok(t.unbalanced() = 0, 'the books still balance');
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
