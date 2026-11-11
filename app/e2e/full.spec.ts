@@ -35,6 +35,12 @@ async function openInvoices(page: Page, code = '4821') {
   await expect(page.locator('#invlock')).toContainText('Invoices are locked');
   await page.fill('#pcode', code); await page.click('#pcodebtn');
 }
+/** Opens a group of options on the Settings page, if it is closed. */
+async function openGroup(page: Page, id: string) {
+  const g = page.locator('#og-' + id);
+  if ((await g.getAttribute('open')) === null) await g.locator('summary').click();
+  await expect(g).toHaveAttribute('open', '');
+}
 const prints = (page: Page) => page.evaluate(() => (window as unknown as { __prints: string[] }).__prints);
 
 test('a full day in SIM', async ({ browser }) => {
@@ -497,7 +503,11 @@ test('a full day in SIM', async ({ browser }) => {
 
   // ---- supermarket switches: walk-in sales without a name and barcode scanning
   await admin.getByRole('link', { name: 'Settings' }).click();
+  await expect(admin.locator('#og-selling')).toContainText('0 of 2 on');                   // the options come in groups that open and close
+  await expect(admin.locator('#s-customer_optional')).toBeHidden();
+  await openGroup(admin, 'selling'); await openGroup(admin, 'scanning');
   await admin.check('#s-customer_optional'); await admin.check('#s-barcode');
+  await expect(admin.locator('#og-selling')).toContainText('1 of 2 on');
   await admin.getByRole('button', { name: 'Save settings' }).click();
   await expect(admin.getByText('Settings saved')).toBeVisible();
   await admin.getByRole('link', { name: 'Inventory' }).click();
@@ -593,6 +603,7 @@ test('a full day in SIM', async ({ browser }) => {
   expect((await prints(shop)).length).toBe(printedDisc);
   // ---- the till operator sells directly once the Admin allows it
   await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'selling'); await openGroup(admin, 'payment');
   await admin.check('#s-till_sells'); await admin.check('#s-cash_change');
   await admin.getByRole('button', { name: 'Save settings' }).click();
   await expect(admin.getByText('Settings saved')).toBeVisible();
@@ -619,6 +630,7 @@ test('a full day in SIM', async ({ browser }) => {
   expect(cashRcpt).toContain('Grace Mbuyi'); expect(cashRcpt).toMatch(/Cash received\s*20,000\.00/); expect(cashRcpt).toMatch(/Change\s*5,750\.00/);
   // ---- payment in USD: $20 for 14 250 CDF at 2 850, change given as whole dollars
   await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'payment');
   await admin.check('#s-usd_pay');
   await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
   await till.goto('/till');
@@ -649,6 +661,7 @@ test('a full day in SIM', async ({ browser }) => {
 
   // ---- one copy of each invoice: the Admin turns it on in Settings, the next sale prints the customer copy only
   await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'printing');
   await expect(admin.locator('#s-one_copy')).not.toBeChecked();                           // off by default: two copies
   await admin.check('#s-one_copy');
   await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
@@ -667,6 +680,7 @@ test('a full day in SIM', async ({ browser }) => {
   await openInvoices(shop);
   await expect(shop.locator('main tr', { hasText: 'One copy customer' })).toContainText('1 copy');
   await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'printing');
   await admin.uncheck('#s-one_copy');
   await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
 

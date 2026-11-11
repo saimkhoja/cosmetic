@@ -181,10 +181,30 @@ function ShopEdit({ shop, onClose }: { shop: Shop; onClose: () => void }) {
   );
 }
 
+/** The till switches, by key: what each one does. */
+const SWITCHES: Record<string, string> = {
+  customer_optional: 'The customer name is optional: walk-in customers are sold to without typing a name',
+  till_sells: 'Till operators sell directly: they take the cash and print the invoice without the shop admin approving the order (a discount only with the Discount passcode you give them under Users)',
+  barcode: 'Barcode scanning: items have barcodes (several per item if needed), and scanning any of them at the till adds 1 pc to the sale',
+  cash_change: 'Enter the cash received: the till shows the change to give and prints the cash received and the change on the receipt',
+  usd_pay: 'Accept payment in USD (and CDF): the cashier enters the dollars and Francs received at the sales rate; change is in CDF, or whole dollars plus CDF',
+  one_copy: 'Print one copy of each invoice: the customer copy only, at every till. Off: two copies, one for the customer and one for the shop',
+};
+/** The groups the switches are shown in on the Settings page. */
+const OPTION_GROUPS: { id: string; title: string; sub: string; icon: string; keys: string[]; note?: string }[] = [
+  { id: 'selling', title: 'Selling', sub: 'Customer name, who sells', icon: 'users', keys: ['customer_optional', 'till_sells'] },
+  { id: 'scanning', title: 'Barcodes', sub: 'Scanning items at the till', icon: 'search', keys: ['barcode'],
+    note: 'A USB barcode scanner works like a keyboard: scan into the till search box. Barcodes are entered in the item form or in the Excel import.' },
+  { id: 'payment', title: 'Payment', sub: 'Cash received, US dollars', icon: 'cash', keys: ['cash_change', 'usd_pay'] },
+  { id: 'printing', title: 'Printing', sub: 'Invoice copies', icon: 'printer', keys: ['one_copy'] },
+];
+
 export function SettingsPage() {
   const settings = useSettings(), shops = useShops(), refresh = useRefresh(), toast = useToast(), a = useAction(), b = useAction();
   const s = settings.data;
   const [f, setF] = useState<Record<string, string> | null>(null);
+  // which option groups are open: all closed at first, so the page is short
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const v = f ?? (s ? { rate: String(s.rate), book_rate: String(bookRate(s)), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', usd_pay: s.features?.usd_pay ? '1' : '', one_copy: s.features?.one_copy ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
   const [shop, setShop] = useState({ name: '', code: '', address: '' });
   const [edit, setEdit] = useState<Shop | null>(null);
@@ -209,14 +229,14 @@ export function SettingsPage() {
           <div className="frow" style={{ marginTop: 12 }}><div className="field"><label>New shop name</label><input className="input" maxLength={40} value={shop.name} onChange={(e) => setShop({ ...shop, name: e.target.value })} /></div><div className="field"><label>Short code (3 letters)</label><input className="input" maxLength={3} style={{ textTransform: 'uppercase' }} value={shop.code} onChange={(e) => setShop({ ...shop, code: e.target.value.toUpperCase() })} /></div></div>
           <div className="field"><label>Address</label><input className="input" maxLength={80} value={shop.address} onChange={(e) => setShop({ ...shop, address: e.target.value })} /></div><div className="lerr">{b.err}</div><button className="btn ghost full" disabled={b.busy} onClick={() => void addShop()}><Icon n="plus" /> Add shop</button></div></div>
       {edit ? <ShopEdit shop={edit} onClose={() => setEdit(null)} /> : null}
-      <div className="card"><h3><Icon n="cart" /> Till options</h3>
-        {sw('customer_optional', 'The customer name is optional: walk-in customers are sold to without typing a name')}
-        {sw('barcode', 'Barcode scanning: items have barcodes (several per item if needed), and scanning any of them at the till adds 1 pc to the sale')}
-        {sw('till_sells', 'Till operators sell directly: they take the cash and print the invoice without the shop admin approving the order (a discount only with the Discount passcode you give them under Users)')}
-        {sw('cash_change', 'Enter the cash received: the till shows the change to give and prints the cash received and the change on the receipt')}
-        {sw('one_copy', 'Print one copy of each invoice: the customer copy only, at every till. Off: two copies, one for the customer and one for the shop')}
-        {sw('usd_pay', 'Accept payment in USD (and CDF): the cashier enters the dollars and Francs received at the sales rate; change is in CDF, or whole dollars plus CDF')}
-        <Note>A USB barcode scanner works like a keyboard: scan into the till search box. Barcodes are entered in the item form or in the Excel import. Saved with the button below.</Note></div>
+      <div className="card" id="tillopts"><h3><Icon n="cart" /> Till options</h3>
+        {/* the switches in groups that open and close; each group shows how many of its switches are on */}
+        {OPTION_GROUPS.map((g) => { const on = g.keys.filter((k) => !!v[k]).length; return (
+          <details key={g.id} className="optgroup" id={'og-' + g.id} open={!!openGroups[g.id]} onToggle={(e) => { const o = (e.currentTarget as HTMLDetailsElement).open; setOpenGroups((x) => ({ ...x, [g.id]: o })); }}>
+            <summary><Icon n={g.icon} /><span className="ogt">{g.title}<small>{g.sub}</small></span><span className={`chip ${on ? 'ok' : ''}`}>{on} of {g.keys.length} on</span></summary>
+            <div className="ogb">{g.keys.map((k) => <div key={k}>{sw(k, SWITCHES[k])}</div>)}{g.note ? <Note>{g.note}</Note> : null}</div>
+          </details>); })}
+        <Note>Changes are saved with the Save settings button below.</Note></div>
       <div className="card"><h3><Icon n="receipt" /> Company details on invoices</h3>
         <div className="frow">{fld('name', 'Company name')}{fld('phone', 'Phone')}</div><div className="frow">{fld('address', 'Head office address')}{fld('email', 'Email')}</div>
         <div className="frow">{fld('rccm', 'RCCM number')}{fld('idnat', 'ID NAT')}</div><div className="frow">{fld('nif', 'NIF (tax number)')}{fld('footer', 'Message at the bottom of invoices')}</div>

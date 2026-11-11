@@ -422,7 +422,18 @@ button.uchip svg{font-size:11px}
 .rangebar{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
 .rangebar .field{margin:0;min-width:150px}
 .switch{display:flex;gap:10px;align-items:center;margin:4px 0 12px;font-weight:700;font-size:14px}
-.switch input{width:22px;height:22px;accent-color:var(--blue)}
+.switch input{width:22px;height:22px;flex:none;accent-color:var(--blue)}
+.optgroup{border:1px solid var(--line);border-radius:12px;margin:0 0 10px;background:var(--card)}
+.optgroup summary{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;list-style:none;font-weight:800;min-height:48px}
+.optgroup summary::-webkit-details-marker{display:none}
+.optgroup summary::after{content:'';width:9px;height:9px;border-right:2.5px solid var(--muted);border-bottom:2.5px solid var(--muted);transform:rotate(45deg);margin:-4px 4px 0 6px;transition:transform .15s}
+.optgroup[open] summary::after{transform:rotate(-135deg);margin-top:4px}
+.optgroup summary>svg{font-size:20px;color:var(--blue);flex:none}
+.optgroup .ogt{flex:1;min-width:0;display:flex;flex-direction:column}
+.optgroup .ogt small{font-weight:600;color:var(--muted);font-size:13px}
+.optgroup .chip{flex:none}
+.optgroup .ogb{padding:4px 14px 12px;border-top:1px solid var(--line)}
+.optgroup .ogb .note{margin-top:4px}
 .pagebreak{height:0}
 @media print{.pagebreak{break-after:page;page-break-after:always}#print-area .receipt{margin:0 auto}}
 @media (max-width:560px){.ugrid{grid-template-columns:1fr}.demo.four{grid-template-columns:1fr 1fr}}
