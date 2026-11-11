@@ -83,7 +83,6 @@ export default function Reports() {
         </tbody></table></div>
       </Modal> : null}
       {ask ? <Modal title="Shift end report" icon="lock" onClose={() => setAsk(false)} foot={<><button className="btn" onClick={() => setAsk(false)}>Cancel</button><button className="btn primary" id="slipbtn" disabled={pa.busy} onClick={() => void printSlip()}><Icon n="printer" /> Print shift end report</button></>}>
-        <p>Enter the Shift end report passcode the Admin gave you to print the report of <b>{dt(from + 'T12:00:00').split(',')[0]}</b>.</p>
         <div className="field"><label htmlFor="slipcode">Passcode</label><input id="slipcode" className="input" type="password" inputMode="numeric" autoComplete="off" maxLength={12} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') void printSlip(); }} autoFocus /></div>
         <div className="lerr">{pa.err}</div>
         <Note i="shield">It needs the connection.</Note>
