@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useDeliveries, useInvoices, useOrders, useProducts, useRanks, useRefresh, useReport, useSettings, useShops, useStock, useStockRequests } from '../data/queries';
@@ -70,7 +71,45 @@ export function ShopStock() {
   );
 }
 
+/** How long the Invoices tab stays open after the passcode (the server allows 30 minutes). */
+const OPEN_MS = 29 * 60000;
+
+/** The Shop Admin's Invoices tab is locked: it opens with the passcode the Admin gave, lists every invoice of the shop
+ *  (also those above the limit on the sales shown) and locks again on leaving the tab, with Lock, or when its time is over. */
 export function Invoices() {
+  const qc = useQueryClient(), a = useAction();
+  const [open, setOpen] = useState(false), [code, setCode] = useState('');
+  const opened = useRef(false), here = useRef(false);
+  const forget = () => { qc.removeQueries({ queryKey: ['invoices'] }); qc.removeQueries({ queryKey: ['gsearch'] }); };
+  const lock = () => { opened.current = false; setOpen(false); forget(); void rpc('close_invoices').catch(() => undefined); };
+  // leaving the tab locks it (the short wait tells a real leave from React re-running effects in development)
+  useEffect(() => { here.current = true; return () => { here.current = false; setTimeout(() => { if (!here.current && opened.current) { opened.current = false; forget(); void rpc('close_invoices').catch(() => undefined); } }, 150); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!open) return; const t = setTimeout(lock, OPEN_MS); return () => clearTimeout(t); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = () => a.run(async () => {
+    if (!code.trim()) throw new Error('Enter the passcode');
+    const r = await rpc<{ ok: boolean; error?: string }>('open_invoices', { p_code: code });
+    setCode('');
+    if (!r.ok) throw new Error(r.error ?? 'Wrong passcode');
+    forget(); opened.current = true; setOpen(true);
+  });
+  if (open) return <InvoiceList onLock={lock} />;
+  return (
+    <>
+      <Head t="Invoices" s="Locked. Enter the Invoices passcode the Admin gave you to see every invoice, edit one or print a duplicate." />
+      <div className="card" id="invlock" style={{ maxWidth: 460 }}>
+        <h3><Icon n="lock" /> Invoices are locked</h3>
+        <form onSubmit={(e) => { e.preventDefault(); void go(); }}>
+          <div className="field"><label htmlFor="pcode">Passcode</label><input id="pcode" className="input" type="password" inputMode="numeric" autoComplete="off" maxLength={12} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} autoFocus /></div>
+          <div className="lerr">{a.err}</div>
+          <button className="btn primary" id="pcodebtn" disabled={a.busy}><Icon n="unlock" /> Open invoices</button>
+        </form>
+        <Note i="shield" style={{ marginTop: 14 }}>The tab locks again when you leave it, and after 30 minutes. It needs the connection. The till, the last sale and the reports work without it.</Note>
+      </div>
+    </>
+  );
+}
+
+function InvoiceList({ onLock }: { onLock: () => void }) {
   const { profile } = useAuth();
   const sid = profile!.shop_id!;
   // opened from the global search: every date, and the box holds the invoice number
@@ -97,7 +136,7 @@ export function Invoices() {
   };
   return (
     <>
-      <Head t="Invoices" s="Find any sale, edit it if something was wrong, or print a duplicate." />
+      <Head t="Invoices" s="Find any sale, edit it if something was wrong, or print a duplicate. The tab locks again when you leave it." a={<button className="btn ghost" id="invlockbtn" onClick={onLock}><Icon n="lock" /> Lock</button>} />
       <div className="toolbar"><div className="seg">{([['today', 'Today'], ['week', '7 days'], ['all', 'All']] as const).map(([k, l]) => <button key={k} className={f === k ? 'on' : ''} onClick={() => setF(k)}>{l}</button>)}</div>
         <div className="search"><Icon n="search" /><input placeholder={`Invoice number or customer, e.g. ${shop?.code ?? 'GOM'}-T1-000005`} value={s} onChange={(e) => setS(e.target.value)} /></div></div>
       <div className="kpis">

@@ -29,6 +29,12 @@ async function firstSignIn(page: Page, user: string, newPw: string) {
   await page.getByRole('button', { name: 'Save password' }).click();
   await expect(page.locator('header.top')).toBeVisible();
 }
+/** The Shop Admin opens the locked Invoices tab with the passcode the Admin gave. */
+async function openInvoices(page: Page, code = '4821') {
+  await page.getByRole('link', { name: 'Invoices' }).click();
+  await expect(page.locator('#invlock')).toContainText('Invoices are locked');
+  await page.fill('#pcode', code); await page.click('#pcodebtn');
+}
 const prints = (page: Page) => page.evaluate(() => (window as unknown as { __prints: string[] }).__prints);
 
 test('a full day in SIM', async ({ browser }) => {
@@ -294,7 +300,24 @@ test('a full day in SIM', async ({ browser }) => {
   expect(val).toContain('Stock valuation'); expect(val).toContain('SIM Beauté Gombe'); expect(val).toContain('570 000 CDF'); expect(val).toContain('At cost');
 
   // ---- correct the approved invoice, then the day end report
-  await shop.getByRole('link', { name: 'Invoices' }).click();
+  // the Invoices tab is locked until the Admin gives a passcode; a wrong one does not open it
+  await openInvoices(shop);
+  await expect(shop.locator('#invlock')).toContainText('No passcode has been set yet. Ask the Admin for one');
+  await admin.goto('/users');
+  await expect(admin.locator('tr', { hasText: 'admin.gombe' })).toContainText('No passcodes yet');
+  await admin.locator('tr', { hasText: 'admin.gombe' }).getByTitle('Passcodes: Invoices and shift end report').click();
+  await admin.fill('#pc-invoices', '4821'); await admin.fill('#pc-day_end', '7735');
+  await admin.click('#pcsave');
+  await expect(admin.getByText('Passcode saved. Give it to Patrick Kabongo.')).toBeVisible();
+  await expect(admin.locator('tr', { hasText: 'admin.gombe' })).not.toContainText('No passcodes yet');
+  await shop.fill('#pcode', '7735'); await shop.click('#pcodebtn');                        // the shift end passcode is another one
+  await expect(shop.locator('#invlock')).toContainText('Wrong passcode');
+  await expect(shop.locator('main table.t')).toHaveCount(0);
+  await shop.fill('#pcode', '4821'); await shop.click('#pcodebtn');
+  await expect(shop.locator('main table.t tbody tr')).toHaveCount(3);
+  await shop.click('#invlockbtn');                                                          // Lock, and leaving the tab, lock it again
+  await expect(shop.locator('#invlock')).toBeVisible();
+  await shop.fill('#pcode', '4821'); await shop.click('#pcodebtn');
   await expect(shop.locator('main table.t tbody tr')).toHaveCount(3);
   await expect(shop.locator('tr', { hasText: noMama })).toContainText('Mama Nzuzi');
   await expect(shop.locator('tr', { hasText: noMama })).toContainText('Changed at approval');
@@ -306,7 +329,11 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.getByText('Invoice updated')).toBeVisible();
   await shop.getByRole('link', { name: 'Reports' }).click();
   await shop.getByRole('button', { name: 'Today' }).click();
-  await shop.getByRole('button', { name: 'Print day end report' }).click();
+  await shop.getByRole('button', { name: 'Print day end report' }).click();                // asks for the Shift end report passcode
+  await shop.fill('#slipcode', '4821'); await shop.click('#slipbtn');
+  await expect(shop.locator('.modal')).toContainText('Wrong passcode');
+  await expect(shop.locator('#slips')).toHaveCount(0);
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
   const slip = shop.locator('#slips');
   await expect(slip).toContainText('Shift End Report');
   await expect(slip).toContainText('SIM Beauté Gombe');
@@ -335,15 +362,16 @@ test('a full day in SIM', async ({ browser }) => {
   await op.locator('.card', { hasText: 'RET-0001' }).getByRole('button', { name: 'Receive' }).click();
   await op.getByRole('button', { name: 'Receive into the store' }).click();
   await expect(op.getByText('RET-0001 received: 2 of 2 units')).toBeVisible();
-  // the warehouse reads the Gombe stock account; the shop reads its cash account
+  // the warehouse reads the Gombe stock account; the shop admin has no Statements tab
   await op.getByRole('link', { name: 'Statements' }).click();
   await op.selectOption('#stacc', { label: 'Stock – SIM Beauté Gombe' });
   await expect(op.locator('#sttable')).toContainText('DEL-0001');
   await expect(op.locator('#sttable')).toContainText('RET-0001');
-  await shop.getByRole('link', { name: 'Statements' }).click();
-  await shop.selectOption('#stacc', { label: 'Cash – SIM Beauté Gombe (CDF)' });
-  await expect(shop.locator('#sttable')).toContainText(noWalk);
-  await expect(shop.locator('#stclose')).toContainText('Dr');
+  await expect(shop.getByRole('link', { name: 'Reports' })).toBeVisible();
+  await expect(shop.getByRole('link', { name: 'Statements' })).toHaveCount(0);
+  await shop.goto('/books');                                                               // the address does not open it either
+  await expect(shop.getByRole('heading', { name: 'Statements' })).toHaveCount(0);
+  await expect(shop).toHaveURL(/\/$/);
 
   // ---- the shop admin orders stock; the warehouse edits and approves one request and rejects another
   await shop.getByRole('link', { name: 'Order stock' }).click();
@@ -383,7 +411,7 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.getByText(`${reqDel} received: 72 of 72 units`)).toBeVisible();     // 1 carton of 24 + 1 carton of 48
 
   // ---- the shop admin changes a line's unit, deletes an invoice and prints a stock count sheet
-  await shop.getByRole('link', { name: 'Invoices' }).click();
+  await openInvoices(shop);                                                                 // locked again since the shop admin left the tab
   await shop.locator('tr', { hasText: noWalk }).getByTitle('Edit invoice').click();
   await shop.locator('.modal select[data-eu="0"]').selectOption({ label: 'dzn (12)' });
   await shop.locator('.modal input[data-eq="0"]').fill('2');
@@ -585,6 +613,49 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(admin.locator('tr', { hasText: 'Shea body lotion' })).toContainText('15 000 CDF');   // $5 a pc at 3 000
   await admin.getByRole('link', { name: 'Settings' }).click();
   await expect(admin.locator('#srate')).toHaveValue('3000'); await expect(admin.locator('#sbook')).toHaveValue('2950');
+
+  // ---- the sales on the Shop Admin's screens stop at 347 USD a sale: 3 cartons (324 USD at 3 000) show, 4 cartons (432 USD) do not.
+  // The Invoices tab, opened with its passcode, lists both and edits either; the shift end report, with its passcode, has both; the Admin sees both
+  for (const [cust, cartons] of [['Within the limit', 3], ['Above the limit', 4]] as const) {
+    await shop.goto('/till');
+    await shop.fill('#cust', cust); await shop.press('#cust', 'Enter');
+    await shop.locator('.ptile', { hasText: 'Shea body lotion' }).click();
+    await shop.locator('.ubtn', { hasText: 'carton' }).first().click();
+    await shop.getByLabel('Quantity of Shea body lotion 400 ml').fill(String(cartons)); await shop.getByLabel('Quantity of Shea body lotion 400 ml').press('Enter');
+    await shop.getByRole('button', { name: 'Take payment' }).click();
+    await expect(shop.locator('.modal')).toContainText(cartons === 3 ? '972 000 CDF' : '1 296 000 CDF');
+    await shop.fill('#cashin', '1300000');
+    await shop.locator('.modal').getByRole('button', { name: 'Take cash and print' }).click();
+    await expect(shop.getByText('Scan or tap an item to add it')).toBeVisible();
+    await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
+  }
+  await shop.getByRole('link', { name: 'Home' }).click();
+  const shown = Number(/(\d+) invoices/.exec(await shop.locator('.kpi', { hasText: 'Sales today' }).innerText())![1]);
+  await openInvoices(shop);
+  await expect(shop.locator('main tr', { hasText: 'Within the limit' })).toContainText('972 000 CDF');
+  await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toContainText('1 296 000 CDF');
+  await shop.locator('tr', { hasText: 'Above the limit' }).getByTitle('Edit invoice').click();   // edited as usual
+  await shop.fill('#ereason', 'Customer asked for the dozen price');
+  await shop.locator('.modal [data-eq="0"]').fill('5');
+  await shop.getByRole('button', { name: 'Save changes' }).click();
+  await expect(shop.getByText('Invoice updated')).toBeVisible();
+  await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toContainText('1 620 000 CDF');
+  await shop.getByRole('link', { name: 'Reports' }).click();                               // on screen the sales keep the limit
+  await shop.getByRole('button', { name: 'Today' }).click();
+  await expect(shop.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
+  await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toHaveCount(0);
+  await expect(shop.locator('.kpi', { hasText: 'Sales, VAT included' })).toContainText(`${shown} invoices`);
+  await shop.getByRole('button', { name: 'Print day end report' }).click();                // the printed shift end report has every sale
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
+  await expect(shop.locator('#slips')).toContainText('Shift End Report');
+  expect(Number(/Total Invoice\s*:\s*(\d+)/.exec(await shop.locator('#slips').innerText())![1])).toBe(shown + 1);
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+  await shop.getByRole('link', { name: 'Invoices' }).click();                              // locked again, and the search does not find it
+  await expect(shop.locator('#invlock')).toBeVisible();
+  await admin.getByRole('link', { name: 'Reports' }).click();
+  await admin.getByRole('button', { name: 'Today' }).click();
+  await expect(admin.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
+  await expect(admin.locator('main tr', { hasText: 'Above the limit' })).toContainText('1 620 000 CDF');
 
   // ---- the Admin sees the activity; disabling the till ends its access
   await admin.getByRole('link', { name: 'Activity' }).click();

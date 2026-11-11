@@ -1,5 +1,5 @@
 // Goods in from suppliers, returns from the shops to the central store, and the stock and
-// shop statements the warehouse and the shop admin can read.
+// shop statements the warehouse can read.
 import { useMemo, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
@@ -269,12 +269,10 @@ function CancelReturn({ x, onClose }: { x: ShopReturn; onClose: () => void }) {
   );
 }
 
-/** Statements for the warehouse (stock ledgers of the store and each shop) and the shop admin (the shop's own ledgers). */
+/** Statements for the warehouse: the stock ledgers of the store and each shop. The Shop Admin has no Statements tab. */
 export function Books() {
-  const { profile } = useAuth(), ledgers = useLedgers();
-  const s = profile!.role === 'whop'
-    ? 'Stock accounts at cost: the central store and each shop. Goods sent to a shop are booked against it when the shop receives them; sales and returns reduce it.'
-    : 'Your shop\'s accounts: cash, sales and the stock you hold at cost, with every delivery received, sale and return.';
+  const ledgers = useLedgers();
+  const s = 'Stock accounts at cost: the central store and each shop. Goods sent to a shop are booked against it when the shop receives them; sales and returns reduce it.';
   return (
     <>
       <Head t="Statements" s={s} />

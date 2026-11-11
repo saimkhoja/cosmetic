@@ -885,6 +885,108 @@ select t.ok((select c->>'val' || '/' || (c->'items'->0->>'pcs') from jsonb_array
 select t.ok((select sum((i->>'val')::bigint) from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c, jsonb_array_elements(c->'items') i where c->>'category' = 'Skin care')
   = (select (c->>'val')::bigint from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c where c->>'category' = 'Skin care'), 'a category''s items add up to the category');
 
+-- ===== the Shop Admin is shown sales up to the limit (347 USD); the Admin sees every sale =====
+select t.ok((select shop_sales_limit_usd from settings) = 347, 'the limit on the sales shown to the Shop Admin starts at 347 USD');
+select t.put('lno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('lno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('lrep0', public.sales_report(current_date, current_date)::text), t.put('lseen0', (select count(*)::text from invoices));
+-- at 2850 CDF to the dollar the limit is 988 950 CDF: a sale of exactly that shows, 10 CDF more does not
+select public.submit_invoice(t.csale(t.get('lno1'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 1, 'price', 988950))));
+select t.ok((public.submit_invoice(t.csale(t.get('lno2'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 1, 'price', 988960))))->>'status') = 'ok',
+  'a sale above the limit is still made');
+select t.ok((select count(*) from invoices) = t.get('lseen0')::int + 1 and exists (select 1 from invoices where no = t.get('lno1')) and not exists (select 1 from invoices where no = t.get('lno2')),
+  'the Shop Admin sees the sale of 347 USD, not the one above it');
+select t.put('lrep1', public.sales_report(current_date, current_date)::text);
+select t.ok((t.get('lrep1')::jsonb->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 1 and (t.get('lrep1')::jsonb->>'total')::bigint = (t.get('lrep0')::jsonb->>'total')::bigint + 988950,
+  'the Shop Admin''s report counts only the sale within the limit');
+select t.ok((t.get('lrep1')::jsonb->'slips'->0->>'value_fc')::bigint = (t.get('lrep1')::jsonb->>'total')::bigint
+  and not exists (select 1 from jsonb_array_elements(t.get('lrep1')::jsonb->'invoices') i where i->>'no' = t.get('lno2')), 'nor do the day end slip and the report''s invoices hold it');
+reset role;
+select t.put('lover', (select id::text from invoices where no = t.get('lno2'))), t.put('lat', (select id::text from invoices where no = t.get('lno1')));
+set role authenticated;
+select t.ok((select count(*) from invoice_items where invoice_id = t.get('lover')::uuid) = 0 and (select count(*) from invoice_items where invoice_id = t.get('lat')::uuid) = 1,
+  'the lines of a sale above the limit are not shown either');
+-- the Admin sees both, in the list and in the report
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok((select count(*) from invoices where no in (t.get('lno1'), t.get('lno2'))) = 2 and (select count(*) from invoice_items where invoice_id = t.get('lover')::uuid) = 1, 'the Admin sees every sale');
+select t.ok((public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total')::bigint = (t.get('lrep0')::jsonb->>'total')::bigint + 988950 + 988960
+  and (public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 2, 'the Admin''s report has every sale');
+reset role;
+-- no limit: the Shop Admin sees everything again
+update settings set shop_sales_limit_usd = null where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok(exists (select 1 from invoices where no = t.get('lno2')) and (public.sales_report(current_date, current_date)->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 2,
+  'with no limit set the Shop Admin sees every sale');
+reset role;
+update settings set shop_sales_limit_usd = 347 where id = 1;
+
+-- ===== passcodes from the Admin: the Invoices tab and the shift end report of a Shop Admin =====
+-- (lno1 is the sale of 347 USD, lno2 the one above the limit; lrep0 is the Shop Admin's report before both)
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails($$select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'invoices', '1234')$$, 'permission', 'a Shop Admin cannot set a passcode');
+select t.ok((public.open_invoices('1234')->>'error') ilike '%Ask the Admin%', 'with no passcode set the Invoices tab stays locked');
+select t.ok((public.day_end_report(current_date, '1234')->>'error') ilike '%Ask the Admin%', 'and so does the shift end report');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.fails($$select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'invoices', '12a')$$, '4 to 12 digits', 'a passcode is 4 to 12 digits');
+select t.fails($$select public.set_passcode('00000000-0000-0000-0000-00000000000d', 'invoices', '1234')$$, 'Shop Admin', 'passcodes are for Shop Admin logins');
+select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'invoices', '4821'), public.set_passcode('00000000-0000-0000-0000-00000000000c', 'day_end', '7735');
+select t.ok((select count(*) from shop_passcodes where user_id = '00000000-0000-0000-0000-00000000000c') = 2, 'the Admin sees which passcodes are set');
+select t.fails($$select hash from public.shop_passcodes$$, 'permission denied', 'nobody reads a passcode, not even the Admin');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((select count(*) from shop_passcodes) = 0, 'a Shop Admin does not see the passcodes table');
+select t.ok((public.open_invoices('7735')->>'error') = 'Wrong passcode', 'the shift end passcode does not open the Invoices tab');
+select t.ok(not exists (select 1 from invoices where no = t.get('lno2')), 'after a wrong passcode the sale above the limit stays hidden');
+select t.ok((public.open_invoices('4821')->>'ok')::boolean, 'the Invoices passcode opens the tab');
+select t.ok(exists (select 1 from invoices where no = t.get('lno2')) and (select count(*) from invoice_items where invoice_id = t.get('lover')::uuid) = 1,
+  'with the tab open the Shop Admin sees every invoice, also above the limit');
+select t.ok((public.sales_report(current_date, current_date)->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 1, 'the sales figures on screen keep the limit while the tab is open');
+-- an invoice above the limit is edited as usual: a 5% discount, then taken back
+select public.edit_invoice(t.get('lover')::uuid, '[{"line_no":1,"qty":1}]', 5, 'Discount agreed with the customer');
+select t.ok((select total from invoices where id = t.get('lover')::uuid) = 939510, 'the Shop Admin edits an invoice above the limit as usual (5% off 988 960)');
+select public.edit_invoice(t.get('lover')::uuid, '[{"line_no":1,"qty":1}]', 0, 'Discount taken back');
+select public.close_invoices();
+select t.ok(not exists (select 1 from invoices where no = t.get('lno2')) and exists (select 1 from invoices where no = t.get('lno1')), 'leaving the tab locks it again');
+select t.ok((public.open_invoices('4821')->>'ok')::boolean, 'it opens again with the passcode');
+reset role;
+update shop_passcodes set open_until = now() - interval '1 minute' where kind = 'invoices';
+set role authenticated;
+select t.ok(not exists (select 1 from invoices where no = t.get('lno2')), 'the tab locks by itself when its time is over');
+-- the shift end report: every sale of the day, for its own passcode
+select t.ok((public.day_end_report(current_date, '4821')->>'error') = 'Wrong passcode', 'the Invoices passcode does not print the shift end report');
+select t.put('lslip', public.day_end_report(current_date, '7735')::text);
+select t.ok((t.get('lslip')::jsonb->>'ok')::boolean and (t.get('lslip')::jsonb->'slip'->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 2
+  and (t.get('lslip')::jsonb->'slip'->>'value_fc')::bigint = (t.get('lrep0')::jsonb->>'total')::bigint + 988950 + 988960,
+  'with its passcode the shift end report has every sale of the day, also above the limit');
+select t.ok((t.get('lslip')::jsonb->'slip'->>'collected')::bigint - (t.get('lslip')::jsonb->'slip'->>'returned')::bigint = (t.get('lslip')::jsonb->'slip'->>'value_fc')::bigint,
+  'and its balance is the value of the invoices');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok((t.get('lslip')::jsonb->'slip'->>'value_fc')::bigint = (select (sl->>'value_fc')::bigint from jsonb_array_elements(public.sales_report(current_date, current_date, t.get('gom')::uuid)->'slips') sl),
+  'it is the same slip the Admin gets');
+select t.fails($$select public.day_end_report(current_date, '7735')$$, 'permission', 'the passcode report is the Shop Admin''s');
+-- another Shop Admin has their own passcodes
+select t.as('00000000-0000-0000-0000-00000000000e');
+select t.ok((public.open_invoices('4821')->>'error') ilike '%Ask the Admin%', 'a passcode belongs to one Shop Admin');
+-- 5 wrong tries block the passcode for 10 minutes, even for the right one
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.day_end_report(current_date, '0000'), public.day_end_report(current_date, '0001'), public.day_end_report(current_date, '0002'), public.day_end_report(current_date, '0003');
+select t.ok((public.day_end_report(current_date, '0004')->>'error') ilike '%blocked for 10 minutes%', 'the fifth wrong passcode blocks it');
+select t.ok((public.day_end_report(current_date, '7735')->>'error') ilike '%Too many wrong passcodes%', 'while blocked even the right passcode is refused');
+-- a new passcode from the Admin lifts the block; removing it locks the report
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'day_end', '990011');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.day_end_report(current_date, '990011')->>'ok')::boolean and (public.day_end_report(current_date, '7735')->>'error') = 'Wrong passcode', 'a new passcode from the Admin works at once, the old one no longer');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'day_end', '');
+select t.ok((select count(*) from audit_log where action like '%passcode%') >= 5, 'passcodes set, used and blocked are in the activity log');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.day_end_report(current_date, '990011')->>'error') ilike '%Ask the Admin%', 'a removed passcode locks the report');
+reset role;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
