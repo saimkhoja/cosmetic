@@ -95,7 +95,7 @@ export function Invoices() {
   if (open) return <InvoiceList onLock={lock} />;
   return (
     <>
-      <Head t="Invoices" s="Locked. Enter the Invoices passcode the Admin gave you to see every invoice, edit one or print a duplicate." />
+      <Head t="Invoices" />
       <div className="card" id="invlock" style={{ maxWidth: 460 }}>
         <h3><Icon n="lock" /> Invoices are locked</h3>
         <form onSubmit={(e) => { e.preventDefault(); void go(); }}>
