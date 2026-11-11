@@ -48,7 +48,7 @@ export default function Reports() {
           <Kpi i="receipt" l="Sales, VAT included" tone="ok"><Dual2 b={fCDF(r.total)} s={`${r.n} invoices${isAdmin ? ', ' + fUSD(r.total_usd) : ''}`} /></Kpi>
           <Kpi i="cart" l="Items sold"><Dual2 b={r.items} s={`${r.n ? fCDF(r.total / r.n) : fCDF(0)} average sale`} /></Kpi>
           <Kpi i="tag" l="Discounts given" tone="warn"><Dual2 b={fCDF(r.disc)} s={`VAT in the period ${fCDF(r.vat)}`} /></Kpi>
-          {isAdmin ? <Kpi i="chart" l="Gross profit, excl. VAT"><Dual2 b={fUSD(r.profit_usd ?? 0)} s={fCDF((r.profit_usd ?? 0) * bookRate(settings.data))} /></Kpi> : <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r.total)} s="all sales are cash" /></Kpi>}
+          {isAdmin ? <Kpi i="chart" l="Gross profit, after VAT on the margin"><Dual2 b={fUSD(r.profit_usd ?? 0)} s={fCDF((r.profit_usd ?? 0) * bookRate(settings.data))} /></Kpi> : <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r.total)} s="all sales are cash" /></Kpi>}
         </div>
         <div className="card"><h3><Icon n="chart" /> Sales by category</h3>
           {r.by_category ? <CategoryChart cats={r.by_category} names={(cats.data ?? []).map((c) => c.name)} onOpen={setCat} />

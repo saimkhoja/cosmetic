@@ -1,4 +1,4 @@
--- QuickSales: which database updates (migrations 10 to 22) this installation has.
+-- QuickSales: which database updates (migrations 10 to 23) this installation has.
 -- Paste it into the Supabase SQL Editor and click Run. It only reads; it changes nothing.
 -- Each "MISSING" file must be run, in order. A migration re-creates functions from the newest version it knows, so
 -- after running a missing older file, run every later file again too (they are safe to run twice). For example,
@@ -16,5 +16,6 @@ select step, case when ok then 'done' else 'MISSING: run this file' end as statu
   (19, '20261103000002_discount_amount.sql',  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'invoices' and column_name = 'disc_pct' and data_type = 'numeric')),
   (20, '20261103000003_carton_parts.sql',     exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'app' and p.proname = 'unit_named')),
   (21, '20261103000004_category_sales.sql',   exists (select 1 from pg_proc where proname = 'sales_report' and pg_get_functiondef(oid) like '%by_category%')),
-  (22, '20261107000001_more_barcodes.sql',    exists (select 1 from pg_proc where proname = 'barcode_list' and pg_get_functiondef(oid) like '%at most 60 barcodes%'))
+  (22, '20261107000001_more_barcodes.sql',    exists (select 1 from pg_proc where proname = 'barcode_list' and pg_get_functiondef(oid) like '%at most 60 barcodes%')),
+  (23, '20261111000001_profit_on_margin.sql', exists (select 1 from pg_proc where proname = 'sales_report' and pg_get_functiondef(oid) like '%(1 - vat_rate / 100)%'))
 ) as m(n, step, ok) order by n;
