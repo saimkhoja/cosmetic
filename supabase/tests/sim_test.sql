@@ -890,6 +890,10 @@ set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select t.ok(jsonb_array_length(public.sales_report(current_date, current_date)->'slips') = 2, 'admin all-shops report has a slip per shop');
 select t.ok((public.sales_report(current_date, current_date)->>'profit_usd') is not null, 'admin gets profit');
+select t.ok(abs((public.sales_report(current_date - 400, current_date + 1)->>'profit_usd')::numeric
+  - (select coalesce(sum((i.total / i.rate - (select coalesce(sum(cost_usd * qty), 0) from invoice_items where invoice_id = i.id)) * (1 - i.vat_rate / 100)), 0) from invoices i)) < 0.01
+  and (public.sales_report(current_date - 400, current_date + 1)->>'profit_usd')::numeric <> 0,
+  'gross profit is the margin (sales less cost of goods) less the VAT rate on the margin');
 select t.ok((select count(*) from audit_log) > 10, 'admin reads the activity log');
 reset role;
 update profiles set active = false where username = 'till.gombe';
