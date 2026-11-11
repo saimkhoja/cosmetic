@@ -335,15 +335,16 @@ test('a full day in SIM', async ({ browser }) => {
   await op.locator('.card', { hasText: 'RET-0001' }).getByRole('button', { name: 'Receive' }).click();
   await op.getByRole('button', { name: 'Receive into the store' }).click();
   await expect(op.getByText('RET-0001 received: 2 of 2 units')).toBeVisible();
-  // the warehouse reads the Gombe stock account; the shop reads its cash account
+  // the warehouse reads the Gombe stock account; the shop admin has no Statements tab
   await op.getByRole('link', { name: 'Statements' }).click();
   await op.selectOption('#stacc', { label: 'Stock – SIM Beauté Gombe' });
   await expect(op.locator('#sttable')).toContainText('DEL-0001');
   await expect(op.locator('#sttable')).toContainText('RET-0001');
-  await shop.getByRole('link', { name: 'Statements' }).click();
-  await shop.selectOption('#stacc', { label: 'Cash – SIM Beauté Gombe (CDF)' });
-  await expect(shop.locator('#sttable')).toContainText(noWalk);
-  await expect(shop.locator('#stclose')).toContainText('Dr');
+  await expect(shop.getByRole('link', { name: 'Reports' })).toBeVisible();
+  await expect(shop.getByRole('link', { name: 'Statements' })).toHaveCount(0);
+  await shop.goto('/books');                                                               // the address does not open it either
+  await expect(shop.getByRole('heading', { name: 'Statements' })).toHaveCount(0);
+  await expect(shop).toHaveURL(/\/$/);
 
   // ---- the shop admin orders stock; the warehouse edits and approves one request and rejects another
   await shop.getByRole('link', { name: 'Order stock' }).click();
