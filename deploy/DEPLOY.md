@@ -46,15 +46,16 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    24. `supabase/migrations/20261111000002_shop_sales_limit.sql` (a limit on the sales the Shop Admin is shown: a sale worth more than 347 USD does not show in the Shop Admin's invoices, search, sales figures, report or day end slip; nothing changes for the Admin)
    25. `supabase/migrations/20261111000003_shop_passcodes.sql` (passcodes the Admin gives a Shop Admin under Users: one opens the Shop Admin's locked Invoices tab, with every invoice of the shop; the other prints the shift end report, with every sale of the day)
    26. `supabase/migrations/20261111000004_till_discount.sql` (a Discount passcode the Admin gives a till operator under Users: it unlocks the Discount button on their till, for one invoice per entry; the Shop Admin sees the discount on the order and approves it as printed)
+   27. `supabase/migrations/20261111000005_shifts.sql` (shift end reports: printing today's report closes the shift and the next one starts fresh; for every till together or one till; a printed shift can be printed again; the day's sales stay combined)
 
-   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 to 26). Run it **before** the new app goes live. They keep your data:
+   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 to 27). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
 
-   **Check what an installation has.** Run `supabase/scripts/check_migrations.sql` in the SQL Editor: it lists files 10 to 26 as done or MISSING and changes nothing. Never skip a file: each one rebuilds some functions from the newest version it knows, and those use what the earlier files added (for example the Reports page fails with "column inv.paid_usd does not exist", and sales fail too, when 14 was skipped). Files 18 to 21 stop with a message naming the file to run first. If one was missed, run it and then every later file again, in order (they are safe to run twice): with 14 to 17 missing, run 14, 15, 16, 17, then 18, 19, 20, 21.
+   **Check what an installation has.** Run `supabase/scripts/check_migrations.sql` in the SQL Editor: it lists files 10 to 27 as done or MISSING and changes nothing. Never skip a file: each one rebuilds some functions from the newest version it knows, and those use what the earlier files added (for example the Reports page fails with "column inv.paid_usd does not exist", and sales fail too, when 14 was skipped). Files 18 to 21 stop with a message naming the file to run first. If one was missed, run it and then every later file again, in order (they are safe to run twice): with 14 to 17 missing, run 14, 15, 16, 17, then 18, 19, 20, 21.
 
-   To check, run this in a new query. It should return `34 tables, 54 functions`:
+   To check, run this in a new query. It should return `35 tables, 55 functions`:
    ```sql
    select (select count(*) from information_schema.tables where table_schema = 'public') || ' tables, ' ||
           (select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname in
@@ -65,7 +66,7 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
              'post_voucher','cancel_voucher','save_account','delete_account','adjust_stock','create_return','cancel_return',
              'receive_return','account_statement','ledger_list','trial_balance','profit_loss','balance_sheet','day_book','payables',
              'delete_invoice','delete_supplier','create_stock_request','cancel_stock_request','reject_stock_request',
-             'approve_stock_request','set_passcode','open_invoices','close_invoices','day_end_report','open_discount')) || ' functions' as result;
+             'approve_stock_request','set_passcode','open_invoices','close_invoices','day_end_report','open_discount','shift_end_report')) || ' functions' as result;
    ```
 2. **Edge Functions.** Dashboard → **Edge Functions** → **Deploy a new function** → **Via Editor**, twice:
    - Name **`setup`**: replace the sample code with the content of `supabase/functions/setup/index.ts`, then **Deploy**.

@@ -668,6 +668,15 @@ test('a full day in SIM', async ({ browser }) => {
 
   // ---- the sales on the Shop Admin's screens stop at 347 USD a sale: 3 cartons (324 USD at 3 000) show, 4 cartons (432 USD) do not.
   // The Invoices tab, opened with its passcode, lists both and edits either; the shift end report, with its passcode, has both; the Admin sees both
+  // a shift end report closes the shift: print one now, so the next shift holds only the two sales below
+  await shop.getByRole('link', { name: 'Reports' }).click();
+  await shop.getByRole('button', { name: 'Today' }).click();
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
+  await expect(shop.locator('#slipshift')).toContainText('New: shift 2, sales since');
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
+  await expect(shop.locator('#slips')).toContainText('Shift End Report');
+  await expect(shop.locator('#slips')).toContainText('All tills');
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
   for (const [cust, cartons] of [['Within the limit', 3], ['Above the limit', 4]] as const) {
     await shop.goto('/till');
     await shop.fill('#cust', cust); await shop.press('#cust', 'Enter');
@@ -695,10 +704,33 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
   await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toHaveCount(0);
   const shown = Number(/(\d+) invoices/.exec(await shop.locator('.kpi', { hasText: 'Sales, VAT included' }).innerText())![1]);   // the report is loaded: its rows are there
-  await shop.getByRole('button', { name: 'Print day end report' }).click();                // the printed shift end report has every sale
+  expect(shown).toBeGreaterThan(1);
+  // the shift end report starts fresh after the last one: shift 3 has the two sales, also the one above the limit
+  const total = async () => Number(/Total Invoice\s*:\s*(\d+)/.exec(await shop.locator('#slips').innerText())![1]);
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
   await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
   await expect(shop.locator('#slips')).toContainText('Shift End Report');
-  expect(Number(/Total Invoice\s*:\s*(\d+)/.exec(await shop.locator('#slips').innerText())![1])).toBe(shown + 1);
+  await expect(shop.locator('#slips')).toContainText(/Shift\s*:\s*3,/);
+  expect(await total()).toBe(2);
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+  await expect(shop.locator('.kpi', { hasText: 'Sales, VAT included' })).toContainText(`${shown} invoices`);   // the day keeps every shift
+  // printed again: the same shift 3, marked as a copy
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
+  await expect(shop.locator('#slipshift')).toContainText('New: shift 4');
+  await expect(shop.locator('#slipshift option').nth(1)).toContainText('Print again: shift 3');
+  await shop.selectOption('#slipshift', { index: 1 });
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
+  await expect(shop.locator('#slips')).toContainText(/Shift\s*:\s*3,.*\(copy\)/);
+  expect(await total()).toBe(2);
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+  // one till only: its own shift 1, since the start of the day
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
+  const tillLabel = (await shop.locator('#sliptill option').nth(1).innerText()).trim();
+  await shop.selectOption('#sliptill', { index: 1 });
+  await expect(shop.locator('#slipshift')).toContainText('New: shift 1, sales since the start of the day');
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
+  await expect(shop.locator('#slips')).toContainText(tillLabel);
+  await expect(shop.locator('#slips')).toContainText(/Shift\s*:\s*1,/);
   await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
   await shop.getByRole('link', { name: 'Invoices' }).click();                              // locked again, and the search does not find it
   await expect(shop.locator('#invlock')).toBeVisible();

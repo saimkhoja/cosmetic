@@ -42,6 +42,10 @@ export const useUsers = (enabled: boolean) => useQuery({ queryKey: ['users'], en
 export type PasscodeKind = 'invoices' | 'day_end' | 'discount';
 /** Admin only: which passcodes a Shop Admin (Invoices tab, shift end report) or a till operator (discount) has and when they were set; never the passcode. */
 export const usePasscodes = (enabled: boolean) => useQuery({ queryKey: ['passcodes'], enabled, queryFn: async () => rows<{ user_id: string; kind: PasscodeKind; set_at: string }>(await supabase.from('shop_passcodes').select('user_id,kind,set_at')) });
+/** The shop's tills (T1, T2...), for the shift end report of one till. */
+export const useTills = (shopId: string | null | undefined, enabled = true) => useQuery({ queryKey: ['tills', shopId ?? ''], enabled: enabled && !!shopId, queryFn: async () => rows<{ id: string; code: string }>(await supabase.from('devices').select('id,code').eq('shop_id', shopId!).order('created_at')) });
+/** Shift end reports already printed (the shop's, newest first), without their amounts. */
+export const useShifts = (enabled = true) => useQuery({ queryKey: ['shifts'], enabled, queryFn: async () => rows<{ id: string; device_id: string | null; day: string; shift_no: number; from_at: string; to_at: string; closed_by_name: string }>(await supabase.from('shift_closes').select('id,device_id,day,shift_no,from_at,to_at,closed_by_name').order('to_at', { ascending: false }).limit(60)) });
 export const useAudit = (enabled = true) => useQuery({ queryKey: ['audit'], enabled, queryFn: async () => rows<{ id: number; at: string; username: string; action: string }>(await supabase.from('audit_log').select('*').order('id', { ascending: false }).limit(300)) });
 export const useUpkeep = (enabled = true) => useQuery({ queryKey: ['upkeep'], enabled, queryFn: async () => rows<{ id: string; date: string; category: string; description: string; amount_usd: number; by_name: string; at: string }>(await supabase.from('upkeep').select('*').order('date', { ascending: false }).order('at', { ascending: false }).limit(500)) });
 export const useReport = (from: string, to: string, shop: string | null, enabled = true) => useQuery({

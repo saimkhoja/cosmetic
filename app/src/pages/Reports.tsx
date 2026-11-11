@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useCategories, useReport, useSettings, useShops } from '../data/queries';
-import { bookRate, dt, fCDF, fUSD, ld, shortCDF, today } from '../lib/format';
+import { useCategories, useRefresh, useReport, useSettings, useShifts, useShops, useTills } from '../data/queries';
+import { bookRate, dt, fCDF, fUSD, ld, shortCDF, tm, today } from '../lib/format';
 import { printHTML, reportHTML, shiftSlipHTML, type CategorySales, type Slip } from '../lib/print';
 import { Bars, Dual2, Empty, Head, HList, Kpi, Modal, Note, useAction } from '../components/ui';
 import { rpc } from '../lib/supabase';
@@ -22,19 +22,29 @@ export default function Reports() {
   const r = rep.data, single = from === to;
   const shopName = (id: string) => shops.data?.find((s) => s.id === id)?.name ?? '';
   const setRange = (k: string) => { const n = Date.now(), D = 864e5; setTo(today()); setFrom(k === 'today' ? today() : k === '7' ? ld(n - 6 * D) : k === '30' ? ld(n - 29 * D) : today().slice(0, 8) + '01'); };
-  // the Shop Admin prints the shift end report with the passcode the Admin gave: the slip then has every sale of the day
-  const [ask, setAsk] = useState(false), [code, setCode] = useState(''), pa = useAction();
+  // the Shop Admin prints the shift end report with the passcode the Admin gave, for every till (combined) or one till.
+  // Today: the shift since the last one printed for that choice, then a new shift starts. A past day: the whole day.
+  // A shift already printed can be printed again as it was.
+  const [ask, setAsk] = useState(false), [code, setCode] = useState(''), [till, setTill] = useState(''), [again, setAgain] = useState(''), pa = useAction(), refresh = useRefresh();
+  const tills = useTills(isAdmin ? null : profile!.shop_id, ask), shifts = useShifts(ask && !isAdmin);
+  const isToday = from === today(), tillCode = (id: string | null) => tills.data?.find((t) => t.id === id)?.code ?? null;
+  const done = (shifts.data ?? []).filter((x) => (x.device_id ?? '') === till && x.day === from);
+  const last = (shifts.data ?? []).find((x) => (x.device_id ?? '') === till);
   const printSlip = () => pa.run(async () => {
     if (!code.trim()) throw new Error('Enter the passcode');
-    const res = await rpc<{ ok: boolean; error?: string; slip?: Slip }>('day_end_report', { p_day: from, p_code: code });
+    const action = again ? 'reprint' : isToday ? 'close' : 'day';
+    const res = await rpc<{ ok: boolean; error?: string; slip?: Slip; shift_no?: number; from?: string; to?: string; till?: string | null }>('shift_end_report',
+      { p_code: code, p_action: action, p_device: till || null, p_day: action === 'day' ? from : null, p_shift: again || null });
     setCode('');
     if (!res.ok || !res.slip) throw new Error(res.error ?? 'Wrong passcode');
-    const html = shiftSlipHTML(res.slip, profile!.username, from, settings.data?.rate ?? 0);
-    setAsk(false); setDoc({ title: 'Day end report', html, slip: true }); setTimeout(() => printHTML(html), 400);
+    const shift = res.shift_no ? `${res.shift_no}, ${dt(res.from!).split(',')[0] === dt(res.to!).split(',')[0] ? tm(res.from!) : dt(res.from!)} to ${tm(res.to!)}${again ? ' (copy)' : ''}` : 'Whole day';
+    const html = shiftSlipHTML(res.slip, profile!.username, again ? ld(res.to!) : from, settings.data?.rate ?? 0, { till: res.till ?? null, shift });
+    setAsk(false); setAgain(''); if (action === 'close') void refresh('shifts');
+    setDoc({ title: res.shift_no ? `Shift end report, shift ${res.shift_no}` : 'Day end report', html, slip: true }); setTimeout(() => printHTML(html), 400);
   });
   const print = () => {
     if (!r) return;
-    if (single && !isAdmin) { pa.setErr(''); setCode(''); setAsk(true); return; }
+    if (single && !isAdmin) { pa.setErr(''); setCode(''); setAgain(''); setAsk(true); return; }
     if (single) {
       // day end report: one slip per shop (all shops plus a total for the Admin)
       const slips = r.slips.map((s) => shiftSlipHTML(s, profile!.username, from, settings.data?.rate ?? 0));
@@ -82,7 +92,15 @@ export default function Reports() {
             <td className="r nw"><b>{fCDF(it.val)}</b></td><td className="r">{cat.val ? Math.round((it.val * 1000) / cat.val) / 10 : 0}%</td></tr>)}
         </tbody></table></div>
       </Modal> : null}
-      {ask ? <Modal title="Shift end report" icon="lock" onClose={() => setAsk(false)} foot={<><button className="btn" onClick={() => setAsk(false)}>Cancel</button><button className="btn primary" id="slipbtn" disabled={pa.busy} onClick={() => void printSlip()}><Icon n="printer" /> Print shift end report</button></>}>
+      {ask ? <Modal title={isToday ? 'Shift end report' : 'Day end report'} icon="lock" onClose={() => setAsk(false)} foot={<><button className="btn" onClick={() => setAsk(false)}>Cancel</button><button className="btn primary" id="slipbtn" disabled={pa.busy} onClick={() => void printSlip()}><Icon n="printer" /> {again ? 'Print again' : isToday ? 'Print and start a new shift' : 'Print day end report'}</button></>}>
+        <div className="field"><label htmlFor="sliptill">Till</label><select id="sliptill" className="input" value={till} onChange={(e) => { setTill(e.target.value); setAgain(''); }}>
+          <option value="">All tills (combined)</option>{(tills.data ?? []).map((t) => <option key={t.id} value={t.id}>Till {t.code}</option>)}</select></div>
+        {isToday ? <>
+          <div className="field"><label htmlFor="slipshift">Report</label><select id="slipshift" className="input" value={again} onChange={(e) => setAgain(e.target.value)}>
+            <option value="">New: shift {done.length + 1}, sales since {last ? (last.day === from ? tm(last.to_at) : dt(last.to_at)) : 'the start of the day'}</option>
+            {done.map((x) => <option key={x.id} value={x.id}>Print again: shift {x.shift_no}, {tm(x.from_at)} to {tm(x.to_at)} ({x.closed_by_name.split(' ')[0]})</option>)}</select></div>
+          {!again ? <Note i="clock">{till ? `Till ${tillCode(till)} only. ` : 'Every till together. '}After printing, a new shift starts for {till ? 'this till' : 'all tills combined'}: the next report has only the sales made after it. Sales today and the sales report keep the whole day.</Note> : null}
+        </> : <Note i="clock">The whole day, {till ? `Till ${tillCode(till)} only` : 'every till together'}. No shift is closed.</Note>}
         <div className="field"><label htmlFor="slipcode">Passcode</label><input id="slipcode" className="input" type="password" inputMode="numeric" autoComplete="off" maxLength={12} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') void printSlip(); }} autoFocus /></div>
         <div className="lerr">{pa.err}</div>
         <Note i="shield">It needs the connection.</Note>
