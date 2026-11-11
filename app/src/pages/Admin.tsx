@@ -185,7 +185,7 @@ export function SettingsPage() {
   const settings = useSettings(), shops = useShops(), refresh = useRefresh(), toast = useToast(), a = useAction(), b = useAction();
   const s = settings.data;
   const [f, setF] = useState<Record<string, string> | null>(null);
-  const v = f ?? (s ? { rate: String(s.rate), book_rate: String(bookRate(s)), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', usd_pay: s.features?.usd_pay ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
+  const v = f ?? (s ? { rate: String(s.rate), book_rate: String(bookRate(s)), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', usd_pay: s.features?.usd_pay ? '1' : '', one_copy: s.features?.one_copy ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
   const [shop, setShop] = useState({ name: '', code: '', address: '' });
   const [edit, setEdit] = useState<Shop | null>(null);
   if (!v) return <Empty i="refresh" t="Loading" tall />;
@@ -193,7 +193,7 @@ export function SettingsPage() {
   const fld = (k: string, l: string) => <div className="field"><label htmlFor={'s-' + k}>{l}</label><input id={'s-' + k} className="input" maxLength={80} value={v[k]} onChange={set(k)} /></div>;
   const sw = (k: string, l: string) => <label className="switch"><input type="checkbox" id={'s-' + k} checked={!!v[k]} onChange={(e) => setF({ ...v, [k]: e.target.checked ? '1' : '' })} /><span>{l}</span></label>;
   const save = () => a.run(async () => {
-    await rpc('save_settings', { p: { rate: Number(v.rate), book_rate: Number(v.book_rate), vat: Number(v.vat), features: { customer_optional: !!v.customer_optional, barcode: !!v.barcode, till_sells: !!v.till_sells, cash_change: !!v.cash_change, usd_pay: !!v.usd_pay }, company: { name: v.name, phone: v.phone, address: v.address, email: v.email, rccm: v.rccm, idnat: v.idnat, nif: v.nif, footer: v.footer } } });
+    await rpc('save_settings', { p: { rate: Number(v.rate), book_rate: Number(v.book_rate), vat: Number(v.vat), features: { customer_optional: !!v.customer_optional, barcode: !!v.barcode, till_sells: !!v.till_sells, cash_change: !!v.cash_change, usd_pay: !!v.usd_pay, one_copy: !!v.one_copy }, company: { name: v.name, phone: v.phone, address: v.address, email: v.email, rccm: v.rccm, idnat: v.idnat, nif: v.nif, footer: v.footer } } });
     await refresh('settings', 'audit'); setF(null); toast('Settings saved');
   });
   const addShop = () => b.run(async () => { await rpc('save_shop', { p: shop }); await refresh('shops', 'stock', 'audit'); setShop({ name: '', code: '', address: '' }); toast('Shop added'); });
@@ -214,6 +214,7 @@ export function SettingsPage() {
         {sw('barcode', 'Barcode scanning: items have barcodes (several per item if needed), and scanning any of them at the till adds 1 pc to the sale')}
         {sw('till_sells', 'Till operators sell directly: they take the cash and print the invoice without the shop admin approving the order (a discount only with the Discount passcode you give them under Users)')}
         {sw('cash_change', 'Enter the cash received: the till shows the change to give and prints the cash received and the change on the receipt')}
+        {sw('one_copy', 'Print one copy of each invoice: the customer copy only, at every till. Off: two copies, one for the customer and one for the shop')}
         {sw('usd_pay', 'Accept payment in USD (and CDF): the cashier enters the dollars and Francs received at the sales rate; change is in CDF, or whole dollars plus CDF')}
         <Note>A USB barcode scanner works like a keyboard: scan into the till search box. Barcodes are entered in the item form or in the Excel import. Saved with the button below.</Note></div>
       <div className="card"><h3><Icon n="receipt" /> Company details on invoices</h3>

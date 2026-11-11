@@ -1,4 +1,4 @@
--- QuickSales: which database updates (migrations 10 to 27) this installation has.
+-- QuickSales: which database updates (migrations 10 to 28) this installation has.
 -- Paste it into the Supabase SQL Editor and click Run. It only reads; it changes nothing.
 -- Each "MISSING" file must be run, in order. A migration re-creates functions from the newest version it knows, so
 -- after running a missing older file, run every later file again too (they are safe to run twice). For example,
@@ -21,5 +21,6 @@ select step, case when ok then 'done' else 'MISSING: run this file' end as statu
   (24, '20261111000002_shop_sales_limit.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'settings' and column_name = 'shop_sales_limit_usd')),
   (25, '20261111000003_shop_passcodes.sql',   exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'shop_passcodes')),
   (26, '20261111000004_till_discount.sql',    exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'discount_grants')),
-  (27, '20261111000005_shifts.sql',          exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'shift_closes'))
+  (27, '20261111000005_shifts.sql',          exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'shift_closes')),
+  (28, '20261111000006_one_copy.sql',        exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'invoices' and column_name = 'copies'))
 ) as m(n, step, ok) order by n;

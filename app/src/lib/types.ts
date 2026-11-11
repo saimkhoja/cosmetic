@@ -2,7 +2,7 @@ export type Role = 'admin' | 'whop' | 'shopadmin' | 'till';
 export interface Profile { id: string; username: string; name: string; role: Role; shop_id: string | null; active: boolean; must_change_password: boolean; created_at?: string }
 export interface Company { name?: string; address?: string; phone?: string; email?: string; rccm?: string; idnat?: string; nif?: string; footer?: string }
 /** Switches the Admin turns on in Settings; both off by default. */
-export interface Features { customer_optional?: boolean; barcode?: boolean; till_sells?: boolean; cash_change?: boolean; usd_pay?: boolean }
+export interface Features { customer_optional?: boolean; barcode?: boolean; till_sells?: boolean; cash_change?: boolean; usd_pay?: boolean; one_copy?: boolean }
 /** rate: the sales rate (prices, tickets, tills). book_rate: the internal rate (suppliers, expenses, vouchers). */
 export interface Settings {
   rate: number; book_rate?: number; vat: number; tz: string; company: Company; features?: Features;
@@ -22,6 +22,8 @@ export interface InvoiceEdit { at: string; by_name: string; reason: string; from
 export interface Invoice {
   id: string; no: string; shop_id: string; cashier_id?: string; cashier_name: string; t: string; rate: number; vat_rate: number;
   gross: number; disc_pct: number; disc: number; total: number; vat: number; ht: number; tendered: number; change: number;
+  /** copies printed when it was made (1 or 2, the Settings switch); printed above it are duplicates */
+  copies?: number;
   printed: number; till_printed_at?: string | null; items: InvoiceItem[]; edits?: InvoiceEdit[]; synced?: boolean;
   customer?: string; prepared_by_name?: string | null; order_id?: string | null;
   paid_usd?: number; paid_cdf?: number; change_usd?: number; change_cdf?: number;

@@ -89,8 +89,9 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   ${ed ? `<div class="small">Modifiée le ${dt(ed.at)} par ${esc(ed.by_name)}</div>` : ''}
   <div class="rnb">${c.footer ? `<div class="c">${esc(c.footer)}</div>` : ''}${NB}</div></div>`;
 }
-export const saleCopies = (inv: Invoice, c: Company, shop: Shop, cash = false) =>
-  receiptHTML(inv, c, shop, { copy: 'client', cash }) + '<div class="pagebreak"></div>' + receiptHTML(inv, c, shop, { copy: 'shop', cash });
+/** The copies of a new invoice: customer and shop, or only the customer's when the Admin chose one copy in Settings. */
+export const saleCopies = (inv: Invoice, c: Company, shop: Shop, cash = false, one = false) =>
+  receiptHTML(inv, c, shop, { copy: 'client', cash }) + (one ? '' : '<div class="pagebreak"></div>' + receiptHTML(inv, c, shop, { copy: 'shop', cash }));
 
 /** Return note for goods sent back to a supplier: the driver signs it. No prices (the warehouse prints it). */
 export function supplierReturnNoteHTML(r: { no: string; kind: string; reason: string; note: string; created_at: string; created_by_name: string; supplier_return_items: { product_id: string; qty: number }[] }, supplier: string, c: Company, products: Map<string, Product>) {

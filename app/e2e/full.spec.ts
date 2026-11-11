@@ -647,6 +647,29 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done, 13 000 CDF/)).toBeVisible();
   await expect(till.locator('.pill')).toContainText('all synced', { timeout: 40000 });      // the server took the discount
 
+  // ---- one copy of each invoice: the Admin turns it on in Settings, the next sale prints the customer copy only
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await expect(admin.locator('#s-one_copy')).not.toBeChecked();                           // off by default: two copies
+  await admin.check('#s-one_copy');
+  await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
+  await shop.goto('/till');
+  await shop.fill('#cust', 'One copy customer'); await shop.press('#cust', 'Enter');
+  await shop.locator('.ptile', { hasText: 'Shea body lotion' }).click();
+  await shop.locator('.ubtn', { hasText: 'pcs' }).first().click();
+  const before1 = (await prints(shop)).length;
+  await shop.getByRole('button', { name: 'Take payment' }).click();
+  await shop.fill('#cashin', '20000');
+  await shop.locator('.modal').getByRole('button', { name: 'Take cash and print' }).click();
+  await expect.poll(async () => (await prints(shop)).length).toBe(before1 + 1);
+  const oneCopy = (await prints(shop)).at(-1)!;
+  expect(oneCopy).toContain('Copie client'); expect(oneCopy).not.toContain('Copie magasin');
+  await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
+  await openInvoices(shop);
+  await expect(shop.locator('main tr', { hasText: 'One copy customer' })).toContainText('1 copy');
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await admin.uncheck('#s-one_copy');
+  await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
+
   // ---- two rates: the internal rate for expenses, the sales rate for item prices (changed from the Items page)
   await admin.getByRole('link', { name: 'Settings' }).click();
   await expect(admin.locator('#sbook')).toHaveValue('2850');

@@ -547,7 +547,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":true,"barcode":true,"other":true}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
@@ -566,7 +566,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false}'::jsonb, 'saving settings without the switches turns them off');
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false}'::jsonb, 'saving settings without the switches turns them off');
 reset role;
 
 -- ===== till operators sell directly when the Admin turns it on =====
@@ -1100,6 +1100,26 @@ select t.as('00000000-0000-0000-0000-00000000000a');
 select t.ok(exists (select 1 from audit_log where action like 'Shift end report 3 of % (all tills) printed, 2 invoices%'), 'each shift printed is in the activity log');
 reset role;
 update settings set features = features - 'till_sells' where id = 1;
+
+-- ===== one copy of each invoice (a switch in Settings, off by default) =====
+select t.ok((select copies || '/' || printed from invoices where no = t.get('sno1')) = '2/2', 'by default an invoice prints two copies');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features || '{"one_copy": true}') from settings));
+select t.ok((select (features->>'one_copy')::boolean from settings), 'the Admin turns on one copy');
+reset role;
+select t.put('cno9', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.submit_invoice(t.csale(t.get('cno9'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 1, 'price', 25650))));
+select t.ok((select copies || '/' || printed from invoices where no = t.get('cno9')) = '1/1', 'with it on, an invoice is made with one copy');
+select public.record_reprint((select id from invoices where no = t.get('cno9')));
+select t.ok((select printed - copies from invoices where no = t.get('cno9')) = 1, 'a duplicate counts as one duplicate');
+select t.ok((select copies from invoices where no = t.get('sno1')) = 2, 'invoices made before keep their two copies');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features - 'one_copy') from settings));
+select t.ok(not (select (features->>'one_copy')::boolean from settings), 'and back to two copies');
+reset role;
 
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
