@@ -586,6 +586,35 @@ test('a full day in SIM', async ({ browser }) => {
   await admin.getByRole('link', { name: 'Settings' }).click();
   await expect(admin.locator('#srate')).toHaveValue('3000'); await expect(admin.locator('#sbook')).toHaveValue('2950');
 
+  // ---- the Shop Admin is shown sales up to 347 USD: 3 cartons (324 USD at 3 000) show, 4 cartons (432 USD) do not; the Admin sees both
+  for (const [cust, cartons] of [['Within the limit', 3], ['Above the limit', 4]] as const) {
+    await shop.goto('/till');
+    await shop.fill('#cust', cust); await shop.press('#cust', 'Enter');
+    await shop.locator('.ptile', { hasText: 'Shea body lotion' }).click();
+    await shop.locator('.ubtn', { hasText: 'carton' }).first().click();
+    await shop.getByLabel('Quantity of Shea body lotion 400 ml').fill(String(cartons)); await shop.getByLabel('Quantity of Shea body lotion 400 ml').press('Enter');
+    await shop.getByRole('button', { name: 'Take payment' }).click();
+    await expect(shop.locator('.modal')).toContainText(cartons === 3 ? '972 000 CDF' : '1 296 000 CDF');
+    await shop.fill('#cashin', '1300000');
+    await shop.locator('.modal').getByRole('button', { name: 'Take cash and print' }).click();
+    await expect(shop.getByText('Scan or tap an item to add it')).toBeVisible();
+    await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
+  }
+  await shop.getByRole('link', { name: 'Invoices' }).click();
+  await expect(shop.locator('main tr', { hasText: 'Within the limit' })).toContainText('972 000 CDF');
+  await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toHaveCount(0);
+  await shop.getByRole('button', { name: 'All', exact: true }).click();
+  await shop.locator('.toolbar .search input').fill('Above the limit');                     // searched on the server, every date
+  await expect(shop.getByText('No invoices for this period')).toBeVisible();
+  await shop.getByRole('link', { name: 'Reports' }).click();
+  await shop.getByRole('button', { name: 'Today' }).click();
+  await expect(shop.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
+  await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toHaveCount(0);
+  await admin.getByRole('link', { name: 'Reports' }).click();
+  await admin.getByRole('button', { name: 'Today' }).click();
+  await expect(admin.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
+  await expect(admin.locator('main tr', { hasText: 'Above the limit' })).toContainText('1 296 000 CDF');
+
   // ---- the Admin sees the activity; disabling the till ends its access
   await admin.getByRole('link', { name: 'Activity' }).click();
   await expect(admin.getByText(new RegExp(`Invoice ${noMama} edited`))).toBeVisible();

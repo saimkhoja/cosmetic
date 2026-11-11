@@ -885,6 +885,44 @@ select t.ok((select c->>'val' || '/' || (c->'items'->0->>'pcs') from jsonb_array
 select t.ok((select sum((i->>'val')::bigint) from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c, jsonb_array_elements(c->'items') i where c->>'category' = 'Skin care')
   = (select (c->>'val')::bigint from jsonb_array_elements(t.get('crep')::jsonb->'by_category') c where c->>'category' = 'Skin care'), 'a category''s items add up to the category');
 
+-- ===== the Shop Admin is shown sales up to the limit (347 USD); the Admin sees every sale =====
+select t.ok((select shop_sales_limit_usd from settings) = 347, 'the limit on the sales shown to the Shop Admin starts at 347 USD');
+select t.put('lno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('lno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('lrep0', public.sales_report(current_date, current_date)::text), t.put('lseen0', (select count(*)::text from invoices));
+-- at 2850 CDF to the dollar the limit is 988 950 CDF: a sale of exactly that shows, 10 CDF more does not
+select public.submit_invoice(t.csale(t.get('lno1'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 1, 'price', 988950))));
+select t.ok((public.submit_invoice(t.csale(t.get('lno2'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 1, 'price', 988960))))->>'status') = 'ok',
+  'a sale above the limit is still made');
+select t.ok((select count(*) from invoices) = t.get('lseen0')::int + 1 and exists (select 1 from invoices where no = t.get('lno1')) and not exists (select 1 from invoices where no = t.get('lno2')),
+  'the Shop Admin sees the sale of 347 USD, not the one above it');
+select t.put('lrep1', public.sales_report(current_date, current_date)::text);
+select t.ok((t.get('lrep1')::jsonb->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 1 and (t.get('lrep1')::jsonb->>'total')::bigint = (t.get('lrep0')::jsonb->>'total')::bigint + 988950,
+  'the Shop Admin''s report counts only the sale within the limit');
+select t.ok((t.get('lrep1')::jsonb->'slips'->0->>'value_fc')::bigint = (t.get('lrep1')::jsonb->>'total')::bigint
+  and not exists (select 1 from jsonb_array_elements(t.get('lrep1')::jsonb->'invoices') i where i->>'no' = t.get('lno2')), 'nor do the day end slip and the report''s invoices hold it');
+reset role;
+select t.put('lover', (select id::text from invoices where no = t.get('lno2'))), t.put('lat', (select id::text from invoices where no = t.get('lno1')));
+set role authenticated;
+select t.ok((select count(*) from invoice_items where invoice_id = t.get('lover')::uuid) = 0 and (select count(*) from invoice_items where invoice_id = t.get('lat')::uuid) = 1,
+  'the lines of a sale above the limit are not shown either');
+-- the Admin sees both, in the list and in the report
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok((select count(*) from invoices where no in (t.get('lno1'), t.get('lno2'))) = 2 and (select count(*) from invoice_items where invoice_id = t.get('lover')::uuid) = 1, 'the Admin sees every sale');
+select t.ok((public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total')::bigint = (t.get('lrep0')::jsonb->>'total')::bigint + 988950 + 988960
+  and (public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 2, 'the Admin''s report has every sale');
+reset role;
+-- no limit: the Shop Admin sees everything again
+update settings set shop_sales_limit_usd = null where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok(exists (select 1 from invoices where no = t.get('lno2')) and (public.sales_report(current_date, current_date)->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 2,
+  'with no limit set the Shop Admin sees every sale');
+reset role;
+update settings set shop_sales_limit_usd = 347 where id = 1;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

@@ -4,7 +4,11 @@ export interface Company { name?: string; address?: string; phone?: string; emai
 /** Switches the Admin turns on in Settings; both off by default. */
 export interface Features { customer_optional?: boolean; barcode?: boolean; till_sells?: boolean; cash_change?: boolean; usd_pay?: boolean }
 /** rate: the sales rate (prices, tickets, tills). book_rate: the internal rate (suppliers, expenses, vouchers). */
-export interface Settings { rate: number; book_rate?: number; vat: number; tz: string; company: Company; features?: Features }
+export interface Settings {
+  rate: number; book_rate?: number; vat: number; tz: string; company: Company; features?: Features;
+  /** sales worth more than this (USD, at the rate of the sale) are not shown to the Shop Admin; empty = no limit */
+  shop_sales_limit_usd?: number | null;
+}
 export interface Shop { id: string; code: string; name: string; address: string; active: boolean }
 export interface Product {
   id: string; sku: string; name: string; category: string; stock_unit: 'pcs' | 'set'; is_bundle: boolean;

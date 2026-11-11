@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fCDF, toCDF } from './format';
+import { aboveShopLimit, fCDF, toCDF } from './format';
 import { cashNotes, ctnTxt, hotSort, marginPct, overLimit, payment, pcValue, pctOf, stockValue, takeLocal, totals, unitsOf, usdNotes } from './units';
 import { barcodesOf, custName, findByCode, itemProblem, pickList, scanInQty, splitBarcodes } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
@@ -26,6 +26,20 @@ describe('money', () => {
     expect(overLimit(totals([{ price: 4560, qty: 10 }], { amount: 14000 }, 16))).toBe(true);
     expect(overLimit(totals([{ price: 4560, qty: 10 }], { amount: 13680 }, 16))).toBe(false);
     expect(pctOf(3000, 45600)).toBe(6.58);
+  });
+});
+
+describe('sales shown to the Shop Admin', () => {
+  it('leaves out a sale above the limit, in USD at the rate of the sale', () => {
+    const s = { shop_sales_limit_usd: 347 };
+    expect(aboveShopLimit({ total: 988950, rate: 2850 }, s)).toBe(false);   // exactly 347 USD
+    expect(aboveShopLimit({ total: 988960, rate: 2850 }, s)).toBe(true);
+    expect(aboveShopLimit({ total: 988960, rate: 2900 }, s)).toBe(false);   // the same Francs at a higher rate are fewer dollars
+  });
+  it('shows every sale when no limit is set', () => {
+    expect(aboveShopLimit({ total: 5e7, rate: 2850 }, { shop_sales_limit_usd: null })).toBe(false);
+    expect(aboveShopLimit({ total: 5e7, rate: 2850 }, {})).toBe(false);
+    expect(aboveShopLimit({ total: 5e7, rate: 2850 }, undefined)).toBe(false);
   });
 });
 

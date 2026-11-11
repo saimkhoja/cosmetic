@@ -6,13 +6,13 @@ import { useDeliveries, useInvoices, useOrders, useProducts, useRanks, useRefres
 import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSet, hotSort, pcValue, stockValue, totals, unitLabel, unitsOf, type Disc } from '../lib/units';
 import { TicketsModal } from '../components/Tickets';
-import { dt, fCDF, ld, sum, tm, toCDF, today } from '../lib/format';
+import { aboveShopLimit, dt, fCDF, ld, sum, tm, toCDF, today } from '../lib/format';
 import { printHTML, receiptHTML, stockCountHTML } from '../lib/print';
 import { Dual2, Empty, Head, Kpi, Modal, Note, Tile, useAction, useToast } from '../components/ui';
 import { DiscFields, discProblem } from '../components/Discount';
-import { outboxAll } from '../offline/store';
+import { getSnapshot, outboxAll } from '../offline/store';
 import { MIN_QUERY, serverTerm } from '../lib/search';
-import type { Invoice, Product } from '../lib/types';
+import type { Invoice, Product, Settings } from '../lib/types';
 
 export function ShopHome() {
   const { profile } = useAuth(), nav = useNavigate();
@@ -84,11 +84,16 @@ export function Invoices() {
   const [waiting, setWaiting] = useState<Invoice[]>([]);
   useEffect(() => { const upd = () => void outboxAll().then((l) => setWaiting(l.flatMap((e) => (e.shop_id === sid && e.kind !== 'order' ? [e.invoice] : [])))); upd(); addEventListener('sim-outbox', upd); return () => removeEventListener('sim-outbox', upd); }, [sid]);
   const shop = shops.data?.find((x) => x.id === sid);
+  // sales above the limit set for the Shop Admin are not shown: the server leaves them out, and those still waiting on
+  // this device are left out here (without internet the limit comes from the till's saved settings)
+  const [saved, setSaved] = useState<Settings | null>(null);
+  useEffect(() => { void getSnapshot(sid).then((snap) => setSaved(snap?.settings ?? null)); }, [sid]);
+  const limit = settings.data ?? saved;
   const q = s.trim().toLowerCase();
   const list = useMemo(() => {
     const server = inv.data ?? [], ids = new Set(server.map((i) => i.id));
-    return [...waiting.filter((w) => !ids.has(w.id) && (f === 'all' || ld(w.t) >= ld(since!))), ...server].filter((i) => !q || i.no.toLowerCase().includes(q) || i.cashier_name.toLowerCase().includes(q) || (i.customer ?? '').toLowerCase().includes(q));
-  }, [inv.data, waiting, q, f, since]);
+    return [...waiting.filter((w) => !ids.has(w.id) && (f === 'all' || ld(w.t) >= ld(since!))), ...server].filter((i) => !aboveShopLimit(i, limit) && (!q || i.no.toLowerCase().includes(q) || i.cashier_name.toLowerCase().includes(q) || (i.customer ?? '').toLowerCase().includes(q)));
+  }, [inv.data, waiting, q, f, since, limit]);
   const pending = list.filter((i) => !i.synced).length, edited = list.filter((i) => i.edits?.length).length;
   const dup = async (i: Invoice) => {
     if (!shop || !settings.data) return;
