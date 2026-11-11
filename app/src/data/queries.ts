@@ -39,8 +39,9 @@ export const useInvoices = (shopId: string, sinceISO: string | null, find = '') 
   },
 });
 export const useUsers = (enabled: boolean) => useQuery({ queryKey: ['users'], enabled, queryFn: async () => rows<Profile>(await supabase.from('profiles').select('*').order('created_at')) });
-/** Admin only: which passcodes each Shop Admin has (Invoices tab, shift end report) and when they were set; never the passcode. */
-export const usePasscodes = (enabled: boolean) => useQuery({ queryKey: ['passcodes'], enabled, queryFn: async () => rows<{ user_id: string; kind: 'invoices' | 'day_end'; set_at: string }>(await supabase.from('shop_passcodes').select('user_id,kind,set_at')) });
+export type PasscodeKind = 'invoices' | 'day_end' | 'discount';
+/** Admin only: which passcodes a Shop Admin (Invoices tab, shift end report) or a till operator (discount) has and when they were set; never the passcode. */
+export const usePasscodes = (enabled: boolean) => useQuery({ queryKey: ['passcodes'], enabled, queryFn: async () => rows<{ user_id: string; kind: PasscodeKind; set_at: string }>(await supabase.from('shop_passcodes').select('user_id,kind,set_at')) });
 export const useAudit = (enabled = true) => useQuery({ queryKey: ['audit'], enabled, queryFn: async () => rows<{ id: number; at: string; username: string; action: string }>(await supabase.from('audit_log').select('*').order('id', { ascending: false }).limit(300)) });
 export const useUpkeep = (enabled = true) => useQuery({ queryKey: ['upkeep'], enabled, queryFn: async () => rows<{ id: string; date: string; category: string; description: string; amount_usd: number; by_name: string; at: string }>(await supabase.from('upkeep').select('*').order('date', { ascending: false }).order('at', { ascending: false }).limit(500)) });
 export const useReport = (from: string, to: string, shop: string | null, enabled = true) => useQuery({

@@ -32,10 +32,12 @@ const quotedPrices = (lines: Priced[], o: SaleOrder | null | undefined) => {
   const q = new Map((o?.items ?? []).filter((i) => i.price).map((i) => [unitKey(i), i.price!]));
   return q.size ? lines.map((l) => { const p = q.get(unitKey(asItem(l))); return p ? { ...l, price: p } : l; }) : lines;
 };
-/** The shop admin changed the invoice printed at the till: other items, quantities, units or prices, or a discount. */
+/** The discount the till operator gave on the invoice printed for an order (with the Discount passcode). */
+const orderDisc = (o: SaleOrder): Disc => (o.disc ? { amount: o.disc } : 0);
+/** The shop admin changed the invoice printed at the till: other items, quantities, units or prices, or another discount. */
 const changedFrom = (o: SaleOrder, lines: Priced[], disc: number) => {
   const key = (x: { product_id: string; mult: number; piece: boolean; unit?: string; qty: number; price?: number }) => `${unitKey(x)}:${x.qty}:${x.price}`;
-  return disc > 0 || lines.map((l) => key(asItem(l))).sort().join() !== o.items.map(key).sort().join();
+  return disc !== (o.disc ?? 0) || lines.map((l) => key(asItem(l))).sort().join() !== o.items.map(key).sort().join();
 };
 
 /** Loads the shop's catalogue from the server and keeps it on the device for offline selling. */
@@ -86,7 +88,7 @@ export default function Till() {
   const [snap, setSnap] = useState<Snapshot | null>(null), [dev, setDev] = useState<Device | null>(null), [problem, setProblem] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]), [dp, setDp] = useState<Disc>(0), [cat, setCat] = useState('All'), [q, setQ] = useState('');
   const [customer, setCustomer] = useState(''), [custDraft, setCustDraft] = useState(''), [editing, setEditing] = useState<SaleOrder | null>(null), [tickets, setTickets] = useState(false);
-  const [pick, setPick] = useState<{ pid: string; k: string | null } | null>(null), [check, setCheck] = useState(false), [disc, setDisc] = useState(false), [reject, setReject] = useState<SaleOrder | null>(null);
+  const [pick, setPick] = useState<{ pid: string; k: string | null } | null>(null), [check, setCheck] = useState(false), [disc, setDisc] = useState(false), [tok, setTok] = useState<string | null>(null), [askCode, setAskCode] = useState(false), [reject, setReject] = useState<SaleOrder | null>(null);
   const [last, setLast] = useState<Invoice | null>(null), [view, setView] = useState<Invoice | null>(null), [outbox, setOutbox] = useState<OutboxEntry[]>([]), [flash, setFlash] = useState(false);
   const [cashFor, setCashFor] = useState<{ total: number; info: string; prints?: boolean; go: (pay: PayIn) => Promise<boolean>; cancel: () => void } | null>(null);
   // the highlighted line (n changes on every scan, so the same line flashes and scrolls into view again)
@@ -158,7 +160,7 @@ export default function Till() {
   const orderTotal = (o: SaleOrder) => o.total ?? o.items.reduce((s, it) => { const p = byId.get(it.product_id); if (!p) return s; const u = unitsOf(p)[unitIndex(p, it)]; return s + (u ? toCDF(u.usd, rate) * it.qty : 0); }, 0);
 
   const startCustomer = () => { const c = custDraft.trim().replace(/\s+/g, ' ').slice(0, 60); if (!c) { if (optCust) scan.current?.focus(); else toast('Type the customer name, then press Enter', 'warn'); return; } setCustomer(c); setCustDraft(''); setTimeout(() => scan.current?.focus(), 50); };
-  const resetSale = () => { setCart([]); setDp(0); setCustomer(''); setSel(null); };
+  const resetSale = () => { setCart([]); setDp(0); setTok(null); setCustomer(''); setSel(null); };
   const hi = (k: string) => { setSel((s) => ({ k, n: (s?.n ?? 0) + 1 })); setFlash(true); setTimeout(() => setFlash(false), 600); };
   const add = (pid: string, ui?: number) => {
     if (!ready) { toast('Type the customer name first', 'warn'); custIn.current?.focus(); return; }
@@ -216,19 +218,22 @@ export default function Till() {
     return { lines, missing };
   };
 
+  // a till operator's discount goes with the token of their Discount passcode entry; no discount, nothing is sent
+  const tillDisc = (d: Disc, amount: number) => (amount > 0 ? { ...(typeof d === 'number' ? { disc_pct: d } : { disc: amount }), discount_token: tok ?? undefined } : {});
   // till operator: the invoice prints here (customer and shop copies) and goes to the shop admin with the order;
   // nothing is sold and no stock moves until the shop admin approves it, which prints nothing unless it is changed
   const sendOrder = async () => {
     if (busy.current || !priced.length || !ready || !snap) return;
+    if (overLimit(T)) { toast(discProblem(dp, T.gross), 'warn'); return; }
     if (!dev) { toast('Connect to the internet once to register this till', 'bad'); return; }
     busy.current = true;
     try {
       const id = crypto.randomUUID(), t = new Date().toISOString(), no = await nextInvoiceNo(dev);
       const items = priced.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
-      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: T.gross, disc_pct: 0, disc: 0, total: T.total, vat: T.vat, ht: T.ht,
+      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: T.gross, disc_pct: T.pct, disc: T.disc, total: T.total, vat: T.vat, ht: T.ht,
         tendered: T.total, change: 0, printed: 2, items, edits: [], synced: false, customer, order_id: id, prepared_by_name: null };
       await outboxPut({ kind: 'order', id, t, shop_id: shopId, tries: 0, total: T.total, created_by: profile!.id,
-        payload: { id, customer, t, no, device_id: dev.id, rate, vat_rate: vat, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
+        payload: { id, customer, t, no, device_id: dev.id, rate, vat_rate: vat, ...tillDisc(dp, T.disc), items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
       printHTML(saleCopies(inv, snap.settings.company, snap.shop));
       toast(`Invoice ${no} for ${custName(customer)}, ${fCDF(T.total)}, printed and sent to the shop admin for approval.`);
       resetSale(); void syncOutbox();
@@ -255,7 +260,7 @@ export default function Till() {
       const items = pr.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
       const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: S.pct, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, paid_usd: usd?.paid_usd ?? 0, paid_cdf: usd ? usd.paid_cdf : tend, change_usd: usd?.change_usd ?? 0, change_cdf: tend - S.total - Math.round((usd?.change_usd ?? 0) * rate), printed: 2, items, edits: [], synced: false,
         customer: cust, order_id: order?.id ?? null, prepared_by_name: order?.created_by_name ?? null, revised_from: revised ? tillInv!.total ?? null : null };
-      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(typeof disc === 'number' ? { disc_pct: disc } : { disc: S.disc }), tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
+      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(isAdmin ? (typeof disc === 'number' ? { disc_pct: disc } : { disc: S.disc }) : tillDisc(disc, S.disc)), tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
@@ -284,7 +289,7 @@ export default function Till() {
   };
   // a parked sale waits on this till (it survives a restart) while the next customer is served
   const saveParked = (l: Parked[]) => { setParkedList(l); void setParked(shopId, l); };
-  const withCurrent = (l: Parked[]) => [...l, { id: crypto.randomUUID(), t: new Date().toISOString(), customer, lines: cart, dp, total: T.total, count: T.count, by: profile!.name }];
+  const withCurrent = (l: Parked[]) => [...l, { id: crypto.randomUUID(), t: new Date().toISOString(), customer, lines: cart, dp, total: T.total, count: T.count, by: profile!.name, tok }];
   const park = () => {
     if (!priced.length) return;
     if (parked.length >= 20) { toast('20 sales are parked already. Finish or delete one first.', 'warn'); return; }
@@ -293,7 +298,7 @@ export default function Till() {
   };
   const resume = (x: Parked) => {
     const rest = parked.filter((y) => y.id !== x.id), swap = priced.length > 0;
-    saveParked(swap ? withCurrent(rest) : rest);
+    saveParked(swap ? withCurrent(rest) : rest); setTok(x.tok ?? null);
     const lines = x.lines.filter((l) => byId.has(l.pid));
     setCart(lines); setDp(x.dp); setCustomer(x.customer); setShowParked(false);
     setSel(lines.length ? { k: keyOf(lines[lines.length - 1]), n: (sel?.n ?? 0) + 1 } : null);
@@ -304,7 +309,7 @@ export default function Till() {
   const approve = async (o: SaleOrder) => {
     const { lines, missing } = orderLines(o);
     if (missing.length) { toast(`Open the order with Edit: ${missing.join(', ')} can no longer be sold this way`, 'warn'); setEditing(o); return; }
-    await sellOrder(lines, 0, o);
+    await sellOrder(lines, orderDisc(o), o);
   };
 
   if (!snap) return <div className="card"><Empty i={problem ? 'wifioff' : 'refresh'} t={problem || 'Loading the till'} tall /></div>;
@@ -359,8 +364,9 @@ export default function Till() {
           {T.disc ? <div className={`row ${overLimit(T) ? 'bad' : ''}`}><span>Discount {T.pct}%</span><span>- {fCDF(T.disc)}</span></div> : null}
           <div className="row muted"><span>Incl. VAT {vat}%</span><span>{fCDF(T.vat)}</span></div></div>
           <div className="grand"><span>{sells ? 'To pay' : 'Order total'}</span><b>{fCDF(T.total)}</b></div></div>
-        <div className={`cact ${isAdmin ? 'three' : ''}`}>
-          {isAdmin ? <button className={`btn ${T.disc ? 'primary' : ''}`} onClick={() => setDisc(true)} disabled={!cart.length} title="Discount on this invoice, as a percentage or an amount" aria-label="Discount on this invoice"><Icon n="tag" /><span>{T.disc ? (typeof dp === 'number' ? `${dp}%` : fNum(T.disc)) : 'Discount'}</span></button> : null}
+        <div className="cact three">
+          {/* the till operator's Discount button is locked: it opens with the Discount passcode from the Admin, once per invoice */}
+          {<button id="discbtn" className={`btn ${T.disc ? 'primary' : ''}`} onClick={() => (isAdmin || tok ? setDisc(true) : setAskCode(true))} disabled={!cart.length} title={isAdmin || tok ? 'Discount on this invoice, as a percentage or an amount' : 'Discount on this invoice: locked, it opens with the Discount passcode'} aria-label="Discount on this invoice"><Icon n={isAdmin || tok ? 'tag' : 'lock'} /><span>{T.disc ? (typeof dp === 'number' ? `${dp}%` : fNum(T.disc)) : 'Discount'}</span></button>}
           <button id="park" className="btn" onClick={park} disabled={!priced.length} title="Put this sale aside and serve the next customer"><Icon n="pause" /><span>Park sale</span></button>
           {sells
             ? <button id="paybtn" className="paybtn cash" onClick={pay} disabled={!priced.length || !ready}><Icon n="cash" /> {cashStep ? 'Take payment' : 'Take cash and print'}</button>
@@ -391,7 +397,7 @@ export default function Till() {
               {toReview.length ? toReview.map((o) => (
                 <div key={o.id} className={`rcard ${editing?.id === o.id ? 'on' : ''}`}>
                   <div className="rrow"><b title={custName(o.customer)}>{custName(o.customer)}</b><span className="amt">{fCDF(orderTotal(o))}</span></div>
-                  <div className="rrow"><span className="code" style={{ flex: 1 }}>{o.invoice_no ?? orderRef(o.id)} · {o.items.reduce((s, i) => s + i.qty, 0)} items · {o.created_by_name.split(' ')[0]}, {tm(o.created_at)}</span>
+                  <div className="rrow"><span className="code" style={{ flex: 1 }}>{o.invoice_no ?? orderRef(o.id)} · {o.items.reduce((s, i) => s + i.qty, 0)} items · {o.created_by_name.split(' ')[0]}, {tm(o.created_at)}{o.disc ? <> · <b>discount {fCDF(o.disc)}</b></> : null}</span>
                     <button className="rbtn ok" title="Approve this order" aria-label={`Approve order for ${custName(o.customer)}`} onClick={() => void approve(o)}><Icon n="check" /></button>
                     <button className="rbtn bad" title="Reject this order" aria-label={`Reject order for ${custName(o.customer)}`} onClick={() => setReject(o)}><Icon n="x" /></button>
                     <button className="rbtn ed" title="Check and change before approving" aria-label={`Edit order for ${custName(o.customer)}`} onClick={() => setEditing(o)}><Icon n="edit" /></button></div>
@@ -409,6 +415,7 @@ export default function Till() {
           {p.is_bundle ? <Note i="tag">The piece price is the last price set by the Admin. It cannot be changed at the shop.</Note> : null}
         </Modal>); })() : null}
       {check ? <PriceCheck products={snap.products} stock={snap.stock} rate={rate} onClose={() => setCheck(false)} /> : null}
+      {askCode ? <DiscCodeModal onOpen={(t) => { setTok(t); setAskCode(false); setDisc(true); }} onClose={() => setAskCode(false)} /> : null}
       {disc ? <DiscModal v={dp} gross={T.gross} onApply={(v) => { setDp(v); setDisc(false); }} onClose={() => setDisc(false)} /> : null}
       {reject ? <RejectModal o={reject} onClose={() => setReject(null)} onDone={() => { if (editing?.id === reject.id) setEditing(null); setReject(null); void orders.refetch(); }} /> : null}
       {editing ? <OrderEditor o={editing} init={orderLines(editing)} byId={byId} snap={snap} onClose={() => setEditing(null)} onReject={() => { setReject(editing); }} onApprove={async (lines, d) => { if (await sellOrder(lines, d, editing)) setEditing(null); }} /> : null}
@@ -490,6 +497,24 @@ function ParkedModal({ list, onResume, onDelete, onClose }: { list: Parked[]; on
 }
 /** The change as given: Francs, or whole dollars plus Francs. */
 const changeText = (inv: Invoice) => (inv.change_usd ? `$${inv.change_usd} + ${fCDF(inv.change_cdf ?? 0)}` : fCDF(inv.change));
+/** The till operator types the Discount passcode the Admin gave; a right one unlocks the discount for this invoice. */
+function DiscCodeModal({ onOpen, onClose }: { onOpen: (token: string) => void; onClose: () => void }) {
+  const a = useAction(), [code, setCode] = useState('');
+  const go = () => a.run(async () => {
+    if (!code.trim()) throw new Error('Enter the passcode');
+    const r = await rpc<{ ok: boolean; error?: string; token?: string }>('open_discount', { p_code: code });
+    setCode('');
+    if (!r.ok || !r.token) throw new Error(r.error ?? 'Wrong passcode');
+    onOpen(r.token);
+  });
+  return (
+    <Modal title="Discount is locked" icon="lock" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="dcodebtn" disabled={a.busy} onClick={() => void go()}><Icon n="unlock" /> Open discount</button></>}>
+      <div className="field"><label htmlFor="dcode">Discount passcode</label><input id="dcode" className="input" type="password" inputMode="numeric" autoComplete="off" maxLength={12} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') void go(); }} autoFocus /></div>
+      <div className="lerr">{a.err}</div>
+      <Note i="shield">One passcode entry covers this invoice. It needs the connection.</Note>
+    </Modal>
+  );
+}
 /** The discount on the sale being made: a percentage or an amount; typing one works out the other from the total. */
 function DiscModal({ v, gross, onApply, onClose }: { v: Disc; gross: number; onApply: (v: Disc) => void; onClose: () => void }) {
   const [d, setD] = useState<Disc>(v), problem = discProblem(d, gross);
@@ -504,7 +529,7 @@ function DiscModal({ v, gross, onApply, onClose }: { v: Disc; gross: number; onA
 
 /** The shop admin checks and changes an order in its own window; the sale being made on the till stays as it is. */
 function OrderEditor({ o, init, byId, snap, onClose, onReject, onApprove }: { o: SaleOrder; init: { lines: CartLine[]; missing: string[] }; byId: Map<string, Product>; snap: Snapshot; onClose: () => void; onReject: () => void; onApprove: (lines: CartLine[], dp: Disc) => Promise<void> }) {
-  const [lines, setLines] = useState<CartLine[]>(init.lines), [dp, setDp] = useState<Disc>(0), [q, setQ] = useState(''), [busy, setBusy] = useState(false);
+  const [lines, setLines] = useState<CartLine[]>(init.lines), [dp, setDp] = useState<Disc>(() => orderDisc(o)), [q, setQ] = useState(''), [busy, setBusy] = useState(false);
   const rate = snap.settings.rate, priced = quotedPrices(cartPriced(lines.filter((l) => byId.has(l.pid)), byId, rate), o), T = totals(priced, dp, snap.settings.vat);
   const ref = o.invoice_no ? 'Invoice ' + o.invoice_no : 'Order ' + orderRef(o.id), prints = !o.invoice_no || changedFrom(o, priced, T.disc), problem = discProblem(dp, T.gross);
   const ql = q.trim().toLowerCase(), found = ql ? snap.products.filter((p) => p.name.toLowerCase().includes(ql)).slice(0, 8) : [];
@@ -515,7 +540,7 @@ function OrderEditor({ o, init, byId, snap, onClose, onReject, onApprove }: { o:
     <Modal title={`${ref} for ${custName(o.customer)}`} icon="receipt" wide onClose={onClose} foot={<><button className="btn danger" onClick={onReject}><Icon n="x" /> Reject</button><span className="sp" /><button className="btn" onClick={onClose}>Close</button>
       <button className="btn primary" id="oapprove" disabled={!priced.length || busy || !!problem} onClick={() => { setBusy(true); void onApprove(lines, dp).finally(() => setBusy(false)); }}><Icon n={prints ? 'printer' : 'check'} /> {prints ? 'Approve and print' : 'Approve'} {fCDF(T.total)}</button></>}>
       <p>{o.invoice_no
-        ? <>Invoice {o.invoice_no}, printed at the till by {o.created_by_name} at {tm(o.created_at)}. Approved as it is, the sale is complete and nothing prints. If you change quantities or units, add or remove items or give a discount, the corrected invoice prints here with the same number and the copy printed at the till is void. The stock goes down on approval.</>
+        ? <>Invoice {o.invoice_no}, printed at the till by {o.created_by_name} at {tm(o.created_at)}. Approved as it is, the sale is complete and nothing prints. {o.disc ? <b>The till operator gave a discount of {fCDF(o.disc)} with the Discount passcode. </b> : null}If you change quantities or units, add or remove items or change the discount, the corrected invoice prints here with the same number and the copy printed at the till is void. The stock goes down on approval.</>
         : <>Order {orderRef(o.id)}, prepared by {o.created_by_name} at {tm(o.created_at)}. Change quantities or units, add or remove items, then approve: the invoice prints here and the stock goes down.</>}</p>
       {init.missing.length ? <Note i="alert" warn>Not added: {init.missing.join(', ')}. The unit or item is no longer sold.</Note> : null}
       <div className="tw"><table className="t"><thead><tr><th>Item</th><th>Unit</th><th className="r">Price</th><th style={{ width: 150 }}>Qty</th><th className="r">Line</th></tr></thead><tbody>

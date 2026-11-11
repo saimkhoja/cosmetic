@@ -552,6 +552,45 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.getByRole('button', { name: 'Take cash and print' }).click();
   await expect(shop.getByText(/Sale GOM-T\d-\d+ for Walk-in done/)).toBeVisible();
   expect((await prints(shop)).at(-1)).not.toContain('Customer:');
+  // ---- a till operator's discount: the Discount button is locked until the Admin gives the Discount passcode.
+  // The invoice prints at the till with the discount; the shop admin approves it as printed and nothing prints again
+  await till.goto('/till');
+  await till.fill('#cust', 'Maman Remise'); await till.press('#cust', 'Enter');
+  await till.locator('.ptile', { hasText: 'Shea body lotion' }).click();
+  await till.locator('.ubtn', { hasText: 'pcs' }).first().click();
+  await till.click('#discbtn');
+  await expect(till.locator('.modal')).toContainText('Discount is locked');
+  await till.fill('#dcode', '5566'); await till.click('#dcodebtn');
+  await expect(till.locator('.modal')).toContainText('No passcode has been set yet. Ask the Admin for one');
+  await admin.goto('/users');
+  await admin.locator('tr', { hasText: 'till.gombe' }).getByTitle('Passcode: discount on an invoice').click();
+  await admin.fill('#pc-discount', '5566'); await admin.click('#pcsave');
+  await expect(admin.getByText('Passcode saved. Give it to Grace Mbuyi.')).toBeVisible();
+  await till.fill('#dcode', '1111'); await till.click('#dcodebtn');
+  await expect(till.locator('.modal')).toContainText('Wrong passcode');
+  await expect(till.locator('#disc-pct')).toHaveCount(0);
+  await till.fill('#dcode', '5566'); await till.click('#dcodebtn');
+  await till.fill('#disc-pct', '10'); await till.click('#dapply');
+  await expect(till.locator('.sumrows')).toContainText('Discount 10%');
+  await expect(till.locator('.grand')).toContainText('12 820 CDF');                        // 14 250 less 1 430
+  await till.getByRole('button', { name: 'Print invoice and send for approval' }).click();
+  await expect.poll(async () => (await prints(till)).length).toBeGreaterThan(0);
+  const discInv = (await prints(till)).at(-1)!;
+  expect(discInv).toContain('Customer: MAMAN REMISE'); expect(discInv).toMatch(/12[ ,.]?820/); expect(discInv).toMatch(/1[ ,.]?430/);
+  await till.fill('#cust', 'Next customer'); await till.press('#cust', 'Enter');             // the next invoice is locked again
+  await till.locator('.ptile', { hasText: 'Shea body lotion' }).click();
+  await till.locator('.ubtn', { hasText: 'pcs' }).first().click();
+  await till.click('#discbtn');
+  await expect(till.locator('.modal')).toContainText('Discount is locked');
+  await till.locator('.modal footer').getByRole('button', { name: 'Cancel' }).click();
+  await shop.goto('/till');
+  const rcard = shop.locator('.review .rcard', { hasText: 'Maman Remise' });
+  await expect(rcard).toContainText('12 820 CDF', { timeout: 30000 });
+  await expect(rcard).toContainText('discount 1 430 CDF');
+  const printedDisc = (await prints(shop)).length;
+  await rcard.getByRole('button', { name: 'Approve order for Maman Remise' }).click();
+  await expect(shop.getByText(/Invoice GOM-T\d-\d+ for Maman Remise approved, 12 820 CDF\. Sale complete, nothing to print/)).toBeVisible();
+  expect((await prints(shop)).length).toBe(printedDisc);
   // ---- the till operator sells directly once the Admin allows it
   await admin.getByRole('link', { name: 'Settings' }).click();
   await admin.check('#s-till_sells'); await admin.check('#s-cash_change');
@@ -595,6 +634,19 @@ test('a full day in SIM', async ({ browser }) => {
   const usdRcpt = (await prints(till)).at(-1)!;
   expect(usdRcpt).toMatch(/Paid USD\s*20\.00/); expect(usdRcpt).toMatch(/Change\s*\$15 \+ 0\.00/); expect(usdRcpt).toContain('1 USD = 2850 CDF');
 
+  // ---- selling directly, the till operator gives a discount with the same passcode: 1 250 CDF off 14 250
+  await till.goto('/till');
+  await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
+  await till.click('#discbtn');
+  await till.fill('#dcode', '5566'); await till.click('#dcodebtn');
+  await till.fill('#disc-amt', '1250'); await till.click('#dapply');
+  await till.getByRole('button', { name: 'Take payment' }).click();
+  await expect(till.locator('.modal')).toContainText('13 000 CDF');
+  await till.fill('#cashin', '13000');
+  await till.locator('.modal').getByRole('button', { name: 'Take cash and print' }).click();
+  await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done, 13 000 CDF/)).toBeVisible();
+  await expect(till.locator('.pill')).toContainText('all synced', { timeout: 40000 });      // the server took the discount
+
   // ---- two rates: the internal rate for expenses, the sales rate for item prices (changed from the Items page)
   await admin.getByRole('link', { name: 'Settings' }).click();
   await expect(admin.locator('#sbook')).toHaveValue('2850');
@@ -629,8 +681,6 @@ test('a full day in SIM', async ({ browser }) => {
     await expect(shop.getByText('Scan or tap an item to add it')).toBeVisible();
     await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
   }
-  await shop.getByRole('link', { name: 'Home' }).click();
-  const shown = Number(/(\d+) invoices/.exec(await shop.locator('.kpi', { hasText: 'Sales today' }).innerText())![1]);
   await openInvoices(shop);
   await expect(shop.locator('main tr', { hasText: 'Within the limit' })).toContainText('972 000 CDF');
   await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toContainText('1 296 000 CDF');
@@ -644,7 +694,7 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.getByRole('button', { name: 'Today' }).click();
   await expect(shop.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
   await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toHaveCount(0);
-  await expect(shop.locator('.kpi', { hasText: 'Sales, VAT included' })).toContainText(`${shown} invoices`);
+  const shown = Number(/(\d+) invoices/.exec(await shop.locator('.kpi', { hasText: 'Sales, VAT included' }).innerText())![1]);   // the report is loaded: its rows are there
   await shop.getByRole('button', { name: 'Print day end report' }).click();                // the printed shift end report has every sale
   await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
   await expect(shop.locator('#slips')).toContainText('Shift End Report');

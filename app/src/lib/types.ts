@@ -41,6 +41,8 @@ export interface SaleOrder {
   created_by: string; created_by_name: string; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null; reason: string | null; invoice_id: string | null;
   /** the invoice the till operator printed when sending it (orders from tills with the old app have none) */
   invoice_no?: string | null; device_id?: string | null; rate?: number | null; vat_rate?: number | null; total?: number | null;
+  /** the discount (CDF) the till operator gave on that invoice, with the Discount passcode */
+  disc?: number | null;
 }
 export interface Category { id: string; name: string; seasonal: boolean; season_months: number[] }
 export interface Rank { product_id: string; sold_30: number; in_season: boolean }
