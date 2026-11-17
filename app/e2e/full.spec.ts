@@ -238,6 +238,20 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.getByRole('link', { name: 'Till' }).click();
   const review = shop.locator('.review');
   await expect(review.locator('.rcard', { hasText: 'Tata Mbo' })).toBeVisible({ timeout: 30000 });
+  // the search box over the panel finds a waiting order without reading down the queue
+  await expect(review.locator('.cart-h .chip')).toHaveText('3');
+  await shop.fill('#rsearch', 'nzuzi');
+  await expect(review.locator('.rcard', { hasText: 'Mama Nzuzi' })).toBeVisible();
+  await expect(review.locator('.rcard', { hasText: 'Tata Mbo' })).toHaveCount(0);
+  await expect(review.locator('.cart-h .chip')).toHaveText('1 of 3');
+  await shop.fill('#rsearch', 'lipstick');                                   // an item on the order finds it too
+  await expect(review.locator('.rcard', { hasText: 'Mama Nzuzi' })).toBeVisible();
+  await shop.fill('#rsearch', 'Grace');                                      // so does the till operator who sent it
+  await expect(review.locator('.rcard', { hasText: 'Mama Nzuzi' })).toBeVisible();
+  await shop.fill('#rsearch', 'zzzz');
+  await expect(review.getByText(/No order waiting matches/)).toBeVisible();
+  await shop.getByRole('button', { name: 'Clear the search' }).click();
+  await expect(review.locator('.rcard', { hasText: 'Tata Mbo' })).toBeVisible();
   await shop.fill('#cust', 'Counter customer'); await shop.press('#cust', 'Enter');
   await shop.locator('.ptile', { hasText: 'Matte lipstick' }).click(); await shop.locator('.ubtn', { hasText: 'pcs' }).first().click();
   await review.locator('.rcard', { hasText: 'Mama Nzuzi' }).getByRole('button', { name: 'Edit order for Mama Nzuzi' }).click();

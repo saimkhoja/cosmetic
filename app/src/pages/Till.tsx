@@ -156,8 +156,14 @@ export default function Till() {
   // orders already approved on this till but not yet sent are hidden from the review list
   const approvedHere = new Set(outbox.flatMap((e) => (e.kind !== 'order' && e.payload.order_id ? [e.payload.order_id] : [])));
   const toReview = (orders.data ?? []).filter((o) => o.status === 'pending' && !approvedHere.has(o.id));
+  const [rq, setRq] = useState('');
   const toReceive = (dels.data ?? []).filter((d) => d.status === 'pending').length;
   const orderTotal = (o: SaleOrder) => o.total ?? o.items.reduce((s, it) => { const p = byId.get(it.product_id); if (!p) return s; const u = unitsOf(p)[unitIndex(p, it)]; return s + (u ? toCDF(u.usd, rate) * it.qty : 0); }, 0);
+  // searching the orders waiting for review: customer, invoice number, till operator, an item on it, or the amount.
+  // It reads orderTotal, so it has to come after it.
+  const rql = rq.trim().toLowerCase();
+  const waiting = !rql ? toReview : toReview.filter((o) => [custName(o.customer), o.invoice_no ?? orderRef(o.id), o.created_by_name,
+    String(orderTotal(o)), ...o.items.map((i) => byId.get(i.product_id)?.name ?? '')].join(' ').toLowerCase().includes(rql));
 
   const startCustomer = () => { const c = custDraft.trim().replace(/\s+/g, ' ').slice(0, 60); if (!c) { if (optCust) scan.current?.focus(); else toast('Type the customer name, then press Enter', 'warn'); return; } setCustomer(c); setCustDraft(''); setTimeout(() => scan.current?.focus(), 50); };
   const resetSale = () => { setCart([]); setDp(0); setTok(null); setCustomer(''); setSel(null); };
@@ -395,17 +401,20 @@ export default function Till() {
       {review ? (
         <div className="tillwrap">{pos}
           <aside className="review" aria-label="Orders for review">
-            <div className="cart-h"><b><Icon n="receipt" /> For review</b><span className={`chip ${toReview.length ? 'warn' : ''}`}>{toReview.length}</span></div>
+            <div className="cart-h"><b><Icon n="receipt" /> For review</b><span className={`chip ${toReview.length ? 'warn' : ''}`}>{rql ? `${waiting.length} of ${toReview.length}` : toReview.length}</span></div>
+            {toReview.length ? <div className="rsearch"><div className="search"><Icon n="search" /><input id="rsearch" placeholder="Search the orders waiting" value={rq} onChange={(e) => setRq(e.target.value)} aria-label="Search the orders waiting for review" />
+              {rq ? <button className="iconbtn dark" onClick={() => setRq('')} title="Clear the search" aria-label="Clear the search"><Icon n="x" /></button> : null}</div></div> : null}
             <div className="rl">
               {!navigator.onLine ? <Note i="wifioff" warn>Orders from the till operators arrive when the internet is back.</Note> : null}
-              {toReview.length ? toReview.map((o) => (
+              {toReview.length && !waiting.length ? <Empty i="search" t={`No order waiting matches "${rq.trim()}"`} /> : null}
+              {waiting.length ? waiting.map((o) => (
                 <div key={o.id} className={`rcard ${editing?.id === o.id ? 'on' : ''}`}>
                   <div className="rrow"><b title={custName(o.customer)}>{custName(o.customer)}</b><span className="amt">{fCDF(orderTotal(o))}</span></div>
                   <div className="rrow"><span className="code" style={{ flex: 1 }}>{o.invoice_no ?? orderRef(o.id)} · {o.items.reduce((s, i) => s + i.qty, 0)} items · {o.created_by_name.split(' ')[0]}, {tm(o.created_at)}{o.disc ? <> · <b>discount {fCDF(o.disc)}</b></> : null}</span>
                     <button className="rbtn ok" title="Approve this order" aria-label={`Approve order for ${custName(o.customer)}`} onClick={() => void approve(o)}><Icon n="check" /></button>
                     <button className="rbtn bad" title="Reject this order" aria-label={`Reject order for ${custName(o.customer)}`} onClick={() => setReject(o)}><Icon n="x" /></button>
                     <button className="rbtn ed" title="Check and change before approving" aria-label={`Edit order for ${custName(o.customer)}`} onClick={() => setEditing(o)}><Icon n="edit" /></button></div>
-                </div>)) : <Empty i="check" t={orders.isLoading ? 'Loading' : 'No orders waiting'} />}
+                </div>)) : toReview.length ? null : <Empty i="check" t={orders.isLoading ? 'Loading' : 'No orders waiting'} />}
               {toReceive ? <button className="rcard" style={{ width: '100%', textAlign: 'left', cursor: 'pointer', background: 'var(--warn-l)' }} onClick={() => nav('/received')}><b><Icon n="truck" /> {toReceive} deliver{toReceive > 1 ? 'ies' : 'y'} to receive</b><div className="code">From the central store. Open to check and approve.</div></button> : null}
             </div>
           </aside>

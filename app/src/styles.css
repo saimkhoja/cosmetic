@@ -441,6 +441,10 @@ button.uchip svg{font-size:11px}
 .tillwrap .pos{grid-template-columns:minmax(0,1fr) minmax(400px,46%)}
 .review{background:var(--card);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;height:calc(100vh - 92px);min-height:0;box-shadow:var(--shadow)}
 .review .rl{flex:1;overflow-y:auto;padding:10px}
+.rsearch{padding:8px 10px 0}
+.rsearch .search{max-width:none;min-height:42px;padding:0 6px 0 11px;gap:6px}
+.rsearch .search input{min-width:0}
+.rsearch .iconbtn{width:32px;height:32px;font-size:15px;flex:none}
 .rcard{display:block;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;background:var(--card);color:var(--text);font:inherit}
 .rcard.on{border-color:var(--blue);background:var(--blue-l)}
 .custbar{display:flex;align-items:center;gap:10px;background:var(--card);border:2px solid var(--ok);border-radius:14px;padding:4px 4px 4px 14px;min-height:52px;color:var(--ok);font-size:15px;flex:none}
