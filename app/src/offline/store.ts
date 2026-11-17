@@ -12,6 +12,8 @@ export interface SalePayload {
   disc_pct?: number; disc?: number;
   /** a till operator's discount: the token of their Discount passcode entry */
   discount_token?: string;
+  /** the rate the dollars were taken at, so a sale sent later keeps the rate of its moment */
+  usd_rate?: number;
   customer: string; order_id: string | null;
   items: { product_id: string; unit?: string; mult: number; piece: boolean; qty: number; price: number }[];
 }

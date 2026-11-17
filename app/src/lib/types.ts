@@ -29,6 +29,8 @@ export interface Invoice {
   printed: number; till_printed_at?: string | null; items: InvoiceItem[]; edits?: InvoiceEdit[]; synced?: boolean;
   customer?: string; prepared_by_name?: string | null; order_id?: string | null;
   paid_usd?: number; paid_cdf?: number; change_usd?: number; change_cdf?: number;
+  /** the rate the dollars on this invoice were taken at (the internal rate); empty on sales made before it was kept */
+  usd_rate?: number | null;
   /** the total the till operator printed, when the shop admin changed the order before approving it */
   revised_from?: number | null;
 }

@@ -776,6 +776,39 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(admin.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
   await expect(admin.locator('main tr', { hasText: 'Above the limit' })).toContainText('1 620 000 CDF');
 
+  // ---- a dollar is worth the internal rate (2 950), not the sales rate (3 000): the Francs on top are collected.
+  // Close the shift first, so the next shift end report holds only the dollar sale.
+  await shop.getByRole('link', { name: 'Reports' }).click();
+  await shop.getByRole('button', { name: 'Today' }).click();
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
+  await expect(shop.locator('#slips')).toContainText('Shift End Report');
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+  await till.goto('/till');                                                                // the till picks up the rates
+  await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
+  await till.getByRole('button', { name: 'Take payment' }).click();
+  await expect(till.locator('.modal')).toContainText('1 USD = 2 950 CDF');                 // the internal rate, not 3 000
+  await till.fill('#cashusd', '5');
+  await expect(till.locator('#cashchange')).toContainText('Still to pay');                 // $5 at 2 950 is 14 750 of 15 000
+  await expect(till.locator('#cashchange')).toContainText('250 CDF');
+  await till.fill('#cashin', '250');
+  await expect(till.locator('#cashchange')).toContainText('Change to give');
+  await till.locator('.modal').getByRole('button', { name: 'Take cash and print' }).click();
+  await expect(till.getByText(/Sale GOM-T\d-\d+ for Walk-in done, 15 000 CDF/)).toBeVisible();
+  const fxRcpt = (await prints(till)).at(-1)!;
+  expect(fxRcpt).toMatch(/Paid USD\s*5\.00/); expect(fxRcpt).toMatch(/Paid CDF\s*250/); expect(fxRcpt).toContain('1 USD = 2950 CDF');
+  await expect(till.locator('.pill')).toContainText('all synced', { timeout: 40000 });
+  // the shift end report now shows the 250 CDF that used to vanish
+  await shop.getByRole('link', { name: 'Reports' }).click();
+  await shop.getByRole('button', { name: 'Today' }).click();
+  await shop.getByRole('button', { name: 'Print day end report' }).click();
+  await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
+  const fxSlip = await shop.locator('#slips').innerText();
+  expect(Number(/Collected USD\s*:\s*([\d.]+)/.exec(fxSlip)![1])).toBe(5);
+  expect(Number(/Collected CDF\s*:\s*([\d.]+)/.exec(fxSlip)![1])).toBe(250);
+  expect(Number(/Invoice Value CDF\s*:\s*([\d.]+)/.exec(fxSlip)![1])).toBe(15000);
+  await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
+
   // ---- no central store: goods from a supplier go straight into a shop, and the store-to-shop tabs go away
   await admin.getByRole('link', { name: 'Settings' }).click();
   await openGroup(admin, 'stock');

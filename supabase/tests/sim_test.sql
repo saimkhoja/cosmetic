@@ -1159,6 +1159,57 @@ select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = t.g
 select t.ok((select shop_id from grns order by received_at desc, no desc limit 1) is null, 'and that receipt has no shop');
 reset role;
 
+-- ===== dollars are taken at the internal rate, so the Francs handed over with them are collected =====
+-- the shop prices at 2 350 but gives only 2 300 for a dollar: a 23 500 CDF bill needs $10 AND 500 CDF
+update settings set features = features || '{"usd_pay": true}' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_rate('sales', 2350), public.save_rate('book', 2300);
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('fx0', (select x::text from jsonb_array_elements(public.sales_report(current_date, current_date)->'slips') x limit 1));
+select t.put('fxid', gen_random_uuid()::text);
+select t.put('fxno', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+-- the loophole is closed: $10 on its own no longer pays a 23 500 bill, because at 2 300 it is only 23 000
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"%s","device_id":"%s","customer":"Dollar top-up","paid_usd":10,"usd_rate":2300,"rate":2350,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":23500}]}')$$,
+  t.get('fxid'), t.get('fxno'), t.get('dev2'), t.get('lotion')), 'less than the total', '10 dollars alone no longer pay a 23 500 CDF bill');
+select public.submit_invoice(jsonb_build_object('id', t.get('fxid'), 'no', t.get('fxno'), 'device_id', t.get('dev2'), 'rate', 2350, 'vat_rate', 16,
+  'customer', 'Dollar top-up', 'paid_usd', 10, 'paid_cdf', 500, 'usd_rate', 2300,
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 23500))));
+select t.put('fx1', (select x::text from jsonb_array_elements(public.sales_report(current_date, current_date)->'slips') x limit 1));
+reset role;
+select t.ok((select total = 23500 and tendered = 23500 and change = 0 and paid_usd = 10 and paid_cdf = 500 and usd_rate = 2300
+  from invoices where id = t.get('fxid')::uuid), 'the sale takes $10 and 500 CDF, and keeps the rate the dollars were taken at');
+select t.ok((t.get('fx1')::jsonb->>'collected_cdf')::bigint - (t.get('fx0')::jsonb->>'collected_cdf')::bigint = 500,
+  'the 500 CDF handed over with the dollars now shows on the slip as Francs collected');
+select t.ok((t.get('fx1')::jsonb->>'collected_usd')::numeric - (t.get('fx0')::jsonb->>'collected_usd')::numeric = 10, 'and the dollars show as dollars collected');
+select t.ok((select round(sum(case when l.side = 'Cr' then l.base else -l.base end), 2) from voucher_lines l join vouchers v on v.id = l.voucher_id
+  join accounts a on a.id = l.account_id where v.source_id = t.get('fxid')::uuid and a.code = 'FX_GAIN') = 0.21,
+  'what the shop earns on the dollars is booked as an exchange gain');
+select t.ok((select sum(l.amount) from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+  where v.source_id = t.get('fxid')::uuid and a.code like 'CASH_SHOP:%') = 500, 'the shop cash ledger takes the 500 CDF');
+select t.ok(t.unbalanced() = 0, 'every voucher still balances');
+-- with the internal rate back at the sales rate nothing changes: a dollar is worth what it always was
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_rate('book', 2350);
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('fxid2', gen_random_uuid()::text);
+select t.put('fxno2', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select public.submit_invoice(jsonb_build_object('id', t.get('fxid2'), 'no', t.get('fxno2'), 'device_id', t.get('dev2'), 'rate', 2350, 'vat_rate', 16,
+  'customer', 'Dollar exact', 'paid_usd', 10, 'usd_rate', 2350,
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 23500))));
+reset role;
+select t.ok((select tendered = 23500 and change = 0 and paid_cdf = 0 from invoices where id = t.get('fxid2')::uuid),
+  'at the same rate $10 still pays a 23 500 bill on its own');
+select t.ok(not exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+  where v.source_id = t.get('fxid2')::uuid and a.code = 'FX_GAIN'), 'and nothing is booked as an exchange gain');
+select t.ok(t.unbalanced() = 0, 'the books still balance');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_rate('sales', 2850), public.save_rate('book', 2900);
+reset role;
+update settings set features = features - 'usd_pay' where id = 1;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
