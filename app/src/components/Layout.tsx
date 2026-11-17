@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useSearchParams } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useShops } from '../data/queries';
+import { useSettings, useShops } from '../data/queries';
 import { outboxAll } from '../offline/store';
 import { syncOutbox } from '../offline/sync';
 import type { Role } from '../lib/types';
@@ -19,6 +19,11 @@ export const NAV: Record<Role, [string, string, string][]> = {
   shopadmin: [['/', 'Home', 'home'], ['/till', 'Till', 'cart'], ['/invoices', 'Invoices', 'receipt'], ['/stock', 'Stock', 'box'], ['/requests', 'Order stock', 'plus'], ['/received', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/reports', 'Reports', 'chart']],
   till: [['/till', 'Till', 'cart']],
 };
+
+/** Tabs that only move stock between the central store and the shops. */
+const STORE_ROUTES = new Set(['/requests', '/deliveries', '/returns', '/received']);
+/** The tabs of a role: without a central store the store-to-shop tabs are left out. */
+export const navFor = (role: Role, noWarehouse?: boolean) => NAV[role].filter((n) => !noWarehouse || !STORE_ROUTES.has(n[0]));
 
 export function useWaiting() {
   const [n, setN] = useState(0);
@@ -48,7 +53,8 @@ function useFind(main: React.RefObject<HTMLElement>) {
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { profile, offline, signOut } = useAuth();
-  const shops = useShops();
+  const shops = useShops(), settings = useSettings();
+  const noStore = !!settings.data?.features?.no_warehouse;
   const loc = useLocation();
   const waiting = useWaiting();
   const [busy, setBusy] = useState(false), [theme, setThemeState] = useState<ThemePref>(getTheme);
@@ -79,7 +85,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
       {offline || !navigator.onLine ? <div className="offline-bar">No internet. {profile.role === 'till' || profile.role === 'shopadmin' ? 'The till keeps working; sales and orders are sent when the connection returns.' : 'Changes need the connection.'}</div> : null}
       <div className="layout">
-        <nav className="nav">{NAV[profile.role].map(([to, l, i]) => <NavLink key={to} to={to} end className={({ isActive }) => (isActive ? 'on' : '')}><Icon n={i} /><span>{l}</span></NavLink>)}</nav>
+        <nav className="nav">{navFor(profile.role, noStore).map(([to, l, i]) => <NavLink key={to} to={to} end className={({ isActive }) => (isActive ? 'on' : '')}><Icon n={i} /><span>{l}</span></NavLink>)}</nav>
         {/* a new search result opens the tab afresh, so it reads the record's filters from the link */}
         <main ref={main} key={findKey} className={pos ? 'posmain' : ''}>{children}</main>
       </div>

@@ -11,7 +11,7 @@ import { R } from '../components/Layout';
 import { QtyCell } from './Inventory';
 import { stockValue } from '../lib/units';
 import { DeliveryModal } from './Deliveries';
-import type { Profile, Role, Shop } from '../lib/types';
+import type { Product, Profile, Role, Shop } from '../lib/types';
 import type { PasscodeKind } from '../data/queries';
 
 export function AdminHome() {
@@ -22,24 +22,29 @@ export function AdminHome() {
   const rate = settings.data?.rate ?? 1, book = bookRate(settings.data), P = (products.data ?? []).filter((p) => p.active);
   const cost = new Map((costs.data ?? []).map((c) => [c.product_id, c.cost_usd]));
   const m = today().slice(0, 7), upM = sum((upkeep.data ?? []).filter((u) => u.date.startsWith(m)), (u) => u.amount_usd);
-  const low = P.filter((p) => p.wh_qty <= p.reorder);
+  // without a central store the stock figures are what the shops hold together
+  const noStore = !!settings.data?.features?.no_warehouse;
+  const inShops = new Map<string, number>();
+  for (const r of stock.data ?? []) inShops.set(r.product_id, (inShops.get(r.product_id) ?? 0) + r.qty);
+  const qtyOf = (p: Product) => (noStore ? inShops.get(p.id) ?? 0 : p.wh_qty);
+  const low = noStore ? [] : P.filter((p) => p.wh_qty <= p.reorder);
   const byId = new Map(P.map((p) => [p.id, p]));
   const sl = (stock.data ?? []).filter((r) => r.qty <= 5 && byId.has(r.product_id)).sort((a, b) => a.qty - b.qty);
   return (
     <>
       <Head t="Admin dashboard" s={`Sales rate: 1 USD = ${fCDF(rate)} · Internal rate: 1 USD = ${fCDF(book)}`} />
       <div className="kpis">
-        <Kpi i="box" l="Store stock at cost"><Dual usd={sum(P, (p) => (cost.get(p.id) ?? 0) * p.wh_qty)} rate={book} /></Kpi>
-        <Kpi i="tag" l="Same stock at selling price">{(() => { const v = stockValue(P.map((p) => ({ p, qty: p.wh_qty })), rate); return <Dual2 b={fUSD(v.usd)} s={fCDF(v.cdf)} />; })()}</Kpi>
+        <Kpi i="box" l={noStore ? 'Shop stock at cost' : 'Store stock at cost'}><Dual usd={sum(P, (p) => (cost.get(p.id) ?? 0) * qtyOf(p))} rate={book} /></Kpi>
+        <Kpi i="tag" l="Same stock at selling price">{(() => { const v = stockValue(P.map((p) => ({ p, qty: qtyOf(p) })), rate); return <Dual2 b={fUSD(v.usd)} s={fCDF(v.cdf)} />; })()}</Kpi>
         <Kpi i="wallet" l="Upkeep this month" tone="warn"><Dual usd={upM} rate={book} /></Kpi>
         <Kpi i="chart" l="All shops, sales today" tone="ok"><Dual2 b={fUSD(rep.data?.total_usd ?? 0)} s={`${fCDF(rep.data?.total ?? 0)} from ${rep.data?.n ?? 0} invoices`} /></Kpi>
       </div>
       <div className="tiles">
-        <Tile i="plus" l="Add new item" onClick={() => nav('/inventory')} /><Tile i="truck" l="Send stock to shops" onClick={() => setSend({})} />
+        <Tile i="plus" l="Add new item" onClick={() => nav('/inventory')} />{noStore ? null : <Tile i="truck" l="Send stock to shops" onClick={() => setSend({})} />}
         <Tile i="wallet" l="Accounts" onClick={() => nav('/accounts')} /><Tile i="store" l="Shop stock" onClick={() => nav('/shop-stock')} /><Tile i="chart" l="Sales report" onClick={() => nav('/reports')} /><Tile i="key" l="Create login" onClick={() => nav('/users')} />
       </div>
       <div className="cols">
-        <div className="card p0"><div style={{ padding: '16px 16px 0' }}><h3><Icon n="alert" /> Low stock in the store</h3></div>{low.length ? <div className="tw"><table className="t"><thead><tr><th>Item</th><th className="r">In store</th><th className="r">Reorder at</th></tr></thead><tbody>{low.slice(0, 15).map((p) => <tr key={p.id}><td><b>{p.name}</b></td><td className="r"><QtyCell p={p} q={p.wh_qty} cls="bad" /></td><td className="r">{p.reorder}</td></tr>)}</tbody></table></div> : <Empty i="check" t="All items above reorder level" />}</div>
+        {noStore ? null : <div className="card p0"><div style={{ padding: '16px 16px 0' }}><h3><Icon n="alert" /> Low stock in the store</h3></div>{low.length ? <div className="tw"><table className="t"><thead><tr><th>Item</th><th className="r">In store</th><th className="r">Reorder at</th></tr></thead><tbody>{low.slice(0, 15).map((p) => <tr key={p.id}><td><b>{p.name}</b></td><td className="r"><QtyCell p={p} q={p.wh_qty} cls="bad" /></td><td className="r">{p.reorder}</td></tr>)}</tbody></table></div> : <Empty i="check" t="All items above reorder level" />}</div>}
         <div className="card p0"><div style={{ padding: '16px 16px 0' }}><h3><Icon n="store" /> Running low in the shops</h3></div>{sl.length ? <div className="tw"><table className="t"><tbody>{sl.slice(0, 12).map((x) => <tr key={x.shop_id + x.product_id}><td><b>{byId.get(x.product_id)!.name}</b><div className="code">{shops.data?.find((s) => s.id === x.shop_id)?.name}</div></td><td className="r"><span className={`chip ${x.qty > 0 ? 'warn' : 'bad'}`}>{x.qty > 0 ? x.qty + ' left' : x.qty < 0 ? Math.abs(x.qty) + ' sold on order' : 'None left'}</span></td><td><div className="act"><button title="Send to this shop" onClick={() => setSend({ pid: x.product_id, sid: x.shop_id })}><Icon n="truck" /></button></div></td></tr>)}</tbody></table></div> : <Empty i="check" t="Shop stock levels look good" />}</div>
       </div>
       {send ? <DeliveryModal d={null} pid={send.pid} sid={send.sid} onClose={() => setSend(null)} /> : null}
@@ -189,6 +194,7 @@ const SWITCHES: Record<string, string> = {
   cash_change: 'Enter the cash received: the till shows the change to give and prints the cash received and the change on the receipt',
   usd_pay: 'Accept payment in USD (and CDF): the cashier enters the dollars and Francs received at the sales rate; change is in CDF, or whole dollars plus CDF',
   one_copy: 'Print one copy of each invoice: the customer copy only, at every till. Off: two copies, one for the customer and one for the shop',
+  no_warehouse: 'No central store: the business keeps no warehouse. Goods received from a supplier go straight into a shop you choose, and the tabs that move stock between the store and the shops (Deliveries, Stock requests, Returns to the store) are hidden',
 };
 /** The groups the switches are shown in on the Settings page. */
 const OPTION_GROUPS: { id: string; title: string; sub: string; icon: string; keys: string[]; note?: string }[] = [
@@ -197,6 +203,8 @@ const OPTION_GROUPS: { id: string; title: string; sub: string; icon: string; key
     note: 'A USB barcode scanner works like a keyboard: scan into the till search box. Barcodes are entered in the item form or in the Excel import.' },
   { id: 'payment', title: 'Payment', sub: 'Cash received, US dollars', icon: 'cash', keys: ['cash_change', 'usd_pay'] },
   { id: 'printing', title: 'Printing', sub: 'Invoice copies', icon: 'printer', keys: ['one_copy'] },
+  { id: 'stock', title: 'Stock', sub: 'Where goods arrive', icon: 'warehouse', keys: ['no_warehouse'],
+    note: 'Turn this on only if the business has no central store. What is already in the store stays there; Shop stock and the stock count sheet still show it.' },
 ];
 
 export function SettingsPage() {
@@ -205,7 +213,7 @@ export function SettingsPage() {
   const [f, setF] = useState<Record<string, string> | null>(null);
   // which option groups are open: all closed at first, so the page is short
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const v = f ?? (s ? { rate: String(s.rate), book_rate: String(bookRate(s)), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', usd_pay: s.features?.usd_pay ? '1' : '', one_copy: s.features?.one_copy ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
+  const v = f ?? (s ? { rate: String(s.rate), book_rate: String(bookRate(s)), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', usd_pay: s.features?.usd_pay ? '1' : '', one_copy: s.features?.one_copy ? '1' : '', no_warehouse: s.features?.no_warehouse ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
   const [shop, setShop] = useState({ name: '', code: '', address: '' });
   const [edit, setEdit] = useState<Shop | null>(null);
   if (!v) return <Empty i="refresh" t="Loading" tall />;
@@ -213,7 +221,7 @@ export function SettingsPage() {
   const fld = (k: string, l: string) => <div className="field"><label htmlFor={'s-' + k}>{l}</label><input id={'s-' + k} className="input" maxLength={80} value={v[k]} onChange={set(k)} /></div>;
   const sw = (k: string, l: string) => <label className="switch"><input type="checkbox" id={'s-' + k} checked={!!v[k]} onChange={(e) => setF({ ...v, [k]: e.target.checked ? '1' : '' })} /><span>{l}</span></label>;
   const save = () => a.run(async () => {
-    await rpc('save_settings', { p: { rate: Number(v.rate), book_rate: Number(v.book_rate), vat: Number(v.vat), features: { customer_optional: !!v.customer_optional, barcode: !!v.barcode, till_sells: !!v.till_sells, cash_change: !!v.cash_change, usd_pay: !!v.usd_pay, one_copy: !!v.one_copy }, company: { name: v.name, phone: v.phone, address: v.address, email: v.email, rccm: v.rccm, idnat: v.idnat, nif: v.nif, footer: v.footer } } });
+    await rpc('save_settings', { p: { rate: Number(v.rate), book_rate: Number(v.book_rate), vat: Number(v.vat), features: { customer_optional: !!v.customer_optional, barcode: !!v.barcode, till_sells: !!v.till_sells, cash_change: !!v.cash_change, usd_pay: !!v.usd_pay, one_copy: !!v.one_copy, no_warehouse: !!v.no_warehouse }, company: { name: v.name, phone: v.phone, address: v.address, email: v.email, rccm: v.rccm, idnat: v.idnat, nif: v.nif, footer: v.footer } } });
     await refresh('settings', 'audit'); setF(null); toast('Settings saved');
   });
   const addShop = () => b.run(async () => { await rpc('save_shop', { p: shop }); await refresh('shops', 'stock', 'audit'); setShop({ name: '', code: '', address: '' }); toast('Shop added'); });
@@ -229,7 +237,7 @@ export function SettingsPage() {
           <div className="frow" style={{ marginTop: 12 }}><div className="field"><label>New shop name</label><input className="input" maxLength={40} value={shop.name} onChange={(e) => setShop({ ...shop, name: e.target.value })} /></div><div className="field"><label>Short code (3 letters)</label><input className="input" maxLength={3} style={{ textTransform: 'uppercase' }} value={shop.code} onChange={(e) => setShop({ ...shop, code: e.target.value.toUpperCase() })} /></div></div>
           <div className="field"><label>Address</label><input className="input" maxLength={80} value={shop.address} onChange={(e) => setShop({ ...shop, address: e.target.value })} /></div><div className="lerr">{b.err}</div><button className="btn ghost full" disabled={b.busy} onClick={() => void addShop()}><Icon n="plus" /> Add shop</button></div></div>
       {edit ? <ShopEdit shop={edit} onClose={() => setEdit(null)} /> : null}
-      <div className="card" id="tillopts"><h3><Icon n="cart" /> Till options</h3>
+      <div className="card" id="tillopts"><h3><Icon n="cart" /> Options</h3>
         {/* the switches in groups that open and close; each group shows how many of its switches are on */}
         {OPTION_GROUPS.map((g) => { const on = g.keys.filter((k) => !!v[k]).length; return (
           <details key={g.id} className="optgroup" id={'og-' + g.id} open={!!openGroups[g.id]} onToggle={(e) => { const o = (e.currentTarget as HTMLDetailsElement).open; setOpenGroups((x) => ({ ...x, [g.id]: o })); }}>

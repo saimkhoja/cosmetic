@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAuth } from './auth/AuthProvider';
-import Layout, { NAV } from './components/Layout';
+import Layout, { navFor } from './components/Layout';
 import { ChangePassword, Lock, Login, Setup, Unconfigured } from './pages/Public';
 import Inventory from './pages/Inventory';
 import Deliveries, { Received, ShopStockAll } from './pages/Deliveries';
@@ -14,9 +14,11 @@ import Accounts from './pages/Accounts';
 import Requests from './pages/Requests';
 import { Empty } from './components/ui';
 import { startSync } from './offline/sync';
+import { useSettings } from './data/queries';
 
 export default function App() {
   const { status, profile, locked } = useAuth();
+  const settings = useSettings(status === 'ready' && !!profile);
   useEffect(() => { if (profile && (profile.role === 'till' || profile.role === 'shopadmin')) startSync(); }, [profile]);
   if (status === 'loading') return <Empty i="refresh" t="Starting QuickSales" tall />;
   if (status === 'unconfigured') return <Unconfigured />;
@@ -24,7 +26,9 @@ export default function App() {
   if (status !== 'ready' || !profile) return <Login />;
   if (locked) return <Lock />;
   if (profile.must_change_password) return <ChangePassword />;
-  const allowed = new Set(NAV[profile.role].map((n) => n[0]));
+  // the tabs of this role: without a central store the store-to-shop ones are left out, address and all
+  const nav = navFor(profile.role, !!settings.data?.features?.no_warehouse);
+  const allowed = new Set(nav.map((n) => n[0]));
   const page: Record<string, JSX.Element> = {
     '/': profile.role === 'admin' ? <AdminHome /> : <ShopHome />, '/inventory': <Inventory />, '/deliveries': <Deliveries />, '/shop-stock': <ShopStockAll />,
     '/upkeep': <Upkeep />, '/reports': <Reports />, '/users': <Users />, '/settings': <SettingsPage />, '/activity': <Activity />,
@@ -35,7 +39,7 @@ export default function App() {
     <Layout>
       <Routes>
         {[...allowed].map((p) => <Route key={p} path={p} element={page[p]} />)}
-        <Route path="*" element={<Navigate to={NAV[profile.role][0][0]} replace />} />
+        <Route path="*" element={<Navigate to={nav[0][0]} replace />} />
       </Routes>
     </Layout>
   );

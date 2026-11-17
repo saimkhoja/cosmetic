@@ -547,7 +547,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":true,"barcode":true,"other":true}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
@@ -566,7 +566,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false}'::jsonb, 'saving settings without the switches turns them off');
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb, 'saving settings without the switches turns them off');
 reset role;
 
 -- ===== till operators sell directly when the Admin turns it on =====
@@ -1119,6 +1119,44 @@ select t.ok((select copies from invoices where no = t.get('sno1')) = 2, 'invoice
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features - 'one_copy') from settings));
 select t.ok(not (select (features->>'one_copy')::boolean from settings), 'and back to two copies');
+reset role;
+
+-- ===== no central store: goods from a supplier go straight into a shop =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok(not coalesce((select (features->>'no_warehouse')::boolean from settings), false), 'the central store is used unless the Admin turns it off');
+select t.put('whq0', (select wh_qty::text from products where id = t.get('lotion')::uuid));
+select t.put('shq0', coalesce((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid), 0)::text);
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features || '{"no_warehouse": true}') from settings));
+select t.ok((select (features->>'no_warehouse')::boolean from settings), 'the Admin turns the central store off');
+select t.fails(format($$select public.receive_goods('{"supplier_id":"%s","lines":[{"product_id":"%s","qty":2}]}')$$, t.get('sup'), t.get('lotion')),
+  'Choose the shop', 'with no central store the goods need a shop');
+select t.fails(format($$select public.receive_goods('{"supplier_id":"%s","shop_id":"00000000-0000-0000-0000-0000000000ff","lines":[{"product_id":"%s","qty":2}]}')$$, t.get('sup'), t.get('lotion')),
+  'Choose the shop', 'an unknown shop is refused');
+select t.put('grnd', public.receive_goods(jsonb_build_object('supplier_id', t.get('sup'), 'ref', 'DN 99', 'shop_id', t.get('gom'),
+  'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 6))))->>'id');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('shq0')::int + 6,
+  'the goods are added to the shop stock');
+select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = t.get('whq0')::int, 'the central store is left untouched');
+select t.ok((select shop_id from grns where id = t.get('grnd')::uuid) = t.get('gom')::uuid, 'the receipt remembers the shop it went into');
+select t.ok((select l.side from voucher_lines l join vouchers v on v.id = l.voucher_id
+  where v.source_type = 'grn' and v.source_id = t.get('grnd')::uuid and l.account_id = t.shop_acc('INV_SHOP', t.get('gom')::uuid)) = 'Dr',
+  'the goods are booked to the shop''s stock account');
+select t.ok(not exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id
+  where v.source_type = 'grn' and v.source_id = t.get('grnd')::uuid and l.account_id = t.acc('INV_STORE')), 'and not to the central store''s');
+select t.ok(t.unbalanced() = 0, 'the books still balance');
+-- the Admin enters the supplier's bill for it as usual
+select t.ok((public.enter_bill(jsonb_build_object('grn_id', t.get('grnd'), 'bill_no', 'F-NW-1', 'amount', 9, 'currency', 'USD'))->>'voucher_id') is not null,
+  'the bill for a receipt into a shop is entered as usual');
+select t.ok((select status from grns where id = t.get('grnd')::uuid) = 'billed', 'and the receipt is billed');
+-- the other shop is not touched
+select t.ok(coalesce((select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('lotion')::uuid), 0) = 0
+  or (select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('lotion')::uuid) is not null, 'only the chosen shop receives the goods');
+-- switching the central store back on: goods arrive there again
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features - 'no_warehouse') from settings));
+select public.receive_goods(jsonb_build_object('supplier_id', t.get('sup'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1))));
+select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = t.get('whq0')::int + 1, 'with the central store back on, goods arrive there again');
+select t.ok((select shop_id from grns order by received_at desc, no desc limit 1) is null, 'and that receipt has no shop');
 reset role;
 
 -- ===== admin sees everything; disabled users are shut out =====

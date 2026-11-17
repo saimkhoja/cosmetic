@@ -2,7 +2,9 @@ export type Role = 'admin' | 'whop' | 'shopadmin' | 'till';
 export interface Profile { id: string; username: string; name: string; role: Role; shop_id: string | null; active: boolean; must_change_password: boolean; created_at?: string }
 export interface Company { name?: string; address?: string; phone?: string; email?: string; rccm?: string; idnat?: string; nif?: string; footer?: string }
 /** Switches the Admin turns on in Settings; both off by default. */
-export interface Features { customer_optional?: boolean; barcode?: boolean; till_sells?: boolean; cash_change?: boolean; usd_pay?: boolean; one_copy?: boolean }
+export interface Features { customer_optional?: boolean; barcode?: boolean; till_sells?: boolean; cash_change?: boolean; usd_pay?: boolean; one_copy?: boolean;
+  /** the business has no central store: goods from a supplier go straight into a shop */
+  no_warehouse?: boolean }
 /** rate: the sales rate (prices, tickets, tills). book_rate: the internal rate (suppliers, expenses, vouchers). */
 export interface Settings {
   rate: number; book_rate?: number; vat: number; tz: string; company: Company; features?: Features;
@@ -52,7 +54,7 @@ export interface Supplier {
   id: string; name: string; contact: string; phone: string; email: string; address: string; tax_no: string; credit_days: number; credit_limit: number;
   currency: 'USD' | 'FC'; notes: string; active: boolean; account_id: string; supplier_items?: { product_id: string }[];
 }
-export interface Grn { id: string; no: string; supplier_id: string; ref: string; note: string; status: 'awaiting_bill' | 'billed'; bill_voucher_id: string | null; received_by_name: string; received_at: string; grn_items: { product_id: string; qty: number; std_cost_usd?: number }[] }
+export interface Grn { id: string; no: string; supplier_id: string; shop_id?: string | null; ref: string; note: string; status: 'awaiting_bill' | 'billed'; bill_voucher_id: string | null; received_by_name: string; received_at: string; grn_items: { product_id: string; qty: number; std_cost_usd?: number }[] }
 /** Goods sent back to a supplier, or billed but not received. Values come separately, for the Admin only. */
 export interface SupplierReturn {
   id: string; no: string; supplier_id: string; kind: 'return' | 'short'; grn_id: string | null; reason: string; note: string; status: 'open' | 'settled' | 'cancelled';

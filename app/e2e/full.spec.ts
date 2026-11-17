@@ -776,6 +776,43 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(admin.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
   await expect(admin.locator('main tr', { hasText: 'Above the limit' })).toContainText('1 620 000 CDF');
 
+  // ---- no central store: goods from a supplier go straight into a shop, and the store-to-shop tabs go away
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'stock');
+  await expect(admin.locator('#s-no_warehouse')).not.toBeChecked();                       // off by default: the store is used
+  await admin.check('#s-no_warehouse');
+  await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
+  await expect(admin.locator('nav.nav').getByRole('link', { name: 'Deliveries' })).toHaveCount(0);
+  await expect(admin.locator('nav.nav').getByRole('link', { name: 'Requests' })).toHaveCount(0);
+  await expect(admin.locator('nav.nav').getByRole('link', { name: 'Returns' })).toHaveCount(0);
+  await admin.goto('/deliveries');                                                        // nor can the address open it
+  await expect(admin.getByRole('heading', { name: 'Deliveries to shops' })).toHaveCount(0);
+  await admin.getByRole('link', { name: 'Inventory' }).click();
+  await expect(admin.locator('main thead')).toContainText('In shops');                    // the quantity is what the shops hold
+  await admin.getByRole('button', { name: 'Receive from supplier' }).click();
+  await admin.selectOption('#gsup', { label: 'Beauté Import SARL' });
+  await admin.getByLabel('Quantity Shea body lotion 400 ml').fill('3');
+  await admin.getByRole('button', { name: /Add to shop stock/ }).click();
+  await expect(admin.locator('.modal .lerr')).toContainText('Choose the shop');
+  await admin.selectOption('#gshop', { label: 'SIM Beauté Limete' });
+  await admin.getByRole('button', { name: /Add to shop stock/ }).click();
+  await expect(admin.getByText(/GRN-\d+ saved: 72 units added to SIM Beauté Limete/)).toBeVisible();
+  await admin.getByRole('link', { name: 'Shop stock' }).click();                          // the goods are in that shop, not the store
+  await admin.locator('.toolbar select').selectOption({ label: 'SIM Beauté Limete' });
+  await expect(admin.locator('main tr', { hasText: 'Shea body lotion' })).toContainText('72');
+  await admin.getByRole('link', { name: 'Goods in' }).click();
+  await expect(admin.locator('main tr').filter({ hasText: 'Beauté Import SARL' }).first()).toContainText('into SIM Beauté Limete');
+  // the shop admin loses the store-to-shop tabs too
+  await shop.goto('/');
+  await expect(shop.locator('nav.nav').getByRole('link', { name: 'Order stock' })).toHaveCount(0);
+  await expect(shop.locator('nav.nav').getByRole('link', { name: 'Till' })).toBeVisible();
+  // back on: the tabs return and goods arrive in the store again
+  await admin.getByRole('link', { name: 'Settings' }).click();
+  await openGroup(admin, 'stock');
+  await admin.uncheck('#s-no_warehouse');
+  await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
+  await expect(admin.locator('nav.nav').getByRole('link', { name: 'Deliveries' })).toBeVisible();
+
   // ---- the Admin sees the activity; disabling the till ends its access
   await admin.getByRole('link', { name: 'Activity' }).click();
   await expect(admin.getByText(new RegExp(`Invoice ${noMama} edited`))).toBeVisible();
