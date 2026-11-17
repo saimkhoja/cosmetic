@@ -29,8 +29,8 @@ export function ShopHome() {
     <>
       <Head t={`Good ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, ${profile!.name.split(' ')[0]}`} s={`${shop?.name ?? ''}, ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}`} />
       <div className="kpis">
-        <Kpi i="chart" l="Sales today" tone="ok"><Dual2 b={fCDF(r?.total ?? 0)} s={`${r?.n ?? 0} invoices`} /></Kpi>
-        <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r?.total ?? 0)} s="cash only" /></Kpi>
+        <Kpi i="chart" l="Sales today" tone="ok"><Dual2 b={fCDF(r?.total ?? 0)} s={`${r?.n ?? 0} invoices${r?.capped ? ' · up to the shop limit' : ''}`} /></Kpi>
+        <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r?.total ?? 0)} s={r?.capped ? 'cash only · up to the shop limit' : 'cash only'} /></Kpi>
         <Kpi i="edit" l="Invoices edited today" tone={r?.edited ? 'warn' : ''}><Dual2 b={r?.edited ?? 0} s="by the shop admin" /></Kpi>
         <Kpi i="alert" l="Items running low" tone={low.length ? 'bad' : ''}><Dual2 b={low.length} s="5 or fewer left" /></Kpi>
       </div>

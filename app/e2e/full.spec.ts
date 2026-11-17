@@ -238,6 +238,20 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.getByRole('link', { name: 'Till' }).click();
   const review = shop.locator('.review');
   await expect(review.locator('.rcard', { hasText: 'Tata Mbo' })).toBeVisible({ timeout: 30000 });
+  // the search box over the panel finds a waiting order without reading down the queue
+  await expect(review.locator('.cart-h .chip')).toHaveText('3');
+  await shop.fill('#rsearch', 'nzuzi');
+  await expect(review.locator('.rcard', { hasText: 'Mama Nzuzi' })).toBeVisible();
+  await expect(review.locator('.rcard', { hasText: 'Tata Mbo' })).toHaveCount(0);
+  await expect(review.locator('.cart-h .chip')).toHaveText('1 of 3');
+  await shop.fill('#rsearch', 'lipstick');                                   // an item on the order finds it too
+  await expect(review.locator('.rcard', { hasText: 'Mama Nzuzi' })).toBeVisible();
+  await shop.fill('#rsearch', 'Grace');                                      // so does the till operator who sent it
+  await expect(review.locator('.rcard', { hasText: 'Mama Nzuzi' })).toBeVisible();
+  await shop.fill('#rsearch', 'zzzz');
+  await expect(review.getByText(/No order waiting matches/)).toBeVisible();
+  await shop.getByRole('button', { name: 'Clear the search' }).click();
+  await expect(review.locator('.rcard', { hasText: 'Tata Mbo' })).toBeVisible();
   await shop.fill('#cust', 'Counter customer'); await shop.press('#cust', 'Enter');
   await shop.locator('.ptile', { hasText: 'Matte lipstick' }).click(); await shop.locator('.ubtn', { hasText: 'pcs' }).first().click();
   await review.locator('.rcard', { hasText: 'Mama Nzuzi' }).getByRole('button', { name: 'Edit order for Mama Nzuzi' }).click();
@@ -258,7 +272,8 @@ test('a full day in SIM', async ({ browser }) => {
   await review.locator('.rcard', { hasText: 'Tata Mbo' }).getByRole('button', { name: 'Reject order for Tata Mbo' }).click();
   await shop.fill('#rreason', 'Customer left');
   await shop.locator('.modal footer').getByRole('button', { name: 'Reject order' }).click();
-  await expect(review.locator('.rcard')).toHaveCount(0);
+  // no order is left waiting (a card for deliveries to receive can also sit in this panel, so check the orders)
+  await expect(review.getByText('No orders waiting')).toBeVisible();
   await expect(shop.locator('.pill')).toContainText('all synced', { timeout: 40000 });
   // the till operator sees what was decided
   await till.reload();
@@ -736,12 +751,15 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.getByRole('button', { name: 'Save changes' }).click();
   await expect(shop.getByText('Invoice updated')).toBeVisible();
   await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toContainText('1 620 000 CDF');
-  await shop.getByRole('link', { name: 'Reports' }).click();                               // on screen the sales keep the limit
+  // on screen the day's figures stop at the shop limit, and say so rather than passing for the day's takings
+  await shop.getByRole('link', { name: 'Reports' }).click();
   await shop.getByRole('button', { name: 'Today' }).click();
-  await expect(shop.locator('main tr', { hasText: 'Within the limit' })).toBeVisible();
+  await expect(shop.locator('.kpi', { hasText: 'Sales, VAT included' })).toContainText('up to the shop limit');
+  await expect(shop.locator('main')).toContainText("These figures stop at the shop's limit");
   await expect(shop.locator('main tr', { hasText: 'Above the limit' })).toHaveCount(0);
-  const shown = Number(/(\d+) invoices/.exec(await shop.locator('.kpi', { hasText: 'Sales, VAT included' }).innerText())![1]);   // the report is loaded: its rows are there
-  expect(shown).toBeGreaterThan(1);
+  const kpiCdf = async () => Number((await shop.locator('.kpi', { hasText: 'Sales, VAT included' }).innerText()).replace(/\u202f|\u00a0/g, ' ').match(/([\d ]+) CDF/)![1].replace(/\D/g, ''));
+  expect(await kpiCdf()).toBeLessThanOrEqual(347 * 3000);                                 // 347 USD at the sales rate of 3 000
+  const shown = Number(/(\d+) invoices/.exec(await shop.locator('.kpi', { hasText: 'Sales, VAT included' }).innerText())![1]);
   // the shift end report starts fresh after the last one: shift 3 has the two sales, also the one above the limit
   const total = async () => Number(/Total Invoice\s*:\s*(\d+)/.exec(await shop.locator('#slips').innerText())![1]);
   await shop.getByRole('button', { name: 'Print day end report' }).click();
@@ -750,7 +768,7 @@ test('a full day in SIM', async ({ browser }) => {
   await expect(shop.locator('#slips')).toContainText(/Shift\s*:\s*3,/);
   expect(await total()).toBe(2);
   await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
-  await expect(shop.locator('.kpi', { hasText: 'Sales, VAT included' })).toContainText(`${shown} invoices`);   // the day keeps every shift
+  await expect(shop.locator('.kpi', { hasText: 'Sales, VAT included' })).toContainText(`${shown} invoices`);   // printing a shift does not change the day
   // printed again: the same shift 3, marked as a copy
   await shop.getByRole('button', { name: 'Print day end report' }).click();
   await expect(shop.locator('#slipshift')).toContainText('New: shift 4');

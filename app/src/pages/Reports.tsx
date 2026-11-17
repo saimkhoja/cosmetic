@@ -67,11 +67,12 @@ export default function Reports() {
       </div></div>
       {!r ? <div className="card"><Empty i={rep.error ? 'alert' : 'refresh'} t={rep.error ? (rep.error as Error).message : 'Loading the report'} /></div> : <>
         <div className="kpis">
-          <Kpi i="receipt" l="Sales, VAT included" tone="ok"><Dual2 b={fCDF(r.total)} s={`${r.n} invoices${isAdmin ? ', ' + fUSD(r.total_usd) : ''}`} /></Kpi>
+          <Kpi i="receipt" l="Sales, VAT included" tone="ok"><Dual2 b={fCDF(r.total)} s={`${r.n} invoices${isAdmin ? ', ' + fUSD(r.total_usd) : ''}${r.capped ? ' · up to the shop limit' : ''}`} /></Kpi>
           <Kpi i="cart" l="Items sold"><Dual2 b={r.items} s={`${r.n ? fCDF(r.total / r.n) : fCDF(0)} average sale`} /></Kpi>
           <Kpi i="tag" l="Discounts given" tone="warn"><Dual2 b={fCDF(r.disc)} s={`VAT in the period ${fCDF(r.vat)}`} /></Kpi>
           {isAdmin ? <Kpi i="chart" l="Gross profit, after VAT on the margin"><Dual2 b={fUSD(r.profit_usd ?? 0)} s={fCDF((r.profit_usd ?? 0) * bookRate(settings.data))} /></Kpi> : <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r.total)} s="all sales are cash" /></Kpi>}
         </div>
+        {r.capped ? <Note i="lock" warn>These figures stop at the shop's limit for each day: the sales made after it are not counted here. Print the shift end report, with its passcode, for the real sales.</Note> : null}
         <div className="card"><h3><Icon n="chart" /> Sales by category</h3>
           {r.by_category ? <CategoryChart cats={r.by_category} names={(cats.data ?? []).map((c) => c.name)} onOpen={setCat} />
             : <Empty i="alert" t="Sales by category need the latest database update (migration 21 in the deploy guide)" />}</div>
