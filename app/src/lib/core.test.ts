@@ -141,7 +141,24 @@ describe('payment in USD and CDF', () => {
   it('converts dollars at the sale rate and gives change in Francs', () => {
     const p = payment(40000, 2850, 20, '', false);
     expect([p.value, p.change, p.short, p.changeUsd, p.changeCdf, p.maxDollars]).toEqual([57000, 17000, 0, 0, 17000, 5]);
-    expect(p.pay).toEqual({ tendered: 57000, paid_usd: 20, paid_cdf: 0, change_usd: 0 });
+    expect(p.pay).toEqual({ tendered: 57000, paid_usd: 20, paid_cdf: 0, change_usd: 0, usd_rate: 2850 });
+  });
+  // the shop prices at 2 350 but gives only 2 300 for a dollar, so Francs make up the difference
+  it('values dollars at the internal rate, so the Francs on top are still owed', () => {
+    const p = payment(23500, 2350, 10, '', false, 2300);
+    expect([p.value, p.short, p.change]).toEqual([23000, 500, 0]);      // $10 no longer covers a 23 500 bill
+    expect(p.due).toBe(10.22);                                          // 23 500 at 2 300
+    const paid = payment(23500, 2350, 10, 500, false, 2300);
+    expect([paid.value, paid.short, paid.change]).toEqual([23500, 0, 0]);
+    expect(paid.pay).toEqual({ tendered: 23500, paid_usd: 10, paid_cdf: 500, change_usd: 0, usd_rate: 2300 });
+  });
+  it('ten times the bill needs ten times the Francs on top', () => {
+    expect(payment(235000, 2350, 100, '', false, 2300).short).toBe(5000);
+    expect(payment(235000, 2350, 100, 5000, false, 2300).short).toBe(0);
+  });
+  it('gives dollars back at the same rate', () => {
+    const p = payment(23500, 2350, 20, '', true, 2300);
+    expect([p.value, p.change, p.changeUsd, p.changeCdf]).toEqual([46000, 22500, 9, 1800]);
   });
   it('gives whole dollars back and the rest in Francs', () => {
     const p = payment(40000, 2850, 20, 0, true);

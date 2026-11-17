@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { rpc, rows, supabase } from '../lib/supabase';
 import { CARTON_PARTS, cartPriced, cashNotes, hotSet, hotSort, overLimit, payment, takeLocal, totals, unitLabel, unitNote, unitsOf, usdNotes, type CartLine, type Disc, type PayIn } from '../lib/units';
 import { catIcon, custName, findByCode } from '../lib/items';
-import { dt, fCDF, fNum, fUSD, ld, tm, toCDF, today } from '../lib/format';
+import { bookRate, dt, fCDF, fNum, fUSD, ld, tm, toCDF, today } from '../lib/format';
 import { orderRef, printHTML, receiptHTML, saleCopies } from '../lib/print';
 import { Empty, Modal, Note, useAction, useToast } from '../components/ui';
 import { DiscFields, discProblem } from '../components/Discount';
@@ -220,6 +220,8 @@ export default function Till() {
 
   // the Admin's Settings: one copy of each invoice (the customer's) instead of two
   const oneCopy = !!snap?.settings.features?.one_copy;
+  // a dollar at the till is worth the internal rate, not the sales rate the goods are priced at
+  const usdRate = snap ? bookRate(snap.settings) : 0;
   // a till operator's discount goes with the token of their Discount passcode entry; no discount, nothing is sent
   const tillDisc = (d: Disc, amount: number) => (amount > 0 ? { ...(typeof d === 'number' ? { disc_pct: d } : { disc: amount }), discount_token: tok ?? undefined } : {});
   // till operator: the invoice prints here (customer and shop copies) and goes to the shop admin with the order;
@@ -260,9 +262,9 @@ export default function Till() {
       if (tend < S.total) { toast(`Cash received is less than the total, ${fCDF(S.total)}`, 'warn'); return false; }
       const no = tillInv ? tillInv.invoice_no! : await nextInvoiceNo(dev), id = tillInv ? tillInv.id : crypto.randomUUID(), t = new Date().toISOString();
       const items = pr.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
-      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: S.pct, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, paid_usd: usd?.paid_usd ?? 0, paid_cdf: usd ? usd.paid_cdf : tend, change_usd: usd?.change_usd ?? 0, change_cdf: tend - S.total - Math.round((usd?.change_usd ?? 0) * rate), copies: oneCopy ? 1 : 2, printed: oneCopy ? 1 : 2, items, edits: [], synced: false,
+      const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: S.pct, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht, tendered: tend, change: tend - S.total, paid_usd: usd?.paid_usd ?? 0, paid_cdf: usd ? usd.paid_cdf : tend, change_usd: usd?.change_usd ?? 0, change_cdf: tend - S.total - Math.round((usd?.change_usd ?? 0) * (usd?.usd_rate ?? rate)), usd_rate: usd ? usd.usd_rate : null, copies: oneCopy ? 1 : 2, printed: oneCopy ? 1 : 2, items, edits: [], synced: false,
         customer: cust, order_id: order?.id ?? null, prepared_by_name: order?.created_by_name ?? null, revised_from: revised ? tillInv!.total ?? null : null };
-      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(isAdmin ? (typeof disc === 'number' ? { disc_pct: disc } : { disc: S.disc }) : tillDisc(disc, S.disc)), tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
+      await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(isAdmin ? (typeof disc === 'number' ? { disc_pct: disc } : { disc: S.disc }) : tillDisc(disc, S.disc)), tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd, usd_rate: usd.usd_rate } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
@@ -421,7 +423,7 @@ export default function Till() {
       {disc ? <DiscModal v={dp} gross={T.gross} onApply={(v) => { setDp(v); setDisc(false); }} onClose={() => setDisc(false)} /> : null}
       {reject ? <RejectModal o={reject} onClose={() => setReject(null)} onDone={() => { if (editing?.id === reject.id) setEditing(null); setReject(null); void orders.refetch(); }} /> : null}
       {editing ? <OrderEditor o={editing} init={orderLines(editing)} byId={byId} snap={snap} onClose={() => setEditing(null)} onReject={() => { setReject(editing); }} onApprove={async (lines, d) => { if (await sellOrder(lines, d, editing)) setEditing(null); }} /> : null}
-      {cashFor ? <CashModal total={cashFor.total} info={cashFor.info} prints={cashFor.prints !== false} rate={rate} usdPay={usdPay} onClose={() => { cashFor.cancel(); setCashFor(null); }} onPay={async (p) => { if (await cashFor.go(p)) setCashFor(null); }} /> : null}
+      {cashFor ? <CashModal total={cashFor.total} info={cashFor.info} prints={cashFor.prints !== false} rate={rate} usdRate={usdRate} usdPay={usdPay} onClose={() => { cashFor.cancel(); setCashFor(null); }} onPay={async (p) => { if (await cashFor.go(p)) setCashFor(null); }} /> : null}
       {showParked ? <ParkedModal list={parked} onResume={resume} onDelete={unpark} onClose={() => setShowParked(false)} /> : null}
       {tickets ? <TicketsModal products={hotSort(snap.products, snap.ranks)} rate={rate} shopName={snap.shop.name} onClose={() => setTickets(false)} /> : null}
       {view ? <Modal title={'Invoice ' + view.no} icon="receipt" onClose={() => setView(null)} foot={<button className="btn" onClick={() => setView(null)}>Close</button>}><div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, snap.settings.company, snap.shop, { copy: 'client', cash: cashStep }) }} /></Modal> : null}
@@ -454,17 +456,17 @@ function PriceCheck({ products, stock, rate, onClose }: { products: Product[]; s
   );
 }
 /** The payment window: what the customer hands over (Francs, and dollars when allowed), and the change to give. */
-function CashModal({ total, info, prints, rate, usdPay, onClose, onPay }: { total: number; info: string; prints: boolean; rate: number; usdPay: boolean; onClose: () => void; onPay: (pay: PayIn) => Promise<void> }) {
+function CashModal({ total, info, prints, rate, usdRate, usdPay, onClose, onPay }: { total: number; info: string; prints: boolean; rate: number; usdRate: number; usdPay: boolean; onClose: () => void; onPay: (pay: PayIn) => Promise<void> }) {
   const [v, setV] = useState(''), [u, setU] = useState(''), [back, setBack] = useState(false), [busy, setBusy] = useState(false);
-  const P = payment(total, rate, usdPay ? u : 0, v, back), any = !!u || !!v;
+  const P = payment(total, rate, usdPay ? u : 0, v, back, usdRate), any = !!u || !!v;
   // a barcode scanned into the box by mistake is far more digits than any amount
   const odd = v.replace(/\D/g, '').length >= 10 || u.replace(/\D/g, '').length >= 10;
   const go = () => { if (P.short || odd || busy) return; setBusy(true); void onPay(P.pay).finally(() => setBusy(false)); };
   const enter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
-  const rest = P.change - Math.round(P.maxDollars * rate);
+  const rest = P.change - Math.round(P.maxDollars * P.rate);
   return (
     <Modal title="Payment" icon="cash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn go" disabled={P.short > 0 || odd || busy} onClick={go}><Icon n="cash" /> {prints ? 'Take cash and print' : 'Take cash'}</button></>}>
-      <div className="paytotal"><small>{info}</small><b>{fCDF(total)}</b>{usdPay ? <small>Due in USD <span id="usddue" className="due">{fUSD(P.due)}</span> · 1 USD = {fCDF(rate)}</small> : null}</div>
+      <div className="paytotal"><small>{info}</small><b>{fCDF(total)}</b>{usdPay ? <small>Due in USD <span id="usddue" className="due">{fUSD(P.due)}</span> · 1 USD = {fCDF(P.rate)}</small> : null}</div>
       <div className="cashin">
         {usdPay ? <div className="frow">
           <div className="field"><label htmlFor="cashusd">USD received</label><input id="cashusd" className="input" type="number" min="0" step="1" inputMode="decimal" autoComplete="off" value={u} autoFocus onChange={(e) => setU(e.target.value)} onKeyDown={enter} placeholder="0" /></div>
@@ -476,7 +478,7 @@ function CashModal({ total, info, prints, rate, usdPay, onClose, onPay }: { tota
         </> : cashNotes(total).map((n) => <button key={n} type="button" className={!u && P.cdf === n ? 'on' : ''} onClick={() => setV(String(n))}>{n === total ? 'Exact' : fCDF(n)}</button>)}</div>
         <div id="cashchange" className={`paychange ${!any ? '' : odd || P.short ? 'bad' : 'ok'}`}>
           <span>{odd ? 'Check the amount' : any && P.short ? (usdPay ? 'Still to pay' : 'Not enough cash') : 'Change to give'}</span>
-          <b>{!any || odd ? '-' : P.short ? (usdPay ? `${fCDF(P.short)} (≈ ${fUSD(Math.ceil((P.short / rate) * 100) / 100)})` : fCDF(P.short)) : P.changeUsd ? `$${P.changeUsd} + ${fCDF(P.changeCdf)}` : fCDF(P.change)}</b></div>
+          <b>{!any || odd ? '-' : P.short ? (usdPay ? `${fCDF(P.short)} (≈ ${fUSD(Math.ceil((P.short / P.rate) * 100) / 100)})` : fCDF(P.short)) : P.changeUsd ? `$${P.changeUsd} + ${fCDF(P.changeCdf)}` : fCDF(P.change)}</b></div>
         {usdPay && P.maxDollars > 0 && !odd ? <button id="dollarsback" type="button" className={`btn sm full ${back ? 'primary' : 'ghost'}`} onClick={() => setBack(!back)}>
           {back ? `Giving $${P.maxDollars} + ${fCDF(rest)}: tap for all in CDF` : `Give dollars back: $${P.maxDollars} + ${fCDF(rest)}`}</button> : null}
       </div>

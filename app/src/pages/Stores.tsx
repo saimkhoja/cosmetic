@@ -4,6 +4,9 @@ import { useMemo, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useGrns, useLedgers, useProducts, useRefresh, useReturns, useSettings, useShops, useStock, useSupplierReturns, useSupplierReturnValues, useSuppliers } from '../data/queries';
+
+/** With no central store, goods from a supplier go straight into a shop. */
+export const useNoStore = () => !!useSettings().data?.features?.no_warehouse;
 import { rpc } from '../lib/supabase';
 import { ctnTxt } from '../lib/units';
 import { dt, fUSD, sum } from '../lib/format';
@@ -28,6 +31,12 @@ export function useQtyLines(init: Record<string, Line> = {}) {
 
 export function ReceiveGoodsModal({ pid, onClose }: { pid?: string; onClose: () => void }) {
   const products = useProducts(), suppliers = useSuppliers(), settings = useSettings(), refresh = useRefresh(), toast = useToast(), a = useAction();
+  // with no central store the goods go into a shop, chosen here; with one shop it is chosen already
+  const noStore = useNoStore(), shops = useShops(), stock = useStock();
+  const open = useMemo(() => (shops.data ?? []).filter((x) => x.active), [shops.data]);
+  const [shop, setShop] = useState('');
+  const sid = noStore ? (shop || (open.length === 1 ? open[0].id : '')) : '';
+  const inShop = useMemo(() => new Map((stock.data ?? []).filter((r) => r.shop_id === sid).map((r) => [r.product_id, r.qty])), [stock.data, sid]);
   const [sup, setSup] = useState(''), [ref, setRef] = useState(''), [note, setNote] = useState('');
   const qty = useQtyLines(), { pcsOf } = qty;
   const s = suppliers.data?.find((x) => x.id === sup), theirs = new Set((s?.supplier_items ?? []).map((i) => i.product_id));
@@ -36,17 +45,20 @@ export function ReceiveGoodsModal({ pid, onClose }: { pid?: string; onClose: () 
   const chosen = all.filter((p) => pcsOf(p) > 0), units = sum(chosen, pcsOf);
   const save = () => a.run(async () => {
     if (!sup) throw new Error('Choose the supplier first');
+    if (noStore && !sid) throw new Error('Choose the shop the goods go into');
     if (!chosen.length) throw new Error('Enter a quantity for at least one item');
-    const r = await rpc<{ no: string }>('receive_goods', { p: { supplier_id: sup, ref, note, lines: chosen.map((p) => ({ product_id: p.id, qty: pcsOf(p) })) } });
-    await refresh('products', 'grns', 'audit'); toast(`${r.no} saved: ${units} units added to the store. The Admin enters the bill.`); onClose();
+    const r = await rpc<{ no: string }>('receive_goods', { p: { supplier_id: sup, ref, note, ...(noStore ? { shop_id: sid } : {}), lines: chosen.map((p) => ({ product_id: p.id, qty: pcsOf(p) })) } });
+    const where = noStore ? open.find((x) => x.id === sid)?.name ?? 'the shop' : 'the store';
+    await refresh('products', 'stock', 'grns', 'audit'); toast(`${r.no} saved: ${units} units added to ${where}. The Admin enters the bill.`); onClose();
   });
   return (
-    <Modal title="Receive goods from a supplier" icon="truck" xl onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Add to store stock{chosen.length ? ` · ${chosen.length} item${chosen.length === 1 ? '' : 's'}, ${units} units` : ''}</button></>}>
+    <Modal title="Receive goods from a supplier" icon="truck" xl onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Add to {noStore ? 'shop' : 'store'} stock{chosen.length ? ` · ${chosen.length} item${chosen.length === 1 ? '' : 's'}, ${units} units` : ''}</button></>}>
       <div className="frow"><div className="field"><label>Supplier</label><select id="gsup" className="input" value={sup} onChange={(e) => setSup(e.target.value)}><option value="">Choose the supplier</option>{(suppliers.data ?? []).filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
         {suppliers.data && !suppliers.data.length ? <span className="hint">No suppliers yet. The Admin adds them under Accounts, Suppliers.</span> : null}</div>
-        <div className="field"><label>Supplier's delivery note or invoice no. (optional)</label><input id="gref" className="input" maxLength={60} value={ref} onChange={(e) => setRef(e.target.value)} /></div></div>
+        <div className="field"><label>Supplier's delivery note or invoice no. (optional)</label><input id="gref" className="input" maxLength={60} value={ref} onChange={(e) => setRef(e.target.value)} /></div>
+        {noStore ? <div className="field"><label htmlFor="gshop">Shop the goods go into</label><select id="gshop" className="input" value={sid} onChange={(e) => setShop(e.target.value)}><option value="">Choose the shop</option>{open.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></div> : null}</div>
       <StockPicker all={all} base={theirs.size ? (p) => theirs.has(p.id) : undefined} qty={qty} codes={!!settings.data?.features?.barcode} initQ={pid ? all.find((p) => p.id === pid)?.name : ''}
-        cols={[{ th: 'In store', td: (p) => <QtyCell p={p} q={p.wh_qty} /> }]} qtyHead="Received" aria={(p) => `Quantity ${p.name}`}
+        cols={[noStore ? { th: 'In shop', td: (p) => (sid ? <QtyCell p={p} q={inShop.get(p.id) ?? 0} /> : <span className="code">-</span>) } : { th: 'In store', td: (p) => <QtyCell p={p} q={p.wh_qty} /> }]} qtyHead="Received" aria={(p) => `Quantity ${p.name}`}
         badge={(p) => (theirs.has(p.id) ? <> <span className="chip ok">from this supplier</span></> : null)} sideTitle="To receive" sideNote={s ? `From ${s.name}${ref ? `, ${ref}` : ''}` : 'Choose the supplier'} />
       <div className="field" style={{ marginTop: 12 }}><label>Note (optional)</label><input className="input" maxLength={120} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. 2 cartons damaged, refused" /></div>
       <Note>No prices here: the Admin enters the supplier's bill and its amounts.</Note>
@@ -148,21 +160,23 @@ function CancelReturnModal({ r, onClose }: { r: SupplierReturn; onClose: () => v
 export function GoodsIn() {
   const { profile } = useAuth(), isAdmin = profile!.role === 'admin';
   const grns = useGrns(), suppliers = useSuppliers(), products = useProducts();
+  const noStore = useNoStore(), shops = useShops();
+  const shopName = (id?: string | null) => (id ? shops.data?.find((x) => x.id === id)?.name ?? '' : '');
   const [recv, setRecv] = useState(false), [rts, setRts] = useState(false), [bill, setBill] = useState<Grn | null>(null), [f, setF] = useState<'all' | 'awaiting_bill'>('all');
   const byId = useMemo(() => new Map((products.data ?? []).map((p) => [p.id, p])), [products.data]);
   const supName = (id: string) => suppliers.data?.find((s) => s.id === id)?.name ?? '';
   const list = (grns.data ?? []).filter((g) => f === 'all' || g.status === f), waiting = (grns.data ?? []).filter((g) => g.status === 'awaiting_bill').length;
   return (
     <>
-      <Head t="Goods in" s="Every delivery from a supplier, with what came in. Each one waits for the Admin to enter the supplier's bill." a={<><button id="rtsbtn" className="btn ghost" onClick={() => setRts(true)}><Icon n="exchange" /> Return to supplier</button><button className="btn primary" onClick={() => setRecv(true)}><Icon n="truck" /> Receive from supplier</button></>} />
+      <Head t="Goods in" s="Every delivery from a supplier, with what came in. Each one waits for the Admin to enter the supplier's bill." a={<>{noStore ? null : <button id="rtsbtn" className="btn ghost" onClick={() => setRts(true)}><Icon n="exchange" /> Return to supplier</button>}<button className="btn primary" onClick={() => setRecv(true)}><Icon n="truck" /> Receive from supplier</button></>} />
       <div className="toolbar"><div className="seg"><button className={f === 'all' ? 'on' : ''} onClick={() => setF('all')}>All</button><button className={f === 'awaiting_bill' ? 'on' : ''} onClick={() => setF('awaiting_bill')}>Waiting for the bill ({waiting})</button></div></div>
       <div className="card p0"><div className="tw">{list.length ? <table className="t"><thead><tr><th>Receipt</th><th>Supplier</th><th>Received</th><th>Items</th><th>Bill</th><th /></tr></thead><tbody>
-        {list.map((g) => <tr key={g.id}><td><b>{g.no}</b>{g.ref ? <div className="code">{g.ref}</div> : null}</td><td>{supName(g.supplier_id)}</td><td className="nw">{dt(g.received_at)}<div className="code">{g.received_by_name}</div></td>
+        {list.map((g) => <tr key={g.id}><td><b>{g.no}</b>{g.ref ? <div className="code">{g.ref}</div> : null}</td><td>{supName(g.supplier_id)}</td><td className="nw">{dt(g.received_at)}<div className="code">{g.received_by_name}{g.shop_id ? ` · into ${shopName(g.shop_id)}` : ''}</div></td>
           <td>{g.grn_items.map((i) => { const p = byId.get(i.product_id); return <div key={i.product_id}>{i.qty} {p?.stock_unit} {p?.name}{p && ctnTxt(p, i.qty) ? <span className="code"> ({ctnTxt(p, i.qty)})</span> : null}</div>; })}{g.note ? <div className="code">{g.note}</div> : null}</td>
           <td>{g.status === 'billed' ? <span className="chip ok">Bill entered</span> : <span className="chip warn">Waiting for the bill</span>}</td>
           <td>{isAdmin && g.status === 'awaiting_bill' ? <button className="btn primary sm" onClick={() => setBill(g)}><Icon n="receipt" /> Enter bill</button> : null}</td></tr>)}
       </tbody></table> : <Empty i="truck" t={grns.isLoading ? 'Loading' : 'Nothing received yet'} />}</div></div>
-      <SupplierReturnsList />
+      {noStore ? null : <SupplierReturnsList />}
       {recv ? <ReceiveGoodsModal onClose={() => setRecv(false)} /> : null}
       {rts ? <ReturnToSupplierModal onClose={() => setRts(false)} /> : null}
       {bill ? <BillModal grn={bill} onClose={() => setBill(null)} /> : null}

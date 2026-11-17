@@ -85,15 +85,18 @@ export function cashNotes(total: number) {
   return [...new Set([total, up(1000), up(5000), up(10000)])].filter((n) => n >= total && n > 0);
 }
 /** Cash handed over at the till, in Francs and (when allowed) dollars at the sale's rate. Mirrors submit_invoice. */
-export interface PayIn { tendered: number; paid_usd: number; paid_cdf: number; change_usd: number }
-export function payment(total: number, rate: number, usd: number | string, cdf: number | string, dollarsBack = false) {
+export interface PayIn { tendered: number; paid_usd: number; paid_cdf: number; change_usd: number; usd_rate: number }
+/** What the customer hands over. Dollars are worth `usdRate` (the internal rate: what the shop gives for a dollar
+ *  over the counter), which can be below the sales rate the goods are priced at, so Francs make up the difference. */
+export function payment(total: number, rate: number, usd: number | string, cdf: number | string, dollarsBack = false, usdRate = rate) {
+  const ur = usdRate > 0 ? usdRate : rate;
   const u = Math.max(0, Math.round((Number(usd) || 0) * 100) / 100), c = Math.max(0, Math.round(Number(cdf) || 0));
-  const value = c + Math.round(u * rate), change = Math.max(0, value - total), short = Math.max(0, total - value);
+  const value = c + Math.round(u * ur), change = Math.max(0, value - total), short = Math.max(0, total - value);
   // whole dollars that fit in the change, never more than the dollars received
-  const maxDollars = rate > 0 ? Math.max(0, Math.min(Math.floor(u), Math.floor(change / rate))) : 0;
-  const changeUsd = dollarsBack ? maxDollars : 0, changeCdf = change - Math.round(changeUsd * rate);
-  const pay: PayIn = { tendered: value, paid_usd: u, paid_cdf: c, change_usd: changeUsd };
-  return { usd: u, cdf: c, value, change, short, maxDollars, changeUsd, changeCdf, pay, due: rate > 0 ? Math.ceil((total / rate) * 100) / 100 : 0 };
+  const maxDollars = ur > 0 ? Math.max(0, Math.min(Math.floor(u), Math.floor(change / ur))) : 0;
+  const changeUsd = dollarsBack ? maxDollars : 0, changeCdf = change - Math.round(changeUsd * ur);
+  const pay: PayIn = { tendered: value, paid_usd: u, paid_cdf: c, change_usd: changeUsd, usd_rate: ur };
+  return { usd: u, cdf: c, value, change, short, maxDollars, changeUsd, changeCdf, pay, rate: ur, due: ur > 0 ? Math.ceil((total / ur) * 100) / 100 : 0 };
 }
 /** USD notes worth offering: the smallest ones that cover what is due, and the common bigger ones. */
 export const usdNotes = (due: number) => { const up = [1, 5, 10, 20, 50, 100].filter((n) => n >= due).slice(0, 3); return up.length ? up : [100]; };

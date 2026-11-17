@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useCategories, useCosts, useProducts, useRanks, useRefresh, useSettings } from '../data/queries';
+import { useCategories, useCosts, useProducts, useRanks, useRefresh, useSettings, useStock } from '../data/queries';
 import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSet, hotSort, marginPct, pcValue, unitLabel, unitsOf } from '../lib/units';
 import { barcodesOf, itemProblem, MAX_BARCODES, MONTHS, type ItemInput } from '../lib/items';
-import { ReceiveGoodsModal } from './Stores';
+import { ReceiveGoodsModal, useNoStore } from './Stores';
 import { bookRate, fCDF, fUSD, toCDF } from '../lib/format';
 import { Dual, Empty, Head, Modal, Note, num, useAction, useToast } from '../components/ui';
 import { IMPCOLS, impParse, readCSV, readXlsx, saveBlob, templateXlsx, type ImportRow } from '../lib/xlsx';
@@ -23,13 +23,17 @@ export default function Inventory() {
   const [q, setQ] = useState(''), [edit, setEdit] = useState<Product | 'new' | null>(null), [recv, setRecv] = useState<Product | 'any' | null>(null), [imp, setImp] = useState(false);
   const [params] = useSearchParams();
   const [cats, setCats] = useState(false), [archived, setArchived] = useState(params.get('arch') === '1'), [count, setCount] = useState<Product | null>(null);
+  // without a central store the quantity shown is what the shops hold together
+  const noStore = useNoStore(), stock = useStock();
+  const inShops = useMemo(() => { const m = new Map<string, number>(); for (const r of stock.data ?? []) m.set(r.product_id, (m.get(r.product_id) ?? 0) + r.qty); return m; }, [stock.data]);
+  const qtyOf = (p: Product) => (noStore ? inShops.get(p.id) ?? 0 : p.wh_qty);
   const rate = settings.data?.rate ?? 1, book = bookRate(settings.data), [rateEdit, setRateEdit] = useState(false);
   const costOf = useMemo(() => new Map((costs.data ?? []).map((c) => [c.product_id, c])), [costs.data]);
   const live = (products.data ?? []).filter((p) => p.active), gone = (products.data ?? []).filter((p) => !p.active);
   const hot = hotSet(ranks.data);
   // items in store first (best sellers first), then the ones with none left, A to Z
   const sorted = hotSort(archived ? gone : live, ranks.data);
-  const list = [...sorted.filter((p) => p.wh_qty > 0), ...sorted.filter((p) => p.wh_qty <= 0).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))].filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category + ' ' + barcodesOf(p).join(' ')).toLowerCase().includes(q.toLowerCase()));
+  const list = [...sorted.filter((p) => qtyOf(p) > 0), ...sorted.filter((p) => qtyOf(p) <= 0).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))].filter((p) => !q || (p.name + ' ' + p.sku + ' ' + p.category + ' ' + barcodesOf(p).join(' ')).toLowerCase().includes(q.toLowerCase()));
   const del = async (p: Product) => {
     if (!confirm(`Delete ${p.name}? An item that was ever received, sent or sold is archived instead, so its history stays.`)) return;
     try { const r = await rpc<string>('delete_product', { p_id: p.id }); await refresh('products', 'costs', 'stock', 'audit'); toast(r === 'deleted' ? `${p.name} deleted` : `${p.name} archived. Find it under Archived items.`, 'warn'); }
@@ -49,16 +53,16 @@ export default function Inventory() {
         {isAdmin ? null : <span className="chip warn"><Icon n="lock" /> Cost prices hidden for your role</span>}<span className="hint">Best sellers of the last 30 days come first; seasonal items out of season come after them. Items with none in store are listed last, A to Z.</span></div>
       <div className="card p0"><div className="tw">
         {products.isLoading ? <Empty i="refresh" t="Loading items" /> : !list.length ? <Empty i="search" t={products.data?.length ? 'No items match your search' : 'No items yet. Add one or import from Excel.'} /> :
-          <table className="t"><thead><tr><th>Item</th><th>Category</th><th className="r">In store</th>{isAdmin ? <th>Cost</th> : null}<th>Selling prices</th>{isAdmin ? <th className="r" title="Mark-up on cost: cost + margin % = selling price">Margin on cost</th> : null}<th /></tr></thead><tbody>
+          <table className="t"><thead><tr><th>Item</th><th>Category</th><th className="r">{noStore ? 'In shops' : 'In store'}</th>{isAdmin ? <th>Cost</th> : null}<th>Selling prices</th>{isAdmin ? <th className="r" title="Mark-up on cost: cost + margin % = selling price">Margin on cost</th> : null}<th /></tr></thead><tbody>
             {list.map((p) => { const c = costOf.get(p.id); return (
               <tr key={p.id}>
                 <td><b>{p.name}</b>{hot.has(p.id) ? <> <span className="chip hot">Hot</span></> : null}<div className="code">{p.sku}{barcodesOf(p).length ? ` · ${barcodesOf(p).join(', ')}` : ''}{p.is_bundle ? ` · mixed set of ${p.pieces_per_set}` : p.per_carton > 1 ? ` · ${p.per_carton} pcs per carton` : ''}</div></td><td>{p.category}</td>
-                <td className="r"><QtyCell p={p} q={p.wh_qty} cls={p.wh_qty <= p.reorder ? 'bad' : 'ok'} /></td>
+                <td className="r"><QtyCell p={p} q={qtyOf(p)} cls={qtyOf(p) <= p.reorder ? 'bad' : 'ok'} /></td>
                 {isAdmin ? <td>{c ? (p.is_bundle ? <><Dual usd={c.cost_usd} rate={book} /><div className="code">per set</div></> : <><Dual usd={c.carton_cost_usd} rate={book} /><div className="code">per carton, {fUSD(c.cost_usd)} per pc</div></>) : '-'}</td> : null}
                 <td>{unitsOf(p).map((u, k) => <div key={k} style={{ whiteSpace: 'nowrap' }}><span className="uchip">{unitLabel(u)}</span> <b>{fCDF(toCDF(u.usd, rate))}</b>{isAdmin ? <span className="code"> {fUSD(u.usd)}</span> : null}</div>)}</td>
                 {isAdmin ? <td className="r"><b>{c && pcValue(p) > 0 ? (marginPct(pcValue(p), Number(c.cost_usd)) ?? '-') : '-'}{c && pcValue(p) > 0 && Number(c.cost_usd) > 0 ? '%' : ''}</b><div className="code">per {p.is_bundle ? 'set' : 'pc'}</div></td> : null}
                 <td><div className="act">{!p.active ? <button title="Restore this item" onClick={() => void restore(p)}><Icon n="refresh" /></button>
-                  : isAdmin ? <><button title="Edit item and prices" onClick={() => setEdit(p)}><Icon n="edit" /></button><button title="Stock count: correct the store quantity" onClick={() => setCount(p)}><Icon n="layers" /></button><button title="Delete item" onClick={() => void del(p)}><Icon n="trash" /></button></>
+                  : isAdmin ? <><button title="Edit item and prices" onClick={() => setEdit(p)}><Icon n="edit" /></button>{noStore ? null : <button title="Stock count: correct the store quantity" onClick={() => setCount(p)}><Icon n="layers" /></button>}<button title="Delete item" onClick={() => void del(p)}><Icon n="trash" /></button></>
                   : <button title="Receive from supplier" onClick={() => setRecv(p)}><Icon n="plus" /></button>}</div></td>
               </tr>); })}
           </tbody></table>}
