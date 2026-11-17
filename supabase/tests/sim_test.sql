@@ -891,6 +891,9 @@ select t.put('lno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text,
 select t.put('lno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('arep0', public.sales_report(current_date, current_date, t.get('gom')::uuid)::text);
+select t.as('00000000-0000-0000-0000-00000000000c');
 select t.put('lrep0', public.sales_report(current_date, current_date)::text), t.put('lseen0', (select count(*)::text from invoices));
 -- at 2850 CDF to the dollar the limit is 988 950 CDF: a sale of exactly that shows, 10 CDF more does not
 select public.submit_invoice(t.csale(t.get('lno1'), jsonb_build_array(jsonb_build_object('product_id', t.get('sh1'), 'mult', 1, 'qty', 1, 'price', 988950))));
@@ -899,10 +902,10 @@ select t.ok((public.submit_invoice(t.csale(t.get('lno2'), jsonb_build_array(json
 select t.ok((select count(*) from invoices) = t.get('lseen0')::int + 1 and exists (select 1 from invoices where no = t.get('lno1')) and not exists (select 1 from invoices where no = t.get('lno2')),
   'the Shop Admin sees the sale of 347 USD, not the one above it');
 select t.put('lrep1', public.sales_report(current_date, current_date)::text);
-select t.ok((t.get('lrep1')::jsonb->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 1 and (t.get('lrep1')::jsonb->>'total')::bigint = (t.get('lrep0')::jsonb->>'total')::bigint + 988950,
-  'the Shop Admin''s report counts only the sale within the limit');
+select t.ok((t.get('lrep1')::jsonb->>'total_usd')::numeric <= 347, 'the Shop Admin''s report never passes the limit for the day');
 select t.ok((t.get('lrep1')::jsonb->'slips'->0->>'value_fc')::bigint = (t.get('lrep1')::jsonb->>'total')::bigint
-  and not exists (select 1 from jsonb_array_elements(t.get('lrep1')::jsonb->'invoices') i where i->>'no' = t.get('lno2')), 'nor do the day end slip and the report''s invoices hold it');
+  and not exists (select 1 from jsonb_array_elements(t.get('lrep1')::jsonb->'invoices') i where i->>'no' in (t.get('lno1'), t.get('lno2'))),
+  'the day end slip agrees with it, and neither big sale is in it');
 reset role;
 select t.put('lover', (select id::text from invoices where no = t.get('lno2'))), t.put('lat', (select id::text from invoices where no = t.get('lno1')));
 set role authenticated;
@@ -911,14 +914,14 @@ select t.ok((select count(*) from invoice_items where invoice_id = t.get('lover'
 -- the Admin sees both, in the list and in the report
 select t.as('00000000-0000-0000-0000-00000000000a');
 select t.ok((select count(*) from invoices where no in (t.get('lno1'), t.get('lno2'))) = 2 and (select count(*) from invoice_items where invoice_id = t.get('lover')::uuid) = 1, 'the Admin sees every sale');
-select t.ok((public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total')::bigint = (t.get('lrep0')::jsonb->>'total')::bigint + 988950 + 988960
-  and (public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 2, 'the Admin''s report has every sale');
+select t.ok((public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total')::bigint = (t.get('arep0')::jsonb->>'total')::bigint + 988950 + 988960
+  and (public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n')::int = (t.get('arep0')::jsonb->>'n')::int + 2, 'the Admin''s report has every sale');
 reset role;
 -- no limit: the Shop Admin sees everything again
 update settings set shop_sales_limit_usd = null where id = 1;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
-select t.ok(exists (select 1 from invoices where no = t.get('lno2')) and (public.sales_report(current_date, current_date)->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 2,
+select t.ok(exists (select 1 from invoices where no = t.get('lno2')) and (public.sales_report(current_date, current_date)->>'n')::int = (t.get('arep0')::jsonb->>'n')::int + 2,
   'with no limit set the Shop Admin sees every sale');
 reset role;
 update settings set shop_sales_limit_usd = 347 where id = 1;
@@ -943,7 +946,7 @@ select t.ok(not exists (select 1 from invoices where no = t.get('lno2')), 'after
 select t.ok((public.open_invoices('4821')->>'ok')::boolean, 'the Invoices passcode opens the tab');
 select t.ok(exists (select 1 from invoices where no = t.get('lno2')) and (select count(*) from invoice_items where invoice_id = t.get('lover')::uuid) = 1,
   'with the tab open the Shop Admin sees every invoice, also above the limit');
-select t.ok((public.sales_report(current_date, current_date)->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 1, 'the sales figures on screen keep the limit while the tab is open');
+select t.ok((public.sales_report(current_date, current_date)->>'total_usd')::numeric <= 347, 'the sales figures on screen keep the limit while the tab is open');
 -- an invoice above the limit is edited as usual: a 5% discount, then taken back
 select public.edit_invoice(t.get('lover')::uuid, '[{"line_no":1,"qty":1}]', 5, 'Discount agreed with the customer');
 select t.ok((select total from invoices where id = t.get('lover')::uuid) = 939510, 'the Shop Admin edits an invoice above the limit as usual (5% off 988 960)');
@@ -958,8 +961,8 @@ select t.ok(not exists (select 1 from invoices where no = t.get('lno2')), 'the t
 -- the shift end report: every sale of the day, for its own passcode
 select t.ok((public.day_end_report(current_date, '4821')->>'error') = 'Wrong passcode', 'the Invoices passcode does not print the shift end report');
 select t.put('lslip', public.day_end_report(current_date, '7735')::text);
-select t.ok((t.get('lslip')::jsonb->>'ok')::boolean and (t.get('lslip')::jsonb->'slip'->>'n')::int = (t.get('lrep0')::jsonb->>'n')::int + 2
-  and (t.get('lslip')::jsonb->'slip'->>'value_fc')::bigint = (t.get('lrep0')::jsonb->>'total')::bigint + 988950 + 988960,
+select t.ok((t.get('lslip')::jsonb->>'ok')::boolean and (t.get('lslip')::jsonb->'slip'->>'n')::int = (t.get('arep0')::jsonb->>'n')::int + 2
+  and (t.get('lslip')::jsonb->'slip'->>'value_fc')::bigint = (t.get('arep0')::jsonb->>'total')::bigint + 988950 + 988960,
   'with its passcode the shift end report has every sale of the day, also above the limit');
 select t.ok((t.get('lslip')::jsonb->'slip'->>'collected')::bigint - (t.get('lslip')::jsonb->'slip'->>'returned')::bigint = (t.get('lslip')::jsonb->'slip'->>'value_fc')::bigint,
   'and its balance is the value of the invoices');
@@ -1209,6 +1212,51 @@ select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_rate('sales', 2850), public.save_rate('book', 2900);
 reset role;
 update settings set features = features - 'usd_pay' where id = 1;
+
+-- ===== the Shop Admin's figures stop at the shop's daily limit =====
+-- the limit is set to the day's sales so far plus 20 USD, then three sales of 10 USD are made: two fit, one does not
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('dlA', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total_usd'),
+       t.put('dlN', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n'),
+       t.put('dlF', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total');
+select t.put('dlno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('dlno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.put('dlno3', (select 'GOM-' || code || '-' || lpad((last_seq + 3)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select t.as('00000000-0000-0000-0000-00000000000c');
+-- 23 500 CDF at 2 350 is exactly 10 USD
+select public.submit_invoice(t.csale(t.get('dlno1'), jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 23500))) || '{"rate": 2350}');
+select public.submit_invoice(t.csale(t.get('dlno2'), jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 23500))) || '{"rate": 2350}');
+select public.submit_invoice(t.csale(t.get('dlno3'), jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 23500))) || '{"rate": 2350}');
+reset role;
+update settings set shop_sales_limit_usd = t.get('dlA')::numeric + 20 where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('dl1', public.sales_report(current_date, current_date)::text);
+reset role;
+select t.ok((t.get('dl1')::jsonb->>'n')::int = t.get('dlN')::int + 2, 'the Shop Admin sees the day only as far as the limit: two of the three new sales');
+select t.ok(round((t.get('dl1')::jsonb->>'total_usd')::numeric, 2) = round(t.get('dlA')::numeric + 20, 2), 'the total shown stops exactly at the limit');
+select t.ok((t.get('dl1')::jsonb->>'total')::bigint = t.get('dlF')::bigint + 47000, 'in Francs it is the day so far plus the two sales that fit');
+select t.ok((t.get('dl1')::jsonb->>'capped')::boolean, 'and the report says the figures stop at the limit');
+select t.ok(not exists (select 1 from jsonb_array_elements(t.get('dl1')::jsonb->'invoices') i where i->>'no' = t.get('dlno3')), 'the sale that did not fit is not in the list');
+select t.ok((select sum((x->>'total')::bigint) from jsonb_array_elements(t.get('dl1')::jsonb->'invoices') x) = (t.get('dl1')::jsonb->>'total')::bigint,
+  'the invoice list adds up to the total, so the screen cannot be added up past the limit');
+select t.ok((select sum((c->>'val')::bigint) from jsonb_array_elements(t.get('dl1')::jsonb->'by_cashier') c) = (t.get('dl1')::jsonb->>'total')::bigint
+  or (select sum((c->>'v')::bigint) from jsonb_array_elements(t.get('dl1')::jsonb->'by_cashier') c) = (t.get('dl1')::jsonb->>'total')::bigint, 'and so do the cashiers');
+select t.ok((t.get('dl1')::jsonb->'slips'->0->>'value_fc')::bigint = (t.get('dl1')::jsonb->>'total')::bigint, 'and the slip in that report');
+-- the shift end report, with its passcode, still has every sale of the day
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'day_end', '4242');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.shift_end_report('4242', 'day', null, current_date)->'slip'->>'value_fc')::bigint = t.get('dlF')::bigint + 70500,
+  'the shift end report still prints every sale of the day, all three');
+-- the Admin is never capped
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok(not (public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'capped')::boolean
+  and (public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n')::int = t.get('dlN')::int + 3, 'the Admin sees every sale, with no limit');
+reset role;
+update settings set shop_sales_limit_usd = 347 where id = 1;
 
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;

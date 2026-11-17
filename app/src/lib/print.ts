@@ -137,6 +137,8 @@ export interface Report {
   by_day: { day: string; n: number; q: number; d: number; v: number }[]; top: { name: string; qty: number; val: number }[];
   by_cashier: { name: string; v: number }[]; slips: (Slip & { shop_id: string; code: string })[];
   invoices: { id: string; no: string; t: string; shop_id: string; cashier_name: string; customer?: string; items: number; disc: number; total: number; edited: boolean }[];
+  /** true when sales were left out to keep the figures under the shop's daily limit (the Shop Admin only) */
+  capped?: boolean;
   /** sales of each category, biggest first, with its items (missing before migration 21) */
   by_category?: CategorySales[];
 }
