@@ -3,7 +3,7 @@
 // the till, start Chrome with --kiosk-printing and set the receipt printer as default.
 import type { Company, Delivery, Invoice, Product, Shop, Statement } from './types';
 import { ctnTxt, pcValue, stockValue, unitsOf } from './units';
-import { dt, esc, fCDF, fNum, fUSD, ld, sum, toCDF, today } from './format';
+import { dt, esc, fCDF, fNum, fUSD, sum, toCDF, today } from './format';
 
 export function printHTML(html: string) {
   const el = document.getElementById('print-area')!;
@@ -133,20 +133,11 @@ export function shiftSlipHTML(s: Slip, user: string, day: string, rate: number, 
   ${row('Date', when)}${row('User', esc(user))}${row('Shop', esc(s.shop_name))}${extra ? row('Till', esc(extra.till ? 'Till ' + extra.till : 'All tills')) : ''}${extra?.shift ? row('Shift', esc(extra.shift)) : ''}${row('TAUX', fc(rate))}${hr}
   ${row('Total Invoice', s.n)}${row('Invoice Value USD', u3(s.value_usd))}${row('Invoice Value CDF', fc(s.value_fc))}${hr}
   ${row('Collected USD', u3(cu))}${row('Collected CDF', fc(cc))}${row('Return USD', u3(0))}${row('Return CDF', fc(s.returned))}${hr}
-  ${bold('Balance USD', u3(cu))}${bold('Balance CDF', fc(cc - s.returned))}${s.day ? daySoFar(s.day, day, row, bold, hr, u3, fc) : ''}</table></div>`;
+  ${bold('Balance USD', u3(cu))}${bold('Balance CDF', fc(cc - s.returned))}${s.day ? daySoFar(s.day, bold, hr, fc) : ''}</table></div>`;
 }
-/** The day so far, under a shift from the second shift of the day: every line is the sum of that line on today's slips. */
-function daySoFar(d: NonNullable<Slip['day']>, day: string, row: (a: string, b: string | number) => string, bold: (a: string, b: string) => string,
-  hr: string, u3: (n: number) => string, fc: (n: number) => string) {
-  const t = new Date(d.from), hm = t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  // the first shift can start the evening before, when the last shift of that day was never printed
-  const since = ld(d.from) === day ? hm : `${String(t.getDate()).padStart(2, '0')}-${String(t.getMonth() + 1).padStart(2, '0')} ${hm}`;
-  const cu = Number(d.collected_usd ?? 0), cc = Number(d.collected_cdf ?? d.collected);
-  return `${hr}<tr><td colspan="2" style="text-align:center;font-weight:700;font-size:14px;padding-top:2px">Day so far: shifts 1 to ${d.shifts}</td></tr>
-  <tr><td colspan="2" style="text-align:center" class="small">since ${since}</td></tr>${hr}
-  ${row('Total Invoice', d.n)}${row('Invoice Value USD', u3(d.value_usd))}${row('Invoice Value CDF', fc(d.value_fc))}${hr}
-  ${row('Collected USD', u3(cu))}${row('Collected CDF', fc(cc))}${row('Return CDF', fc(d.returned))}${hr}
-  ${bold('Balance USD', u3(cu))}${bold('Balance CDF', fc(cc - d.returned))}`;
+/** From the second shift of the day: one line with the total of the day, which is today's shift slips added up. */
+function daySoFar(d: NonNullable<Slip['day']>, bold: (a: string, b: string) => string, hr: string, fc: (n: number) => string) {
+  return `${hr}${bold('Total of the day', fc(d.value_fc))}`;
 }
 
 export interface Report {

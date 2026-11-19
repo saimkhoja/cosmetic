@@ -1,9 +1,9 @@
--- QuickSales: from the second shift of the day, the shift end report also shows the day so far.
--- Printing shift 2 (or 3, ...) adds a section with every shift printed today for the same choice (all tills
--- together, or the one till): the invoices, their value in USD and CDF, and the cash, combined. It is today's shift
--- slips added up line by line, so every line agrees with the slips the cashier already holds.
+-- QuickSales: from the second shift of the day, the shift end report shows the total of the day.
+-- Printing shift 2 (or 3, ...) keeps, inside the slip, today's shift slips added up for the same choice (all tills
+-- together, or the one till), and the slip prints them as one line, "Total of the day". It is the slips that are
+-- added, not the sales counted again, so the total agrees with the slips the cashier already holds.
 -- It is kept inside the slip, so a shift printed again shows the day as it stood when that shift was printed.
--- The first shift of the day has no such section: it would repeat the shift's own figures.
+-- The first shift of the day has no such line: it would repeat the shift's own figure.
 -- Already running QuickSales? Run this file once, after 20261111000011_keep_switches.sql. It changes no data.
 
 -- stop at once if the update before this one was not run
