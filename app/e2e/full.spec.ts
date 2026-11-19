@@ -46,6 +46,8 @@ async function openTill(page: Page) {
   await page.goto('/till');
   await expect(page.locator('.ptile').first()).toBeVisible();
 }
+/** Every "Total Invoice" on the slip in view: the shift's own first, then the day so far when there is one. */
+const slipTotals = async (page: Page) => [...(await page.locator('#slips').innerText()).matchAll(/Total Invoice\s*:\s*(\d+)/g)].map((m) => Number(m[1]));
 const prints = (page: Page) => page.evaluate(() => (window as unknown as { __prints: string[] }).__prints);
 
 test('a full day in SIM', async ({ browser }) => {
@@ -366,6 +368,7 @@ test('a full day in SIM', async ({ browser }) => {
   const txt = await slip.innerText();
   const n = (k: string) => Number(new RegExp(k + '\\s*:\\s*([\\d.]+)').exec(txt)![1]);
   expect(n('Total Invoice')).toBe(3);
+  expect(txt).not.toContain('Day so far');                      // the first shift of the day would only repeat itself
   expect(n('Return CDF')).toBe(94050);                          // the returned dozen
   expect(n('Balance CDF')).toBe(n('Invoice Value CDF'));
   expect(txt).not.toContain('Shea body lotion');               // no item lines on the slip
@@ -734,6 +737,9 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
   await expect(shop.locator('#slips')).toContainText('Shift End Report');
   await expect(shop.locator('#slips')).toContainText('All tills');
+  await expect(shop.locator('#slips')).toContainText('Day so far: shifts 1 to 2');           // from shift 2 the day so far is added
+  const [s2, d2] = await slipTotals(shop);
+  expect(d2).toBe(3 + s2);                                                                // shift 1 had 3 invoices
   await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
   for (const [cust, cartons] of [['Within the limit', 3], ['Above the limit', 4]] as const) {
     await shop.goto('/till');
@@ -772,6 +778,8 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
   await expect(shop.locator('#slips')).toContainText('Shift End Report');
   await expect(shop.locator('#slips')).toContainText(/Shift\s*:\s*3,/);
+  await expect(shop.locator('#slips')).toContainText('Day so far: shifts 1 to 3');
+  expect((await slipTotals(shop))[1]).toBe(3 + s2 + 2);                                   // the three shift slips, added up
   expect(await total()).toBe(2);
   await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
   await expect(shop.locator('.kpi', { hasText: 'Sales, VAT included' })).toContainText(`${shown} invoices`);   // printing a shift does not change the day

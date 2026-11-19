@@ -1094,12 +1094,34 @@ select t.ok((t.get('shf3')::jsonb->>'shift_no')::int = 3 and (t.get('shf3')::jso
   'printing one till does not close the combined shift');
 select t.ok((t.get('shf3')::jsonb->'slip'->>'returned')::bigint = t.get('back')::bigint and t.get('back')::bigint > 0
   and (t.get('shf3')::jsonb->'slip'->>'collected')::bigint = 25650 + 51300, 'a correction counts in the shift it was made in');
-select t.ok((public.shift_end_report('2468', 'close', t.get('dev1')::uuid)->'slip'->>'n')::int = 0, 'the till''s next shift starts fresh');
+-- from the second shift of the day the slip also carries the day so far, which is the sum of today's shifts
+select t.ok(not (t.get('shf1')::jsonb->'slip' ? 'day'), 'the first shift of the day has no day-so-far section: it would repeat itself');
+select t.ok((t.get('shf2')::jsonb->'slip'->'day'->>'shifts')::int = 2
+  and (t.get('shf2')::jsonb->'slip'->'day'->>'n')::int = (t.get('shf1')::jsonb->'slip'->>'n')::int + (t.get('shf2')::jsonb->'slip'->>'n')::int,
+  'shift 2 carries the day so far: shifts 1 and 2 together');
+select t.ok((t.get('shf3')::jsonb->'slip'->'day'->>'shifts')::int = 3
+  and (t.get('shf3')::jsonb->'slip'->'day'->>'n')::int
+    = (t.get('shf1')::jsonb->'slip'->>'n')::int + (t.get('shf2')::jsonb->'slip'->>'n')::int + (t.get('shf3')::jsonb->'slip'->>'n')::int,
+  'shift 3 carries the invoices of all three shifts');
+select t.ok((t.get('shf3')::jsonb->'slip'->'day'->>'value_fc')::bigint
+    = (t.get('shf1')::jsonb->'slip'->>'value_fc')::bigint + (t.get('shf2')::jsonb->'slip'->>'value_fc')::bigint + (t.get('shf3')::jsonb->'slip'->>'value_fc')::bigint
+  and (t.get('shf3')::jsonb->'slip'->'day'->>'collected')::bigint
+    = (t.get('shf1')::jsonb->'slip'->>'collected')::bigint + (t.get('shf2')::jsonb->'slip'->>'collected')::bigint + (t.get('shf3')::jsonb->'slip'->>'collected')::bigint
+  and (t.get('shf3')::jsonb->'slip'->'day'->>'returned')::bigint
+    = (t.get('shf1')::jsonb->'slip'->>'returned')::bigint + (t.get('shf2')::jsonb->'slip'->>'returned')::bigint + (t.get('shf3')::jsonb->'slip'->>'returned')::bigint,
+  'and its value, the cash collected and the money given back add up exactly with the three shift slips');
+select t.ok((t.get('shf3')::jsonb->'slip'->'day'->>'from')::timestamptz = (t.get('shf1')::jsonb->>'from')::timestamptz, 'the day so far starts where shift 1 started');
+select t.ok(not (t.get('t1')::jsonb->'slip' ? 'day'), 'a till''s first shift has no day-so-far section either');
+select t.put('t2', public.shift_end_report('2468', 'close', t.get('dev1')::uuid)::text);
+select t.ok((t.get('t2')::jsonb->'slip'->>'n')::int = 0, 'the till''s next shift starts fresh');
+select t.ok((t.get('t2')::jsonb->'slip'->'day'->>'n') = (t.get('t1')::jsonb->'slip'->>'n'), 'and its day so far is that till''s own shifts, not all tills''');
 -- the day keeps every shift together
 select t.ok((public.shift_end_report('2468', 'day', null, current_date)->'slip'->>'n')::int = (t.get('day0')::jsonb->'slip'->>'n')::int + 2, 'the day end report still has the whole day');
 -- reprint: the same as printed, even after more sales
 select t.ok((public.shift_end_report('2468', 'reprint', null, null, (select id from shift_closes where shift_no = 1 and device_id is null and shop_id = t.get('gom')::uuid))->'slip')
   = (t.get('shf1')::jsonb->'slip'), 'a printed shift prints again the same');
+select t.ok((public.shift_end_report('2468', 'reprint', null, null, (select id from shift_closes where shift_no = 3 and device_id is null and shop_id = t.get('gom')::uuid))->'slip'->'day')
+  = (t.get('shf3')::jsonb->'slip'->'day'), 'printed again, a later shift keeps the day so far as it stood then');
 select t.ok((select count(*) from shift_closes) = 5, 'the Shop Admin sees the list of printed shifts');
 select t.fails($$select slip from public.shift_closes$$, 'permission denied', 'but not their amounts without the passcode');
 select t.as('00000000-0000-0000-0000-00000000000e');

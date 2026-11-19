@@ -53,13 +53,14 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    31. `supabase/migrations/20261111000009_daily_sales_limit.sql` (the Shop Admin's sales figures stop at the shop's daily limit: the day's sales are counted while they fit under 347 USD, instead of only hiding single sales above it; the shift end report still has every sale)
    32. `supabase/migrations/20261111000010_usd_at_till_rate.sql` (sales in dollars are counted at the rate the till takes dollars, so the shift end report's Invoice Value USD ties with Collected USD and the Admin's sales in dollars match the cash)
    33. `supabase/migrations/20261111000011_keep_switches.sql` (saving Settings no longer turns off a switch the page did not send, so an older app still cached on a computer cannot switch off Accept payment in USD or any other option; changes no data)
+   34. `supabase/migrations/20261111000012_shift_day_total.sql` (from the second shift of the day, the shift end report also prints the day so far: today's shift slips added up line by line; changes no data)
 
-   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 to 33). Run it **before** the new app goes live. They keep your data:
+   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 to 34). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
 
-   **Check what an installation has.** Run `supabase/scripts/check_migrations.sql` in the SQL Editor: it lists files 10 to 33 as done or MISSING and changes nothing. Never skip a file: each one rebuilds some functions from the newest version it knows, and those use what the earlier files added (for example the Reports page fails with "column inv.paid_usd does not exist", and sales fail too, when 14 was skipped). Files 18 to 21 stop with a message naming the file to run first. If one was missed, run it and then every later file again, in order (they are safe to run twice): with 14 to 17 missing, run 14, 15, 16, 17, then 18, 19, 20, 21.
+   **Check what an installation has.** Run `supabase/scripts/check_migrations.sql` in the SQL Editor: it lists files 10 to 34 as done or MISSING and changes nothing. Never skip a file: each one rebuilds some functions from the newest version it knows, and those use what the earlier files added (for example the Reports page fails with "column inv.paid_usd does not exist", and sales fail too, when 14 was skipped). Files 18 to 21 stop with a message naming the file to run first. If one was missed, run it and then every later file again, in order (they are safe to run twice): with 14 to 17 missing, run 14, 15, 16, 17, then 18, 19, 20, 21.
 
    To check, run this in a new query. It should return `35 tables, 55 functions`:
    ```sql
