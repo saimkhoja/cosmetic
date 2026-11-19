@@ -566,7 +566,12 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb, 'saving settings without the switches turns them off');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb,
+  'saving settings without the switches leaves them as they were, so an older app cannot turn one off');
+-- sending a switch as off does turn it off
+select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":false,"barcode":false}'::jsonb));
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb,
+  'and sending it as off does turn it off');
 reset role;
 
 -- ===== till operators sell directly when the Admin turns it on =====
@@ -1120,7 +1125,7 @@ select public.record_reprint((select id from invoices where no = t.get('cno9')))
 select t.ok((select printed - copies from invoices where no = t.get('cno9')) = 1, 'a duplicate counts as one duplicate');
 select t.ok((select copies from invoices where no = t.get('sno1')) = 2, 'invoices made before keep their two copies');
 select t.as('00000000-0000-0000-0000-00000000000a');
-select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features - 'one_copy') from settings));
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features || '{"one_copy": false}') from settings));
 select t.ok(not (select (features->>'one_copy')::boolean from settings), 'and back to two copies');
 reset role;
 
@@ -1156,7 +1161,7 @@ select t.ok((select status from grns where id = t.get('grnd')::uuid) = 'billed',
 select t.ok(coalesce((select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('lotion')::uuid), 0) = 0
   or (select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('lotion')::uuid) is not null, 'only the chosen shop receives the goods');
 -- switching the central store back on: goods arrive there again
-select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features - 'no_warehouse') from settings));
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features || '{"no_warehouse": false}') from settings));
 select public.receive_goods(jsonb_build_object('supplier_id', t.get('sup'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1))));
 select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = t.get('whq0')::int + 1, 'with the central store back on, goods arrive there again');
 select t.ok((select shop_id from grns order by received_at desc, no desc limit 1) is null, 'and that receipt has no shop');
