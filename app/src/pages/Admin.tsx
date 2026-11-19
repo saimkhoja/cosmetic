@@ -192,7 +192,7 @@ const SWITCHES: Record<string, string> = {
   till_sells: 'Till operators sell directly: they take the cash and print the invoice without the shop admin approving the order (a discount only with the Discount passcode you give them under Users)',
   barcode: 'Barcode scanning: items have barcodes (several per item if needed), and scanning any of them at the till adds 1 pc to the sale',
   cash_change: 'Enter the cash received: the till shows the change to give and prints the cash received and the change on the receipt',
-  usd_pay: 'Accept payment in USD (and CDF): the cashier enters the dollars and Francs received at the sales rate; change is in CDF, or whole dollars plus CDF',
+  usd_pay: 'Accept payment in USD (and CDF): the cashier enters the dollars and Francs received, the dollars counted at the internal rate; change is in CDF, or whole dollars plus CDF',
   one_copy: 'Print one copy of each invoice: the customer copy only, at every till. Off: two copies, one for the customer and one for the shop',
   no_warehouse: 'No central store: the business keeps no warehouse. Goods received from a supplier go straight into a shop you choose, and the tabs that move stock between the store and the shops (Deliveries, Stock requests, Returns to the store) are hidden',
 };

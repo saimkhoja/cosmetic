@@ -114,7 +114,11 @@ export function deliveryNoteHTML(d: Delivery, shop: Shop, c: Company, products: 
   <div style="display:flex;justify-content:space-between;margin-top:26px;gap:20px"><div>Sent by: ${esc(d.created_by_name)}<br><br>Signature ____________</div><div>Received by (shop):${d.status === 'received' ? ` ${esc(d.received_by_name)}, ${dt(d.received_at!)}${d.received_note ? `<br>Note: ${esc(d.received_note)}` : ''}` : ''}<br><br>Signature ____________</div></div></div>`;
 }
 
-export interface Slip { shop_name: string; n: number; value_fc: number; value_usd: number; collected: number; returned: number; collected_usd?: number; collected_cdf?: number }
+export interface Slip {
+  shop_name: string; n: number; value_fc: number; value_usd: number; collected: number; returned: number; collected_usd?: number; collected_cdf?: number;
+  /** from the second shift of the day: today's shift slips added up line by line, and where the first one started */
+  day?: Omit<Slip, 'shop_name' | 'day'> & { from: string; shifts: number };
+}
 /** Day end slip in the shop's shift end format. Collected USD is what was paid in dollars (when USD payment is on); returns are in CDF. */
 /** extra: the till (combined when absent) and the shift (number and times) of a shift end report. */
 export function shiftSlipHTML(s: Slip, user: string, day: string, rate: number, extra?: { till?: string | null; shift?: string }) {
@@ -129,7 +133,11 @@ export function shiftSlipHTML(s: Slip, user: string, day: string, rate: number, 
   ${row('Date', when)}${row('User', esc(user))}${row('Shop', esc(s.shop_name))}${extra ? row('Till', esc(extra.till ? 'Till ' + extra.till : 'All tills')) : ''}${extra?.shift ? row('Shift', esc(extra.shift)) : ''}${row('TAUX', fc(rate))}${hr}
   ${row('Total Invoice', s.n)}${row('Invoice Value USD', u3(s.value_usd))}${row('Invoice Value CDF', fc(s.value_fc))}${hr}
   ${row('Collected USD', u3(cu))}${row('Collected CDF', fc(cc))}${row('Return USD', u3(0))}${row('Return CDF', fc(s.returned))}${hr}
-  ${bold('Balance USD', u3(cu))}${bold('Balance CDF', fc(cc - s.returned))}</table></div>`;
+  ${bold('Balance USD', u3(cu))}${bold('Balance CDF', fc(cc - s.returned))}${s.day ? daySoFar(s.day, bold, hr, fc) : ''}</table></div>`;
+}
+/** From the second shift of the day: one line with the total of the day, which is today's shift slips added up. */
+function daySoFar(d: NonNullable<Slip['day']>, bold: (a: string, b: string) => string, hr: string, fc: (n: number) => string) {
+  return `${hr}${bold('Total of the day', fc(d.value_fc))}`;
 }
 
 export interface Report {

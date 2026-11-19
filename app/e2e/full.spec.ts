@@ -41,6 +41,13 @@ async function openGroup(page: Page, id: string) {
   if ((await g.getAttribute('open')) === null) await g.locator('summary').click();
   await expect(g).toHaveAttribute('open', '');
 }
+/** Opens the till and waits until it has read its items, so a scan is not lost while it loads. */
+async function openTill(page: Page) {
+  await page.goto('/till');
+  await expect(page.locator('.ptile').first()).toBeVisible();
+}
+/** A figure on the slip in view, by its label, e.g. "Invoice Value CDF" or "Total of the day". */
+const slipValue = async (page: Page, label: string) => Number(new RegExp(label + '\\s*:\\s*([\\d.]+)').exec(await page.locator('#slips').innerText())![1]);
 const prints = (page: Page) => page.evaluate(() => (window as unknown as { __prints: string[] }).__prints);
 
 test('a full day in SIM', async ({ browser }) => {
@@ -361,6 +368,8 @@ test('a full day in SIM', async ({ browser }) => {
   const txt = await slip.innerText();
   const n = (k: string) => Number(new RegExp(k + '\\s*:\\s*([\\d.]+)').exec(txt)![1]);
   expect(n('Total Invoice')).toBe(3);
+  expect(txt).not.toContain('Total of the day');                // the first shift of the day would only repeat itself
+  const v1 = n('Invoice Value CDF');
   expect(n('Return CDF')).toBe(94050);                          // the returned dozen
   expect(n('Balance CDF')).toBe(n('Invoice Value CDF'));
   expect(txt).not.toContain('Shea body lotion');               // no item lines on the slip
@@ -543,6 +552,7 @@ test('a full day in SIM', async ({ browser }) => {
   await sq.fill('46001234567890'); await sq.press('Enter');                                       // the scanner typed into the quantity box
   await expect(sq).toHaveValue('5');
   await expect(op.locator('#picked')).toContainText('5 ctn (120 pcs)');
+  await expect(sq).toBeFocused();                                                                // the cursor is back in the quantity box
   await op.fill('#pscan', '9876543210'); await op.press('#pscan', 'Enter');
   await expect(op.locator('.modal')).toContainText('No item has the barcode 9876543210');
   await op.locator('.modal footer').getByRole('button', { name: 'Cancel' }).click();             // nothing received
@@ -648,7 +658,7 @@ test('a full day in SIM', async ({ browser }) => {
   await openGroup(admin, 'payment');
   await admin.check('#s-usd_pay');
   await Promise.all([admin.waitForResponse((r) => r.url().includes('/rpc/save_settings') && r.ok()), admin.getByRole('button', { name: 'Save settings' }).click()]);
-  await till.goto('/till');
+  await openTill(till);
   await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
   await till.getByRole('button', { name: 'Take payment' }).click();
   await expect(till.locator('#usddue')).toHaveText('$5.00');                                     // 14 250 / 2 850
@@ -662,7 +672,7 @@ test('a full day in SIM', async ({ browser }) => {
   expect(usdRcpt).toMatch(/Paid USD\s*20\.00/); expect(usdRcpt).toMatch(/Change\s*\$15 \+ 0\.00/); expect(usdRcpt).toContain('1 USD = 2850 CDF');
 
   // ---- selling directly, the till operator gives a discount with the same passcode: 1 250 CDF off 14 250
-  await till.goto('/till');
+  await openTill(till);
   await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
   await till.click('#discbtn');
   await till.fill('#dcode', '5566'); await till.click('#dcodebtn');
@@ -728,6 +738,8 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
   await expect(shop.locator('#slips')).toContainText('Shift End Report');
   await expect(shop.locator('#slips')).toContainText('All tills');
+  const v2 = await slipValue(shop, 'Invoice Value CDF');                                    // from shift 2, one line with the day's total
+  expect(await slipValue(shop, 'Total of the day')).toBe(v1 + v2);
   await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
   for (const [cust, cartons] of [['Within the limit', 3], ['Above the limit', 4]] as const) {
     await shop.goto('/till');
@@ -766,6 +778,7 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
   await expect(shop.locator('#slips')).toContainText('Shift End Report');
   await expect(shop.locator('#slips')).toContainText(/Shift\s*:\s*3,/);
+  expect(await slipValue(shop, 'Total of the day')).toBe(v1 + v2 + await slipValue(shop, 'Invoice Value CDF'));   // the three slips added up
   expect(await total()).toBe(2);
   await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
   await expect(shop.locator('.kpi', { hasText: 'Sales, VAT included' })).toContainText(`${shown} invoices`);   // printing a shift does not change the day
@@ -802,7 +815,7 @@ test('a full day in SIM', async ({ browser }) => {
   await shop.fill('#slipcode', '7735'); await shop.click('#slipbtn');
   await expect(shop.locator('#slips')).toContainText('Shift End Report');
   await shop.locator('.modal footer').getByRole('button', { name: 'Close' }).click();
-  await till.goto('/till');                                                                // the till picks up the rates
+  await openTill(till);                                                                // the till picks up the rates
   await till.fill('#scan', '6001234567890'); await till.press('#scan', 'Enter');
   await till.getByRole('button', { name: 'Take payment' }).click();
   await expect(till.locator('.modal')).toContainText('1 USD = 2 950 CDF');                 // the internal rate, not 3 000

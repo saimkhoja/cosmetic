@@ -566,7 +566,12 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb, 'saving settings without the switches turns them off');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb,
+  'saving settings without the switches leaves them as they were, so an older app cannot turn one off');
+-- sending a switch as off does turn it off
+select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":false,"barcode":false}'::jsonb));
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb,
+  'and sending it as off does turn it off');
 reset role;
 
 -- ===== till operators sell directly when the Admin turns it on =====
@@ -1089,12 +1094,34 @@ select t.ok((t.get('shf3')::jsonb->>'shift_no')::int = 3 and (t.get('shf3')::jso
   'printing one till does not close the combined shift');
 select t.ok((t.get('shf3')::jsonb->'slip'->>'returned')::bigint = t.get('back')::bigint and t.get('back')::bigint > 0
   and (t.get('shf3')::jsonb->'slip'->>'collected')::bigint = 25650 + 51300, 'a correction counts in the shift it was made in');
-select t.ok((public.shift_end_report('2468', 'close', t.get('dev1')::uuid)->'slip'->>'n')::int = 0, 'the till''s next shift starts fresh');
+-- from the second shift of the day the slip also carries the day so far, which is the sum of today's shifts
+select t.ok(not (t.get('shf1')::jsonb->'slip' ? 'day'), 'the first shift of the day has no day-so-far section: it would repeat itself');
+select t.ok((t.get('shf2')::jsonb->'slip'->'day'->>'shifts')::int = 2
+  and (t.get('shf2')::jsonb->'slip'->'day'->>'n')::int = (t.get('shf1')::jsonb->'slip'->>'n')::int + (t.get('shf2')::jsonb->'slip'->>'n')::int,
+  'shift 2 carries the day so far: shifts 1 and 2 together');
+select t.ok((t.get('shf3')::jsonb->'slip'->'day'->>'shifts')::int = 3
+  and (t.get('shf3')::jsonb->'slip'->'day'->>'n')::int
+    = (t.get('shf1')::jsonb->'slip'->>'n')::int + (t.get('shf2')::jsonb->'slip'->>'n')::int + (t.get('shf3')::jsonb->'slip'->>'n')::int,
+  'shift 3 carries the invoices of all three shifts');
+select t.ok((t.get('shf3')::jsonb->'slip'->'day'->>'value_fc')::bigint
+    = (t.get('shf1')::jsonb->'slip'->>'value_fc')::bigint + (t.get('shf2')::jsonb->'slip'->>'value_fc')::bigint + (t.get('shf3')::jsonb->'slip'->>'value_fc')::bigint
+  and (t.get('shf3')::jsonb->'slip'->'day'->>'collected')::bigint
+    = (t.get('shf1')::jsonb->'slip'->>'collected')::bigint + (t.get('shf2')::jsonb->'slip'->>'collected')::bigint + (t.get('shf3')::jsonb->'slip'->>'collected')::bigint
+  and (t.get('shf3')::jsonb->'slip'->'day'->>'returned')::bigint
+    = (t.get('shf1')::jsonb->'slip'->>'returned')::bigint + (t.get('shf2')::jsonb->'slip'->>'returned')::bigint + (t.get('shf3')::jsonb->'slip'->>'returned')::bigint,
+  'and its value, the cash collected and the money given back add up exactly with the three shift slips');
+select t.ok((t.get('shf3')::jsonb->'slip'->'day'->>'from')::timestamptz = (t.get('shf1')::jsonb->>'from')::timestamptz, 'the day so far starts where shift 1 started');
+select t.ok(not (t.get('t1')::jsonb->'slip' ? 'day'), 'a till''s first shift has no day-so-far section either');
+select t.put('t2', public.shift_end_report('2468', 'close', t.get('dev1')::uuid)::text);
+select t.ok((t.get('t2')::jsonb->'slip'->>'n')::int = 0, 'the till''s next shift starts fresh');
+select t.ok((t.get('t2')::jsonb->'slip'->'day'->>'n') = (t.get('t1')::jsonb->'slip'->>'n'), 'and its day so far is that till''s own shifts, not all tills''');
 -- the day keeps every shift together
 select t.ok((public.shift_end_report('2468', 'day', null, current_date)->'slip'->>'n')::int = (t.get('day0')::jsonb->'slip'->>'n')::int + 2, 'the day end report still has the whole day');
 -- reprint: the same as printed, even after more sales
 select t.ok((public.shift_end_report('2468', 'reprint', null, null, (select id from shift_closes where shift_no = 1 and device_id is null and shop_id = t.get('gom')::uuid))->'slip')
   = (t.get('shf1')::jsonb->'slip'), 'a printed shift prints again the same');
+select t.ok((public.shift_end_report('2468', 'reprint', null, null, (select id from shift_closes where shift_no = 3 and device_id is null and shop_id = t.get('gom')::uuid))->'slip'->'day')
+  = (t.get('shf3')::jsonb->'slip'->'day'), 'printed again, a later shift keeps the day so far as it stood then');
 select t.ok((select count(*) from shift_closes) = 5, 'the Shop Admin sees the list of printed shifts');
 select t.fails($$select slip from public.shift_closes$$, 'permission denied', 'but not their amounts without the passcode');
 select t.as('00000000-0000-0000-0000-00000000000e');
@@ -1120,7 +1147,7 @@ select public.record_reprint((select id from invoices where no = t.get('cno9')))
 select t.ok((select printed - copies from invoices where no = t.get('cno9')) = 1, 'a duplicate counts as one duplicate');
 select t.ok((select copies from invoices where no = t.get('sno1')) = 2, 'invoices made before keep their two copies');
 select t.as('00000000-0000-0000-0000-00000000000a');
-select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features - 'one_copy') from settings));
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features || '{"one_copy": false}') from settings));
 select t.ok(not (select (features->>'one_copy')::boolean from settings), 'and back to two copies');
 reset role;
 
@@ -1156,7 +1183,7 @@ select t.ok((select status from grns where id = t.get('grnd')::uuid) = 'billed',
 select t.ok(coalesce((select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('lotion')::uuid), 0) = 0
   or (select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('lotion')::uuid) is not null, 'only the chosen shop receives the goods');
 -- switching the central store back on: goods arrive there again
-select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features - 'no_warehouse') from settings));
+select public.save_settings((select jsonb_build_object('rate', rate, 'book_rate', book_rate, 'vat', vat, 'company', company, 'features', features || '{"no_warehouse": false}') from settings));
 select public.receive_goods(jsonb_build_object('supplier_id', t.get('sup'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1))));
 select t.ok((select wh_qty from products where id = t.get('lotion')::uuid) = t.get('whq0')::int + 1, 'with the central store back on, goods arrive there again');
 select t.ok((select shop_id from grns order by received_at desc, no desc limit 1) is null, 'and that receipt has no shop');
@@ -1217,9 +1244,14 @@ update settings set features = features - 'usd_pay' where id = 1;
 -- the limit is set to the day's sales so far plus 20 USD, then three sales of 10 USD are made: two fit, one does not
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
-select t.put('dlA', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total_usd'),
-       t.put('dlN', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n'),
+select t.put('dlN', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n'),
        t.put('dlF', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total');
+reset role;
+-- the limit counts a sale at the rate it was priced at, so the baseline is taken the same way
+select t.put('dlA', (select coalesce(sum(i.total / i.rate), 0)::text from invoices i
+  where i.shop_id = t.get('gom')::uuid and (i.t at time zone (select tz from settings where id = 1))::date = current_date));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
 select t.put('dlno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
 select t.put('dlno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
 select t.put('dlno3', (select 'GOM-' || code || '-' || lpad((last_seq + 3)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
@@ -1235,7 +1267,9 @@ select t.as('00000000-0000-0000-0000-00000000000c');
 select t.put('dl1', public.sales_report(current_date, current_date)::text);
 reset role;
 select t.ok((t.get('dl1')::jsonb->>'n')::int = t.get('dlN')::int + 2, 'the Shop Admin sees the day only as far as the limit: two of the three new sales');
-select t.ok(round((t.get('dl1')::jsonb->>'total_usd')::numeric, 2) = round(t.get('dlA')::numeric + 20, 2), 'the total shown stops exactly at the limit');
+select t.ok((select round(sum(i.total / i.rate), 2) from invoices i
+    where i.id in (select (x->>'id')::uuid from jsonb_array_elements(t.get('dl1')::jsonb->'invoices') x))
+  = round(t.get('dlA')::numeric + 20, 2), 'the sales shown stop exactly at the limit, counted at the rate they were priced at');
 select t.ok((t.get('dl1')::jsonb->>'total')::bigint = t.get('dlF')::bigint + 47000, 'in Francs it is the day so far plus the two sales that fit');
 select t.ok((t.get('dl1')::jsonb->>'capped')::boolean, 'and the report says the figures stop at the limit');
 select t.ok(not exists (select 1 from jsonb_array_elements(t.get('dl1')::jsonb->'invoices') i where i->>'no' = t.get('dlno3')), 'the sale that did not fit is not in the list');
@@ -1257,6 +1291,49 @@ select t.ok(not (public.sales_report(current_date, current_date, t.get('gom')::u
   and (public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n')::int = t.get('dlN')::int + 3, 'the Admin sees every sale, with no limit');
 reset role;
 update settings set shop_sales_limit_usd = 347 where id = 1;
+
+-- ===== sales in dollars are counted at the rate the till takes dollars =====
+-- a 1 000 000 CDF invoice priced at 2 350 and paid with dollars at 2 300
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_rate('sales', 2350), public.save_rate('book', 2300);
+select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'day_end', '9191');
+reset role;
+update settings set features = features || '{"usd_pay": true}' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.shift_end_report('9191') is not null as shift_closed;   -- close off what came before
+select t.put('urid', gen_random_uuid()::text);
+select t.put('urno', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select public.submit_invoice(jsonb_build_object('id', t.get('urid'), 'no', t.get('urno'), 'device_id', t.get('dev2'), 'rate', 2350, 'vat_rate', 16,
+  'customer', 'Dollar payer', 'paid_usd', 434.79, 'usd_rate', 2300,
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 1000000))));
+select t.put('urslip', public.shift_end_report('9191')::text);
+select t.as('00000000-0000-0000-0000-00000000000a');   -- the Admin's report, so the big sale is in it
+select t.put('urrep', public.sales_report(current_date, current_date, t.get('gom')::uuid)::text);
+reset role;
+select t.ok((select tendered = 1000017 and change = 17 and paid_usd = 434.79 and usd_rate = 2300 from invoices where id = t.get('urid')::uuid),
+  '434.79 dollars at 2 300 pays a 1 000 000 CDF invoice, with 17 CDF change');
+-- the slip's two dollar lines now agree: the sale is worth what was collected
+select t.ok(round((t.get('urslip')::jsonb->'slip'->>'value_usd')::numeric, 2) = 434.78,
+  'the shift end report values the sale at the till''s dollar rate: 1 000 000 / 2 300');
+select t.ok(round((t.get('urslip')::jsonb->'slip'->>'collected_usd')::numeric, 2) = 434.79, 'and the dollars collected are the dollars taken');
+select t.ok(abs((t.get('urslip')::jsonb->'slip'->>'value_usd')::numeric - (t.get('urslip')::jsonb->'slip'->>'collected_usd')::numeric) < 0.02,
+  'so the two no longer differ by the exchange margin');
+select t.ok((t.get('urslip')::jsonb->'slip'->>'value_fc')::bigint = 1000000, 'the Francs are untouched');
+-- the sales report counts the day in dollars the same way
+select t.ok(round((t.get('urrep')::jsonb->>'total_usd')::numeric, 2) = (select round(sum(i.total / coalesce(i.usd_rate, i.rate)), 2) from invoices i
+    where i.id in (select (x->>'id')::uuid from jsonb_array_elements(t.get('urrep')::jsonb->'invoices') x)),
+  'the sales report counts the day in dollars at each sale''s own dollar rate');
+select t.ok((t.get('urrep')::jsonb->>'total_usd')::numeric > (select round(sum(i.total / i.rate), 2) from invoices i
+    where i.id in (select (x->>'id')::uuid from jsonb_array_elements(t.get('urrep')::jsonb->'invoices') x)),
+  'which is more dollars than the sales rate would give, because the shop gives less for a dollar');
+reset role;
+update settings set features = features - 'usd_pay' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_rate('sales', 2850), public.save_rate('book', 2900);
+reset role;
 
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
