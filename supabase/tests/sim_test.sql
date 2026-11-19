@@ -1217,9 +1217,14 @@ update settings set features = features - 'usd_pay' where id = 1;
 -- the limit is set to the day's sales so far plus 20 USD, then three sales of 10 USD are made: two fit, one does not
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
-select t.put('dlA', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total_usd'),
-       t.put('dlN', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n'),
+select t.put('dlN', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n'),
        t.put('dlF', public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'total');
+reset role;
+-- the limit counts a sale at the rate it was priced at, so the baseline is taken the same way
+select t.put('dlA', (select coalesce(sum(i.total / i.rate), 0)::text from invoices i
+  where i.shop_id = t.get('gom')::uuid and (i.t at time zone (select tz from settings where id = 1))::date = current_date));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
 select t.put('dlno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
 select t.put('dlno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
 select t.put('dlno3', (select 'GOM-' || code || '-' || lpad((last_seq + 3)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
@@ -1235,7 +1240,9 @@ select t.as('00000000-0000-0000-0000-00000000000c');
 select t.put('dl1', public.sales_report(current_date, current_date)::text);
 reset role;
 select t.ok((t.get('dl1')::jsonb->>'n')::int = t.get('dlN')::int + 2, 'the Shop Admin sees the day only as far as the limit: two of the three new sales');
-select t.ok(round((t.get('dl1')::jsonb->>'total_usd')::numeric, 2) = round(t.get('dlA')::numeric + 20, 2), 'the total shown stops exactly at the limit');
+select t.ok((select round(sum(i.total / i.rate), 2) from invoices i
+    where i.id in (select (x->>'id')::uuid from jsonb_array_elements(t.get('dl1')::jsonb->'invoices') x))
+  = round(t.get('dlA')::numeric + 20, 2), 'the sales shown stop exactly at the limit, counted at the rate they were priced at');
 select t.ok((t.get('dl1')::jsonb->>'total')::bigint = t.get('dlF')::bigint + 47000, 'in Francs it is the day so far plus the two sales that fit');
 select t.ok((t.get('dl1')::jsonb->>'capped')::boolean, 'and the report says the figures stop at the limit');
 select t.ok(not exists (select 1 from jsonb_array_elements(t.get('dl1')::jsonb->'invoices') i where i->>'no' = t.get('dlno3')), 'the sale that did not fit is not in the list');
@@ -1257,6 +1264,49 @@ select t.ok(not (public.sales_report(current_date, current_date, t.get('gom')::u
   and (public.sales_report(current_date, current_date, t.get('gom')::uuid)->>'n')::int = t.get('dlN')::int + 3, 'the Admin sees every sale, with no limit');
 reset role;
 update settings set shop_sales_limit_usd = 347 where id = 1;
+
+-- ===== sales in dollars are counted at the rate the till takes dollars =====
+-- a 1 000 000 CDF invoice priced at 2 350 and paid with dollars at 2 300
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_rate('sales', 2350), public.save_rate('book', 2300);
+select public.set_passcode('00000000-0000-0000-0000-00000000000c', 'day_end', '9191');
+reset role;
+update settings set features = features || '{"usd_pay": true}' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.shift_end_report('9191') is not null as shift_closed;   -- close off what came before
+select t.put('urid', gen_random_uuid()::text);
+select t.put('urno', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
+select public.submit_invoice(jsonb_build_object('id', t.get('urid'), 'no', t.get('urno'), 'device_id', t.get('dev2'), 'rate', 2350, 'vat_rate', 16,
+  'customer', 'Dollar payer', 'paid_usd', 434.79, 'usd_rate', 2300,
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 1000000))));
+select t.put('urslip', public.shift_end_report('9191')::text);
+select t.as('00000000-0000-0000-0000-00000000000a');   -- the Admin's report, so the big sale is in it
+select t.put('urrep', public.sales_report(current_date, current_date, t.get('gom')::uuid)::text);
+reset role;
+select t.ok((select tendered = 1000017 and change = 17 and paid_usd = 434.79 and usd_rate = 2300 from invoices where id = t.get('urid')::uuid),
+  '434.79 dollars at 2 300 pays a 1 000 000 CDF invoice, with 17 CDF change');
+-- the slip's two dollar lines now agree: the sale is worth what was collected
+select t.ok(round((t.get('urslip')::jsonb->'slip'->>'value_usd')::numeric, 2) = 434.78,
+  'the shift end report values the sale at the till''s dollar rate: 1 000 000 / 2 300');
+select t.ok(round((t.get('urslip')::jsonb->'slip'->>'collected_usd')::numeric, 2) = 434.79, 'and the dollars collected are the dollars taken');
+select t.ok(abs((t.get('urslip')::jsonb->'slip'->>'value_usd')::numeric - (t.get('urslip')::jsonb->'slip'->>'collected_usd')::numeric) < 0.02,
+  'so the two no longer differ by the exchange margin');
+select t.ok((t.get('urslip')::jsonb->'slip'->>'value_fc')::bigint = 1000000, 'the Francs are untouched');
+-- the sales report counts the day in dollars the same way
+select t.ok(round((t.get('urrep')::jsonb->>'total_usd')::numeric, 2) = (select round(sum(i.total / coalesce(i.usd_rate, i.rate)), 2) from invoices i
+    where i.id in (select (x->>'id')::uuid from jsonb_array_elements(t.get('urrep')::jsonb->'invoices') x)),
+  'the sales report counts the day in dollars at each sale''s own dollar rate');
+select t.ok((t.get('urrep')::jsonb->>'total_usd')::numeric > (select round(sum(i.total / i.rate), 2) from invoices i
+    where i.id in (select (x->>'id')::uuid from jsonb_array_elements(t.get('urrep')::jsonb->'invoices') x)),
+  'which is more dollars than the sales rate would give, because the shop gives less for a dollar');
+reset role;
+update settings set features = features - 'usd_pay' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.save_rate('sales', 2850), public.save_rate('book', 2900);
+reset role;
 
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
