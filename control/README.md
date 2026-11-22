@@ -36,6 +36,9 @@ project (Settings → API) and **Run**. Running it again for the same subdomain 
 - `subdomain`: lowercase letters, digits and single hyphens, up to 40 characters. Names the site keeps for itself
   (`www`, `app`, `api`, `admin`, `test`, `demo`, …) are refused; the list is in the migration and in `app/src/lib/tenant.ts`.
 - `anon_key`: the client's **public** key. The table refuses nothing else, so check you did not paste the secret one.
+- `project_ref` and `backup_name`: the database updates and nightly backups (`.github/workflows/migrate.yml` and
+  `backup.yml`) go through every client that has a `project_ref`, and save its backups in the `backup_name` folder.
+  A client without a `project_ref` is skipped, with a warning in the run.
 
 **Switching a client off** (e.g. unpaid): `update public.tenants set status = 'suspended' where subdomain = '…';`
 The site then shows "… is switched off". A till that is already open keeps going until it is restarted, so a sale is never cut off.

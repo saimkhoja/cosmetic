@@ -1,0 +1,138 @@
+# Brings every client's database (and Edge Functions) up to date with main. See deploy/DEPLOY.md, section 6.
+#
+# - On every push to main that changes supabase/migrations or supabase/functions: for each client in the control
+#   project, back up the database, run the new migration files (ops/migrate.sh), then deploy the functions if they changed.
+# - By hand (Actions → Update client databases → Run workflow): "plan" shows what would happen and changes nothing;
+#   "apply" does it. Optionally for one client only.
+#
+# Secrets: SUPABASE_ACCESS_TOKEN, CONTROL_PROJECT_REF, and for the backup BACKUP_PASSPHRASE, R2_ENDPOINT, R2_ACCESS_KEY_ID,
+# R2_SECRET_ACCESS_KEY, R2_BUCKET. A client whose own database address is saved as a secret (e.g. CLIENT2_DB_URL, see
+# backup.yml) is reached with it; any other client through a temporary login from the Supabase Management API.
+name: Update client databases
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/scripts/check_migrations.sql']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan = only show what would change; apply = back up and update'
+        type: choice
+        options: [plan, apply]
+        default: plan
+      client:
+        description: 'Only this client (its subdomain). Empty = every client.'
+        required: false
+        default: ''
+      functions:
+        description: 'Also deploy the Edge Functions (setup, admin-users)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: update-client-databases
+  cancel-in-progress: false
+jobs:
+  clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      clients: ${{ steps.list.outputs.clients }}
+      count: ${{ steps.list.outputs.count }}
+      functions: ${{ steps.fn.outputs.functions }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: List the clients
+        id: list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          CONTROL_PROJECT_REF: ${{ secrets.CONTROL_PROJECT_REF }}
+          ONLY: ${{ inputs.client }}
+        run: node ops/clients.mjs list "$ONLY"
+      - name: Did the functions change?
+        id: fn
+        env:
+          BEFORE: ${{ github.event.before }}
+          WANTED: ${{ inputs.functions }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then echo "functions=$WANTED" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # on a push: only when something under supabase/functions changed (or the range is unknown)
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null && git diff --quiet "$BEFORE" "$GITHUB_SHA" -- supabase/functions; then
+            echo "functions=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "functions=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  update:
+    needs: clients
+    if: needs.clients.outputs.count != '0'
+    name: ${{ matrix.client.subdomain }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        client: ${{ fromJSON(needs.clients.outputs.clients) }}
+    env:
+      MODE: ${{ github.event_name == 'push' && 'apply' || inputs.mode }}
+      FUNCTIONS: ${{ needs.clients.outputs.functions }}
+      REF: ${{ matrix.client.ref }}
+      FOLDER: ${{ matrix.client.folder }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PSQL: /usr/lib/postgresql/17/bin/psql
+      PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+      PG_RESTORE: /usr/lib/postgresql/17/bin/pg_restore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: ops/install-pg17.sh
+      - name: Connect
+        env:
+          OWN_URL: ${{ secrets[matrix.client.db_secret] }}
+        run: |
+          echo "## ${{ matrix.client.subdomain }} ($MODE)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$OWN_URL" ]; then
+            printf '%s' "$OWN_URL" > "$RUNNER_TEMP/db.url"; echo "Using the saved secret ${{ matrix.client.db_secret }}"
+          else
+            node ops/clients.mjs db-url "$REF" "$RUNNER_TEMP/db.url"
+          fi
+          chmod 600 "$RUNNER_TEMP/db.url"
+      - name: What needs doing
+        id: plan
+        run: ops/migrate.sh "$RUNNER_TEMP/db.url" plan
+      - name: Back up first
+        if: env.MODE == 'apply' && steps.plan.outputs.pending != '0'
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: ops/backup.sh "$RUNNER_TEMP/db.url" "$FOLDER" before-update
+      - name: Update the database
+        if: env.MODE == 'apply' && steps.plan.outputs.pending != '0'
+        env:
+          OWN_URL: ${{ secrets[matrix.client.db_secret] }}
+        run: |
+          # a temporary login may have expired during the backup: get a fresh one
+          if [ -z "$OWN_URL" ]; then node ops/clients.mjs db-url "$REF" "$RUNNER_TEMP/db.url"; fi
+          ops/migrate.sh "$RUNNER_TEMP/db.url" apply
+      - uses: supabase/setup-cli@v1
+        if: env.FUNCTIONS == 'true'
+        with: { version: latest }
+      - name: Deploy the Edge Functions
+        if: env.FUNCTIONS == 'true'
+        run: |
+          if [ "$MODE" = plan ]; then echo "- Would deploy the Edge Functions: setup, admin-users" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          for fn in setup admin-users; do supabase functions deploy "$fn" --project-ref "$REF" --no-verify-jwt; done
+          echo "- Edge Functions deployed: setup, admin-users" >> "$GITHUB_STEP_SUMMARY"
+      - name: Clean up
+        if: always()
+        run: rm -f "$RUNNER_TEMP/db.url"

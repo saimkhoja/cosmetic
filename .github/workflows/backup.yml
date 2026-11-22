@@ -1,76 +1,84 @@
-# Nightly encrypted backup of each client's SIM database to Cloudflare R2 (or any S3-compatible storage).
-# Daily copies go to <client>/daily/ (an R2 lifecycle rule deletes them after 30 days); the backup of the
-# 1st of each month also goes to <client>/monthly/ and is kept. See deploy/DEPLOY.md, section 8.
-# Secrets: CLIENT1_DB_URL, CLIENT2_DB_URL, BACKUP_PASSPHRASE, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
+# Nightly encrypted backup of every client's database to Cloudflare R2 (or any S3-compatible storage).
+# The clients come from the control project (control/README.md); each is backed up in its own job by ops/backup.sh.
+# Daily copies go to <folder>/daily/ (an R2 lifecycle rule deletes them after 30 days); the backup of the 1st of
+# each month also goes to <folder>/monthly/ and is kept. <folder> is the client's backup_name (e.g. client2).
+# See deploy/DEPLOY.md, section 8.
+# Secrets: SUPABASE_ACCESS_TOKEN, CONTROL_PROJECT_REF, BACKUP_PASSPHRASE, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+# R2_BUCKET. A client with its own database address saved as <FOLDER>_DB_URL (e.g. CLIENT2_DB_URL) is reached with it;
+# any other client through a temporary login from the Supabase Management API.
 name: Backup
 on:
   schedule:
     - cron: '17 1 * * *'   # 01:17 UTC = 02:17 in Kinshasa
   workflow_dispatch:
+    inputs:
+      client:
+        description: 'Only this client (its subdomain). Empty = every client.'
+        required: false
+        default: ''
 permissions:
   contents: read
 concurrency:
   group: backup
   cancel-in-progress: false
 jobs:
+  clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      clients: ${{ steps.list.outputs.clients }}
+      count: ${{ steps.list.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: List the clients
+        id: list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          CONTROL_PROJECT_REF: ${{ secrets.CONTROL_PROJECT_REF }}
+          ONLY: ${{ inputs.client }}
+        run: node ops/clients.mjs list "$ONLY"
+
   backup:
+    needs: clients
+    if: needs.clients.outputs.count != '0'
+    name: ${{ matrix.client.subdomain }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
-        include:
-          - client: client1
-            db_secret: CLIENT1_DB_URL
-          - client: client2
-            db_secret: CLIENT2_DB_URL
+        client: ${{ fromJSON(needs.clients.outputs.clients) }}
     env:
-      CLIENT: ${{ matrix.client }}
-      DB_URL: ${{ secrets[matrix.db_secret] }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
       R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      PSQL: /usr/lib/postgresql/17/bin/psql
+      PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+      PG_RESTORE: /usr/lib/postgresql/17/bin/pg_restore
     steps:
-      - name: Check the secrets are set
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: ops/install-pg17.sh
+      - name: Connect
+        env:
+          OWN_URL: ${{ secrets[matrix.client.db_secret] }}
         run: |
-          missing=""
-          for v in DB_URL BACKUP_PASSPHRASE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ENDPOINT R2_BUCKET; do
-            [ -n "${!v}" ] || missing="$missing $v"
-          done
-          if [ -n "$missing" ]; then echo "::error::Not set for $CLIENT:$missing (DB_URL is the secret ${{ matrix.db_secret }})"; exit 1; fi
-      - name: Install the PostgreSQL 17 client
-        run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
-          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
-      - name: Dump the database
-        run: |
-          set -euo pipefail
-          FILE="$CLIENT-$(date -u +%Y-%m-%d-%H%M).dump"
-          echo "FILE=$FILE" >> "$GITHUB_ENV"
-          /usr/lib/postgresql/17/bin/pg_dump "$DB_URL" --format=custom --no-owner --no-privileges \
-            --schema=public --schema=app --schema=auth --file="$FILE"
-          # a usable backup: not empty, readable, and it has the invoices and the logins
-          /usr/lib/postgresql/17/bin/pg_restore --list "$FILE" > list.txt
-          grep -q 'TABLE DATA public invoices' list.txt && grep -q 'TABLE DATA auth users' list.txt
-          echo "Dump: $(du -h "$FILE" | cut -f1), $(grep -c 'TABLE DATA' list.txt) tables"
-      - name: Encrypt
-        run: |
-          set -euo pipefail
-          gpg --batch --yes --symmetric --cipher-algo AES256 --pinentry-mode loopback --passphrase-fd 0 --output "$FILE.gpg" "$FILE" <<< "$BACKUP_PASSPHRASE"
-          rm -f "$FILE" list.txt
-      - name: Upload
-        run: |
-          set -euo pipefail
-          aws s3 cp "$FILE.gpg" "s3://$R2_BUCKET/$CLIENT/daily/$FILE.gpg" --endpoint-url "$R2_ENDPOINT" --only-show-errors
-          if [ "$(date -u +%d)" = "01" ]; then
-            aws s3 cp "$FILE.gpg" "s3://$R2_BUCKET/$CLIENT/monthly/$FILE.gpg" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          if [ -n "$OWN_URL" ]; then
+            printf '%s' "$OWN_URL" > "$RUNNER_TEMP/db.url"; echo "Using the saved secret ${{ matrix.client.db_secret }}"
+          else
+            node ops/clients.mjs db-url "${{ matrix.client.ref }}" "$RUNNER_TEMP/db.url"
           fi
-          echo "### $CLIENT backup saved: \`$CLIENT/daily/$FILE.gpg\`" >> "$GITHUB_STEP_SUMMARY"
+          chmod 600 "$RUNNER_TEMP/db.url"
+      - name: Back up
+        run: ops/backup.sh "$RUNNER_TEMP/db.url" "${{ matrix.client.folder }}"
       - name: Clean up
         if: always()
-        run: rm -f ./*.dump ./*.dump.gpg list.txt
+        run: rm -f "$RUNNER_TEMP/db.url"
