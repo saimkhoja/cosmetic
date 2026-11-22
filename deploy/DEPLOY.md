@@ -359,6 +359,21 @@ It is not a migration and never runs on its own.
 4. On **every till PC**, clear the QuickSales site data once: in Chrome, click the icon left of the address → **Site settings** → **Delete data**. Then sign in again **while online**. The till registers again as T1, T2… and invoices restart at `000001`.
 5. Enter the real starting stock through **Goods in** (or the stock count button in Inventory), and the opening balances (cash, bank, capital, what is owed to each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
 
+### Clearing all stock but keeping the sales
+
+When a client's stock figures are wrong and they want to start counting again without losing their sales, **Actions → Clear all stock of one client** sets every quantity in the central store and in every shop to 0.
+
+- **It keeps:** every invoice and sale, reports and shift reports, vendeurs, the books so far, items with their prices and costs, suppliers, logins and settings.
+- **It books** the value removed, at cost, as a stock adjustment (one entry per place), so the stock ledgers keep matching. Stock sold on order (negative) set to 0 is booked the other way round.
+- **It refuses** while a delivery or a return to the store is still on its way: receive or cancel it in the app first.
+
+1. On every till, check that the pill at the top shows **nothing waiting to send** (a sale still on a till would take stock afterwards).
+2. Run the workflow with the client's subdomain and **plan**: the summary shows, place by place, how many items and units would be cleared and their value at cost. Nothing changes.
+3. Run it again with **apply** and the subdomain typed again in **confirm**. It backs the database up first (`<folder>-…-before-zero-stock`), then clears the stock in one transaction.
+4. Enter the real stock through **Goods in**, **Add stock to shops** (no central store) or deliveries.
+
+The same script, `supabase/scripts/zero_stock.sql`, can be run by hand in the client's SQL Editor; it only changes anything with `\set apply true` (psql) and otherwise shows the plan and rolls back.
+
 ## 8. Backups and exporting data
 
 The live database keeps all data for ever: every invoice and voucher from the first day stays in it. Backups are for getting back to an earlier state: after a mistake, a deletion noticed late, or when a client asks for the data as it was on a given date.

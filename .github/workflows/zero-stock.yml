@@ -1,0 +1,109 @@
+# Sets ALL stock of ONE client to zero (central store and every shop), keeping every sale. See supabase/scripts/zero_stock.sql.
+#
+# By hand only (Actions → Clear all stock of one client → Run workflow):
+#   "plan" shows, place by place, what would be cleared and its value at cost, and changes nothing;
+#   "apply" backs the database up first, then does it. Apply also needs the client's subdomain typed again in "confirm".
+# Uses the same secrets and connection as Update client databases, and never runs at the same time as it.
+name: Clear all stock of one client
+on:
+  workflow_dispatch:
+    inputs:
+      client:
+        description: 'The client (its subdomain, e.g. sapcongo)'
+        required: true
+      mode:
+        description: 'plan = only show what would be cleared; apply = back up, then clear'
+        type: choice
+        options: [plan, apply]
+        default: plan
+      confirm:
+        description: 'For apply: type the subdomain again'
+        required: false
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: update-client-databases
+  cancel-in-progress: false
+jobs:
+  clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      clients: ${{ steps.list.outputs.clients }}
+      count: ${{ steps.list.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Find the client
+        id: list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          CONTROL_PROJECT_REF: ${{ secrets.CONTROL_PROJECT_REF }}
+          ONLY: ${{ inputs.client }}
+          CONFIRM: ${{ inputs.confirm }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          [ -n "$(echo "$ONLY" | tr -d ' ')" ] || { echo "::error::Name the client"; exit 1; }
+          if [ "$MODE" = apply ] && [ "$(echo "$CONFIRM" | tr -d ' ' | tr A-Z a-z)" != "$(echo "$ONLY" | tr -d ' ' | tr A-Z a-z)" ]; then
+            echo "::error::To clear the stock, type the client's subdomain again in confirm"; exit 1
+          fi
+          node ops/clients.mjs list "$ONLY"
+          grep -q '^count=1$' "$GITHUB_OUTPUT" || { echo "::error::No active client called $ONLY"; exit 1; }
+
+  clear:
+    needs: clients
+    name: ${{ matrix.client.subdomain }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        client: ${{ fromJSON(needs.clients.outputs.clients) }}
+    env:
+      MODE: ${{ inputs.mode }}
+      REF: ${{ matrix.client.ref }}
+      FOLDER: ${{ matrix.client.folder }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PSQL: /usr/lib/postgresql/17/bin/psql
+      PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+      PG_RESTORE: /usr/lib/postgresql/17/bin/pg_restore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: ops/install-pg17.sh
+      - name: Connect
+        env:
+          OWN_URL: ${{ secrets[matrix.client.db_secret] }}
+        run: |
+          echo "## ${{ matrix.client.subdomain }}: clear all stock ($MODE)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$OWN_URL" ]; then
+            printf '%s' "$OWN_URL" > "$RUNNER_TEMP/db.url"; echo "Using the saved secret ${{ matrix.client.db_secret }}"
+          else
+            node ops/clients.mjs db-url "$REF" "$RUNNER_TEMP/db.url"
+          fi
+          chmod 600 "$RUNNER_TEMP/db.url"
+      - name: What would be cleared
+        run: ops/zero-stock.sh "$RUNNER_TEMP/db.url" plan
+      - name: Back up first
+        if: env.MODE == 'apply'
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: ops/backup.sh "$RUNNER_TEMP/db.url" "$FOLDER" before-zero-stock
+      - name: Clear the stock
+        if: env.MODE == 'apply'
+        env:
+          OWN_URL: ${{ secrets[matrix.client.db_secret] }}
+        run: |
+          # a temporary login may have expired during the backup: get a fresh one
+          if [ -z "$OWN_URL" ]; then node ops/clients.mjs db-url "$REF" "$RUNNER_TEMP/db.url"; fi
+          ops/zero-stock.sh "$RUNNER_TEMP/db.url" apply
+      - name: Clean up
+        if: always()
+        run: rm -f "$RUNNER_TEMP/db.url"

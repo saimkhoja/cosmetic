@@ -26,5 +26,7 @@ psql -h 127.0.0.1 -p $PORT -U postgres -qc 'drop schema supabase_migrations casc
 out=$(ops/migrate.sh "$URL_FILE" plan)
 echo "$out" | grep -q 'Set up by hand, all' && echo "$out" | grep -q 'Up to date: nothing to run' || { echo "FAIL: baseline: $out"; exit 1; }
 echo "ok - a database set up by hand is recognised as up to date"
+# clearing all stock of one client (it changes the test data, so it comes after every other check of it)
+supabase/tests/zero_stock_test.sh "$URL_FILE"
 # the runner itself
 ops/tests/migrate_test.sh "$(cat "$URL_FILE")" 2>&1 | grep -v NOTICE
