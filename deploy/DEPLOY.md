@@ -212,12 +212,16 @@ So a new client needs **no Vercel project, no DNS record and no build**, and one
 
 ### 6b. Adding a client
 
-1. **New Supabase project** in the client's name. Do all of section 1 for it: every migration file, the `setup` and
-   `admin-users` functions with **Verify JWT off**, and the Auth settings. Set **Site URL** (and `SIM_ALLOWED_ORIGIN`
-   if you use it) to `https://<subdomain>.getquicksales.com`.
+1. **New Supabase project** in the client's name, in the same Supabase account as the others. Do only the **Auth settings**
+   of section 1 by hand. Set **Site URL** to `https://<subdomain>.getquicksales.com`.
 2. **Control project → SQL Editor**: `control/scripts/add_tenant.sql` with the subdomain, business name, the new project's
-   URL, public key and ref, and a backup name. The address works straight away.
-3. Send the client `https://<subdomain>.getquicksales.com`. The **Set up QuickSales** screen asks for their name, Admin
+   URL, public key, **ref** and a **backup name** (e.g. `client3`). The address works straight away.
+3. **GitHub → Actions → Update client databases → Run workflow**: mode **apply**, client = the subdomain, tick
+   **Also deploy the Edge Functions**. It runs every migration file on the empty database and deploys `setup` and
+   `admin-users` with Verify JWT off. (Instead of pasting the files into the SQL Editor; don't do both.)
+4. **Cloudflare R2**: a lifecycle rule for `<backup name>/daily/` (30 days), as in section 8. The nightly backup picks
+   the client up by itself.
+5. Send the client `https://<subdomain>.getquicksales.com`. The **Set up QuickSales** screen asks for their name, Admin
    username and password, company details, rate, VAT and their shops (section 4). Their Admin then creates the other logins.
 
 Features they need are turned on under **Settings → Till options**:
@@ -255,9 +259,26 @@ No data is touched; items, stock, invoices, logins and Settings all stay in the 
 
 ### Updating every client
 
-The shared site redeploys by itself when `main` changes, for every client at once. A new migration file still has to be run on
-**each** client's Supabase project (section 1, only the new files), after backing up that client's database (section 8); making this
-automatic is the next step. The app keeps working on a project that has not run the newest file yet, but the new features stay off there.
+A push to `main` updates everyone:
+
+- **The site**: the shared Vercel project redeploys, for every client at once.
+- **The databases**: if the push adds a file to `supabase/migrations` (or changes `supabase/functions`), the
+  **Update client databases** workflow (`.github/workflows/migrate.yml`) runs for every client in the control project:
+  it backs up the database to R2 (`<folder>/daily/…-before-update.dump.gpg`), runs only the new files, each in its own
+  transaction, and records them (Supabase → Database → Migrations shows them). Changed functions are deployed after.
+  Clients run side by side; one failing does not stop the others.
+- Check **GitHub → Actions → Update client databases**: each client is a line with a summary. A red client is left
+  exactly as before the file that failed (that file is rolled back; the ones before it stay). Fix the file in a new commit.
+
+Rules for migration files, which the workflow enforces:
+- **Never run a migration file by hand in the SQL Editor any more.** The workflow keeps the record of what ran; a file
+  run by hand is not in it, and would run a second time.
+- A new file always gets a **newer number** than every file before it (`YYYYMMDDhhmmss_name.sql`, today's date). A file
+  older than one a client already has is refused, because it could put back older versions of functions.
+- The app must keep working on a database that has not got the newest file yet, as before.
+
+To see what a run would do without changing anything: **Run workflow** with mode **plan**. The first time each existing
+client is seen, it is checked with `supabase/scripts/check_migrations.sql` and recorded as complete (it was set up by hand).
 
 ## 7. Going live: clearing the test data
 
@@ -289,13 +310,15 @@ The live database keeps all data for ever: every invoice and voucher from the fi
 1. **Cloudflare R2.** Sign up at cloudflare.com, then go to **R2 Object Storage** and create a bucket, e.g. `sim-backups`.
    - **Manage R2 API Tokens → Create API token**: permission **Object Read & Write**, limited to that bucket. Copy the **Access Key ID**, the **Secret Access Key** and the **S3 endpoint** (`https://<account-id>.r2.cloudflarestorage.com`).
    - Bucket → **Settings → Object lifecycle rules → Add rule**: prefix `client1/daily/`, *delete objects 30 days after upload*. Add the same rule for `client2/daily/` later. Don't add a rule for `monthly/`.
-2. **The database address.** In client 1's Supabase project, click **Connect** and copy the **Session pooler** URI, then put in the database password. (If you don't know the password, reset it under Project Settings → Database. QuickSales doesn't use it.)
+2. **The database address (optional, not needed with `SUPABASE_ACCESS_TOKEN` below).** In client 1's Supabase project, click **Connect** and copy the **Session pooler** URI, then put in the database password. (If you don't know the password, reset it under Project Settings → Database. QuickSales doesn't use it.)
 3. **A backup passphrase.** Make up a long one (5 or more random words). **Write it down and keep it somewhere safe off the computer.** Without it no backup can be opened, by you or anyone else.
-4. **GitHub secrets.** In the repository on GitHub, go to **Settings → Secrets and variables → Actions → New repository secret**, and add these six:
+4. **GitHub secrets.** In the repository on GitHub, go to **Settings → Secrets and variables → Actions → New repository secret**, and add these:
 
    | Name | Value |
    |---|---|
-   | `CLIENT1_DB_URL` | the Session pooler URI from step 2 |
+   | `SUPABASE_ACCESS_TOKEN` | supabase.com → your avatar → **Account preferences → Access Tokens → Generate new token**. It can reach every project in your account, so keep it only here. |
+   | `CONTROL_PROJECT_REF` | the control project's ref (the part before `.supabase.co`) |
+   | `CLIENT1_DB_URL` | optional: the Session pooler URI from step 2. Without it, the workflows use a temporary login from Supabase (no password stored). |
    | `BACKUP_PASSPHRASE` | the passphrase from step 3 |
    | `R2_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` |
    | `R2_ACCESS_KEY_ID` | from step 1 |
@@ -303,7 +326,10 @@ The live database keeps all data for ever: every invoice and voucher from the fi
    | `R2_BUCKET` | `sim-backups` |
 
 5. **Test it now.** GitHub → **Actions → Backup → Run workflow**. After a minute or two the run is green and says `client1 backup saved: client1/daily/client1-2026-…dump.gpg`; the file shows in the R2 bucket. A red run sends an email to the repository owner; the log says which step failed (for example a secret that isn't set).
-6. **Client 2** is in the workflow too: add the secret `CLIENT2_DB_URL` (client 2's Session pooler URI) and an R2 lifecycle rule for `client2/daily/`. Each client runs as its own job, so one failing never stops the other. **Another client:** add a `CLIENTn_DB_URL` secret and two lines (`- client: clientn` / `db_secret: CLIENTn_DB_URL`) under `matrix.include` in `.github/workflows/backup.yml`.
+6. **Which clients.** Every client in the control project (active or switched off) with a `project_ref` is backed up,
+   each in its own job, into the folder named by its `backup_name` (e.g. `client2/`). A new client needs only its row
+   in the control project and an R2 lifecycle rule for `<backup name>/daily/`. A client whose `<BACKUP NAME>_DB_URL`
+   secret exists (e.g. `CLIENT2_DB_URL`) is reached with it; the others through a temporary login.
 
 GitHub pauses scheduled jobs in a repository that has had **no commit for 60 days**. It emails a warning first; re-enable the job under **Actions → Backup** with one click (or make any commit). A backup can also be taken at any moment with **Run workflow**.
 
