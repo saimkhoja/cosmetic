@@ -1,10 +1,11 @@
 // Excel (.xlsx) and CSV reading/writing with no outside library, so import works offline.
 import { itemProblem, MAX_BARCODES, splitBarcodes } from './items';
 
-export const IMPCOLS = ['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per half dozen USD', 'Price per dozen USD', 'Price per carton USD', 'Opening cartons', 'Opening pcs', 'Reorder at (pcs)', 'SKU', 'Barcode'];
+export const IMPCOLS = ['Name', 'Category', 'Gross carton cost USD', 'Net carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per half dozen USD', 'Price per dozen USD', 'Price per carton USD', 'Opening cartons', 'Opening pcs', 'Reorder at (pcs)', 'SKU', 'Barcode'];
 const IMPKEYS: Record<string, string[]> = {
   name: ['name', 'item', 'itemname', 'nom', 'article', 'designation', 'produit'], category: ['category', 'categorie', 'cat'],
-  cartonCost: ['cartoncost', 'costcarton', 'costofcarton', 'costofonecarton', 'coutcarton', 'prixachatcarton'],
+  cartonCost: ['cartoncost', 'costcarton', 'costofcarton', 'costofonecarton', 'coutcarton', 'prixachatcarton', 'grosscartoncost', 'grosscost', 'grosscostcarton', 'grosscostofonecarton', 'coutbrutcarton', 'coutbrut', 'prixachatbrutcarton'],
+  netCost: ['netcartoncost', 'netcost', 'netcostcarton', 'netcostofonecarton', 'coutnetcarton', 'coutnet', 'prixachatnetcarton'],
   perCarton: ['pcspercarton', 'piecespercarton', 'percarton', 'pcscarton', 'qtypercarton', 'pcsparcarton', 'piecesparcarton'],
   pc: ['priceperpc', 'pricepc', 'pcprice', 'priceperpiece', 'prixpiece', 'prixparpiece'], half: ['priceperhalfdozen', 'pricehalfdozen', 'halfdozenprice', 'priceper6', 'prixdemidouzaine', 'prixpardemidouzaine'], dzn: ['priceperdozen', 'pricedozen', 'dozenprice', 'prixdouzaine', 'prixpardouzaine'],
   ctn: ['pricepercarton', 'pricecarton', 'cartonprice', 'prixcarton', 'prixparcarton'], openCtn: ['openingcartons', 'cartons', 'stockcartons', 'openingstockcartons'],
@@ -107,7 +108,7 @@ export function zipStore(files: { name: string; data: string }[]): Blob {
 export function templateXlsx(): Blob {
   const X = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   const col = (i: number) => String.fromCharCode(65 + i);
-  const rows: (string | number)[][] = [IMPCOLS, ['Aloe vera gel 300 ml', 'Skin care', 60, 24, 4, 23, 45, 90, 5, 0, 24, '', ''], ['Argan oil shampoo 500 ml', 'Hair care', 72, 12, 9, 50, '', 100, 2, 6, 12, '', ''], ['Rose body mist 100 ml', 'Fragrance', 84, 36, 3.5, '', 38, '', 3, 0, 36, '', '']];
+  const rows: (string | number)[][] = [IMPCOLS, ['Aloe vera gel 300 ml', 'Skin care', 60, '', 24, 4, 23, 45, 90, 5, 0, 24, '', ''], ['Argan oil shampoo 500 ml', 'Hair care', 72, 66, 12, 9, 50, '', 100, 2, 6, 12, '', ''], ['Rose body mist 100 ml', 'Fragrance', 84, '', 36, 3.5, '', 38, '', 3, 0, 36, '', '']];
   const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols>${IMPCOLS.map((_, i) => `<col min="${i + 1}" max="${i + 1}" width="${i === 0 ? 34 : i === 1 ? 16 : 19}" customWidth="1"/>`).join('')}</cols><sheetData>${rows.map((r, ri) => `<row r="${ri + 1}">${r.map((v, ci) => (v === '' ? '' : typeof v === 'number' ? `<c r="${col(ci)}${ri + 1}"><v>${v}</v></c>` : `<c r="${col(ci)}${ri + 1}" t="inlineStr"><is><t>${X(v)}</t></is></c>`)).join('')}</row>`).join('')}</sheetData></worksheet>`;
   return zipStore([
     { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
@@ -120,7 +121,7 @@ export function templateXlsx(): Blob {
 
 export interface ImportRow {
   n: number; status: 'ok' | 'bad' | 'skip'; msg: string; sku: string; barcode: string; qty: number;
-  o: { name: string; category: string; carton_cost: number; per_carton: number; pc: number; half: number; dzn: number; ctn: number; open_cartons: number; open_pcs: number; reorder: number | null };
+  o: { name: string; category: string; carton_cost: number; net_cost: number; per_carton: number; pc: number; half: number; dzn: number; ctn: number; open_cartons: number; open_pcs: number; reorder: number | null };
 }
 /** Turns sheet rows into checked import rows; names, codes and barcodes already in the catalogue are skipped. */
 export function impParse(rows: Cell[][], existingNames: string[], existingSkus: string[], existingBarcodes: string[] = []): ImportRow[] {
@@ -138,7 +139,7 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
     if (!r || !r.some((c) => String(c ?? '').trim() !== '')) return;
     const name = String(g(r, 'name')).trim().replace(/\s+/g, ' ').slice(0, 60), sku = String(g(r, 'sku')).trim().slice(0, 20), bl = splitBarcodes(String(g(r, 'barcode'))), barcode = bl.join(';'), dz = inum(g(r, 'dzn')), hz = inum(g(r, 'half')), ct = inum(g(r, 'ctn'));
     const oc = inum(g(r, 'openCtn')), op = inum(g(r, 'openPcs')), ro = inum(g(r, 'reorder'));
-    const o = { name, category: String(g(r, 'category')).trim().replace(/\s+/g, ' ').slice(0, 30) || 'Other', carton_cost: inum(g(r, 'cartonCost')), per_carton: inum(g(r, 'perCarton')), pc: (() => { const v = inum(g(r, 'pc')); return isNaN(v) ? 0 : v; })(), half: isNaN(hz) ? 0 : hz, dzn: isNaN(dz) ? 0 : dz, ctn: isNaN(ct) ? 0 : ct,
+    const o = { name, category: String(g(r, 'category')).trim().replace(/\s+/g, ' ').slice(0, 30) || 'Other', carton_cost: inum(g(r, 'cartonCost')), net_cost: inum(g(r, 'netCost')), per_carton: inum(g(r, 'perCarton')), pc: (() => { const v = inum(g(r, 'pc')); return isNaN(v) ? 0 : v; })(), half: isNaN(hz) ? 0 : hz, dzn: isNaN(dz) ? 0 : dz, ctn: isNaN(ct) ? 0 : ct,
       open_cartons: isNaN(oc) ? 0 : oc, open_pcs: isNaN(op) ? 0 : op, reorder: isNaN(ro) ? null : ro };
     const row: ImportRow = { n: hi + i + 2, o, sku, barcode, status: 'ok', msg: '', qty: 0 };
     if (name && names.has(name.toLowerCase())) { row.status = 'skip'; row.msg = 'Name already exists'; }
@@ -146,6 +147,7 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
     else if (bl.some((b) => codes.has(b))) { row.status = 'skip'; row.msg = `Barcode already exists (${bl.find((b) => codes.has(b))})`; }
     else if (bl.some((b) => !/^[A-Za-z0-9-]{3,32}$/.test(b))) { row.status = 'bad'; row.msg = 'Each barcode must be 3 to 32 letters or digits; separate several with ;'; }
     else if (bl.length > MAX_BARCODES) { row.status = 'bad'; row.msg = `At most ${MAX_BARCODES} barcodes per item`; }
+    else if (isNaN(o.net_cost) && String(g(r, 'netCost')).trim() !== '') { row.status = 'bad'; row.msg = 'Net carton cost must be a number, or left empty'; }
     else {
       const p = itemProblem({ ...o, is_bundle: false, set_cost: 0, set_price: 0, pcs: 0, piece: 0 });
       if (p) { row.status = 'bad'; row.msg = p; }

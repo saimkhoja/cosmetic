@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fCDF, toCDF } from './format';
 import { cashNotes, ctnTxt, hotSort, marginPct, overLimit, payment, pcValue, pctOf, stockValue, takeLocal, totals, unitsOf, usdNotes } from './units';
-import { barcodesOf, custName, findByCode, itemProblem, pickList, scanInQty, splitBarcodes } from './items';
+import { barcodesOf, costThatCounts, custName, findByCode, itemProblem, pickList, scanInQty, splitBarcodes } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
 import type { Product } from './types';
 
@@ -96,6 +96,26 @@ describe('item validation', () => {
     expect(itemProblem({ ...one, ctn: 1.5 })).toMatch(/pc is below/);
     expect(itemProblem({ ...one, per_carton: 0 })).toMatch(/1 or more/);
   });
+  it('a net cost, when given, is the cost the prices are checked against', () => {
+    // gross 24 a carton of 24 ($1 a pc); net 12 ($0.50 a pc)
+    expect(itemProblem({ ...base, pc: 0.8 })).toMatch(/pc is below/);
+    expect(itemProblem({ ...base, pc: 0.8, net_cost: 12 })).toBeNull();
+    expect(itemProblem({ ...base, pc: 0.4, net_cost: 12 })).toBe('Price per pc is below the cost of one pc ($0.50)');
+    expect(itemProblem({ ...base, ctn: 20, net_cost: 12 })).toBeNull();
+    expect(itemProblem({ ...base, pc: 0, dzn: 0, ctn: 30, net_cost: 36 })).toMatch(/carton cannot be below/);
+    expect(itemProblem({ ...base, net_cost: NaN })).toBeNull();   // empty: the gross cost counts
+    expect(itemProblem({ ...base, net_cost: -1 })).toMatch(/net cost cannot be negative/);
+    const set = { ...base, is_bundle: true, set_cost: 10, set_price: 8, pcs: 12, piece: 1 };
+    expect(itemProblem(set)).toMatch(/Set price cannot be below/);
+    expect(itemProblem({ ...set, net_cost: 7 })).toBeNull();
+  });
+  it('the cost that counts is the net cost if given, else the gross cost', () => {
+    expect(costThatCounts(24, 12)).toBe(12);
+    expect(costThatCounts(24, null)).toBe(24);
+    expect(costThatCounts(24, undefined)).toBe(24);
+    expect(costThatCounts(24, NaN)).toBe(24);
+    expect(costThatCounts(24, 0)).toBe(0);
+  });
 });
 
 describe('import', () => {
@@ -104,6 +124,15 @@ describe('import', () => {
     const r = impParse(rows, [], []);
     expect(r).toHaveLength(1);
     expect(r[0]).toMatchObject({ status: 'ok', qty: 108, o: { name: 'Rose mist; 100 ml', pc: 3.5, reorder: 36 } });
+  });
+  it('reads an optional net carton cost', () => {
+    const rows = [['Name', 'Category', 'Gross carton cost USD', 'Net carton cost USD', 'Pcs per carton', 'Price per pc USD'], ['Net one', 'X', 24, 12, 24, 0.8], ['Gross one', 'X', 24, '', 24, 1.5], ['Bad net', 'X', 24, 'abc', 24, 1.5], ['Under net', 'X', 24, 12, 24, 0.4]];
+    const r = impParse(rows, [], []);
+    expect(r.map((x) => x.status)).toEqual(['ok', 'ok', 'bad', 'bad']);
+    expect(r[0].o.net_cost).toBe(12);
+    expect(r[1].o.net_cost).toBeNaN();
+    expect(r[2].msg).toMatch(/Net carton cost must be a number/);
+    expect(r[3].msg).toMatch(/pc is below/);
   });
   it('skips names already in the catalogue and flags bad rows', () => {
     const rows = [['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per carton USD'], ['Shea lotion', 'Skin', 76, 24, 5, 108], ['Cheap', 'X', 100, 10, 5, 90], ['New one', 'X', 10, 10, 2, 15]];

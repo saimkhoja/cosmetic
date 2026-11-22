@@ -5,13 +5,20 @@ export interface ItemInput {
   name: string; category: string; is_bundle: boolean;
   carton_cost: number; per_carton: number; pc: number; half: number; dzn: number; ctn: number;
   set_cost: number; set_price: number; pcs: number; piece: number;
+  /** Optional net cost of one carton (or one set). When given it is the item's cost; empty (NaN or left out), the gross cost counts. */
+  net_cost?: number;
 }
+/** Whether a net cost was given (an empty box reads as NaN). */
+export const hasNet = (n: number | null | undefined): n is number => typeof n === 'number' && !isNaN(n);
+/** The cost that counts for one carton (or set): the net cost if given, else the gross cost. */
+export const costThatCounts = (gross: number, net?: number | null) => (hasNet(net) ? net : gross);
 export function itemProblem(o: ItemInput): string | null {
   if (!o.name.trim()) return 'Enter the item name';
   if (!o.category.trim()) return 'Choose the category';
+  if (hasNet(o.net_cost) && o.net_cost < 0) return 'The net cost cannot be negative';
   if (o.is_bundle) {
     if (!(o.set_cost >= 0) || !(o.set_price > 0)) return 'Enter the cost and selling price of one set';
-    if (o.set_price < o.set_cost) return 'Set price cannot be below its cost';
+    if (o.set_price < costThatCounts(o.set_cost, o.net_cost)) return 'Set price cannot be below its cost';
     if (!(o.pcs > 1) || o.pcs % 1 || !(o.piece > 0)) return 'For a mixed set, enter the pieces per set and the last price for one piece';
     return null;
   }
@@ -21,13 +28,13 @@ export function itemProblem(o: ItemInput): string | null {
   const pc = o.pc || (o.per_carton === 1 ? o.ctn || 0 : 0);
   if (pc < 0 || (o.dzn || 0) < 0 || (o.half || 0) < 0 || (o.ctn || 0) < 0) return 'Prices cannot be negative';
   // a carton of 12 (or 6) is the dozen (or half dozen): that price is the carton price, as on the server
-  const cpc = o.carton_cost / o.per_carton, dzn = o.per_carton === 12 ? 0 : o.dzn || 0, half = o.per_carton === 6 ? 0 : o.half || 0;
+  const eff = costThatCounts(o.carton_cost, o.net_cost), cpc = eff / o.per_carton, dzn = o.per_carton === 12 ? 0 : o.dzn || 0, half = o.per_carton === 6 ? 0 : o.half || 0;
   const ctn = o.per_carton === 1 ? 0 : o.ctn || (o.per_carton === 12 ? o.dzn || 0 : o.per_carton === 6 ? o.half || 0 : 0);
   if (!pc && !half && !dzn && !ctn) return 'Enter at least one selling price: per pc, half dozen, dozen or carton';
   if (pc > 0 && pc < cpc - 1e-9) return `Price per pc is below the cost of one pc (${fUSD(cpc)})`;
   if (half > 0 && half < cpc * 6 - 1e-9) return `Price per half dozen is below the cost of 6 pcs (${fUSD(cpc * 6)})`;
   if (dzn > 0 && dzn < cpc * 12 - 1e-9) return `Price per dozen is below the cost of 12 pcs (${fUSD(cpc * 12)})`;
-  if (ctn > 0 && ctn < o.carton_cost) return 'Price per carton cannot be below the carton cost';
+  if (ctn > 0 && ctn < eff) return 'Price per carton cannot be below the carton cost';
   return null;
 }
 const CATICON: Record<string, string> = { all: 'grid', skin: 'lotion', hair: 'comb', make: 'lipstick', lip: 'lipstick', frag: 'perfume', perf: 'perfume', bath: 'soap', soap: 'soap', body: 'soap', acc: 'mirror', brush: 'mirror', school: 'doc', station: 'doc', gift: 'gift' };

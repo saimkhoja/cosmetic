@@ -1335,6 +1335,50 @@ select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_rate('sales', 2850), public.save_rate('book', 2900);
 reset role;
 
+-- ===== gross and net cost: the net cost, when given, is the item's cost; empty, the gross cost counts =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('net1', public.save_product('{"name":"Net soap","category":"Skin care","carton_cost":24,"net_cost":12,"per_carton":24,"pc":0.8,"qty_cartons":1}')::text);
+select t.ok((select carton_cost_usd || ':' || net_cost_usd || ':' || cost_usd from product_costs where product_id = t.get('net1')::uuid) = '24.000000:12.000000:0.500000',
+  'gross and net cost are both kept; the cost per pc is the net cost / pcs');
+select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id where v.type = 'opening' and v.narration like '%Net soap%' and l.side = 'Dr') = 12,
+  'opening stock is booked at the net cost (24 pcs x 0.50)');
+select t.fails($$select public.save_product('{"name":"Net soap 2","category":"Skin care","carton_cost":24,"net_cost":12,"per_carton":24,"pc":0.4}')$$, 'below the cost of one pc ($0.50)', 'prices are checked against the net cost');
+select t.fails($$select public.save_product('{"name":"Net soap 2","category":"Skin care","carton_cost":24,"net_cost":-1,"per_carton":24,"pc":2}')$$, 'net cost cannot be negative', 'a negative net cost is refused');
+select t.fails($$select public.save_product('{"name":"Net soap 2","category":"Skin care","carton_cost":24,"net_cost":"abc","per_carton":24,"pc":2}')$$, 'valid net cost', 'a net cost that is not a number is refused');
+select t.put('gross1', public.save_product('{"name":"Gross soap","category":"Skin care","carton_cost":24,"net_cost":"","per_carton":24,"pc":1.5}')::text);
+select t.ok((select net_cost_usd is null and cost_usd = 1 from product_costs where product_id = t.get('gross1')::uuid), 'an empty net cost: the gross cost counts');
+-- an older app that does not send the net cost keeps it
+select public.save_product(jsonb_build_object('id', t.get('net1'), 'name','Net soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',0.9));
+select t.ok((select net_cost_usd = 12 and cost_usd = 0.5 from product_costs where product_id = t.get('net1')::uuid), 'saving without the net cost keeps it');
+-- changing the net cost revalues the stock, as any cost change does
+select public.save_product(jsonb_build_object('id', t.get('net1'), 'name','Net soap','category','Skin care','carton_cost',24,'net_cost',18,'per_carton',24,'pc',0.9));
+select t.ok((select cost_usd from product_costs where product_id = t.get('net1')::uuid) = 0.75, 'a new net cost is the new cost');
+select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id where v.type = 'adjustment' and v.narration like 'Cost of Net soap changed from $0.50 to $0.75%' and l.account_id = t.acc('INV_STORE')) = 6,
+  'the stock held is revalued at the new net cost (24 pcs x 0.25)');
+select t.ok(exists (select 1 from audit_log where action = 'Net cost of Net soap changed $12.00 to $18.00 per carton'), 'a net cost change is logged');
+-- removing the net cost: back to the gross cost
+select public.save_product(jsonb_build_object('id', t.get('net1'), 'name','Net soap','category','Skin care','carton_cost',24,'net_cost',null,'per_carton',24,'pc',1.5));
+select t.ok((select net_cost_usd is null and cost_usd = 1 from product_costs where product_id = t.get('net1')::uuid), 'removing the net cost brings back the gross cost');
+select t.ok(exists (select 1 from audit_log where action like 'Net cost of Net soap removed%'), 'removing it is logged');
+select t.ok(t.unbalanced() = 0, 'the cost changes keep the books balanced');
+-- a set: gross and net cost of one set
+select t.put('netset', public.save_product('{"name":"Net clips","category":"Skin care","is_bundle":true,"set_cost":10,"net_cost":7,"set_price":8,"pcs":12,"piece":1}')::text);
+select t.ok((select carton_cost_usd || ':' || net_cost_usd || ':' || cost_usd from product_costs where product_id = t.get('netset')::uuid) = '10.000000:7.000000:7.000000',
+  'a set keeps its gross and net cost; its cost is the net cost');
+select t.ok((select carton_cost_usd = cost_usd from product_costs where product_id = t.get('brush')::uuid), 'a set made before keeps its cost as its gross cost');
+-- the Excel import takes an optional net carton cost
+select t.ok((public.import_products('[{"row":2,"name":"Net import","category":"Skin care","carton_cost":24,"net_cost":12,"per_carton":24,"pc":0.8},
+  {"row":3,"name":"Gross import","category":"Skin care","carton_cost":24,"net_cost":null,"per_carton":24,"pc":1.5}]')->>'imported')::int = 2, 'import with and without a net cost');
+select t.ok((select string_agg(coalesce(c.net_cost_usd::text, '-') || ':' || c.cost_usd, ',' order by p.name) from product_costs c join products p on p.id = c.product_id
+  where p.name in ('Net import', 'Gross import')) = '-:1.000000,12.000000:0.500000', 'imported net cost is the cost; without one the gross cost counts');
+-- goods in are valued at the cost that counts
+select public.save_product(jsonb_build_object('id', t.get('net1'), 'name','Net soap','category','Skin care','carton_cost',24,'net_cost',12,'per_carton',24,'pc',1.5));
+select t.as('00000000-0000-0000-0000-00000000000b');
+select t.put('grnnet', public.receive_goods(jsonb_build_object('supplier_id', t.get('sup'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('net1'), 'qty', 24))))->>'id');
+reset role;
+select t.ok((select std_cost_usd from grn_items where grn_id = t.get('grnnet')::uuid) = 0.5, 'goods in are valued at the net cost');
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

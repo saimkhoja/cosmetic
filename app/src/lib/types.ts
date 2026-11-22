@@ -17,7 +17,9 @@ export interface Product {
   per_carton: number; pieces_per_set: number; price_usd: number; half_dozen_usd: number; dozen_usd: number; carton_usd: number; piece_usd: number;
   reorder: number; wh_qty: number; active: boolean; archived_at?: string | null; barcode?: string | null; barcodes?: string[] | null;
 }
-export interface Cost { product_id: string; carton_cost_usd: number; cost_usd: number }
+/** An item's cost (Admin only). carton_cost_usd is the gross cost of one carton (or set); net_cost_usd the optional
+ *  net cost of one carton (or set), empty when the gross cost counts; cost_usd the cost that counts, per pc (or set). */
+export interface Cost { product_id: string; carton_cost_usd: number; net_cost_usd?: number | null; cost_usd: number }
 export interface StockRow { shop_id: string; product_id: string; qty: number; open_pieces: number }
 export interface InvoiceItem { line_no?: number; product_id: string; name: string; unit: string; mult: number; piece: boolean; qty: number; price: number; line: number }
 export interface InvoiceEdit { at: string; by_name: string; reason: string; from_total: number; to_total: number }
