@@ -268,13 +268,13 @@ export function vendeurPaymentHTML(x: { no: string; at: string; amount: number; 
   <div class="rl">Reçu par&nbsp;&nbsp; ${esc(x.by_name)}</div></div>`;
 }
 
-/** The promo report of a month: each vendeur's promo items, at the shop price. */
+/** The promo report of a month: each item given out free and how many pieces, all vendeurs together. */
 export function promoReportHTML(d: PromoData, c: Company, shopName: string, by: string, status: 'open' | 'kept' | 'settled') {
   const m = new Date(d.month + 'T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-  const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(shopName)}</b>: promo items given to vendeurs, open at the end of ${esc(m)}${d.carried ? `, ${fCDF(d.carried)} of them from earlier months` : ''}. ${status === 'settled' ? '<b>Settled.</b>' : status === 'kept' ? 'Kept, not settled.' : 'Not yet kept or settled.'}</p>
-  <table class="t"><thead><tr><th>Vendeur</th><th>Items given</th><th class="r">Promos</th><th class="r">Value CDF</th></tr></thead><tbody>
-  ${d.vendeurs.map((v) => `<tr><td><b>${esc(v.name)}</b><br><small>${esc(v.first)} to ${esc(v.last)}</small></td><td>${(v.items ?? []).map((i) => `${i.qty} ${esc(i.unit)} ${esc(i.name)}`).join(', ')}</td><td class="r">${v.n}</td><td class="r">${fCDF(v.value)}</td></tr>`).join('') || '<tr><td colspan="4">No promo items</td></tr>'}
-  <tr><td colspan="2"><b>Total</b></td><td class="r"><b>${d.n}</b></td><td class="r"><b>${fCDF(d.value)}</b></td></tr></tbody></table>
-  <p style="margin-top:10px">Promo items are not invoiced and not owed by the vendeurs. They are valued at the shop price.</p>`;
+  const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(shopName)}</b>: promo items given out, open at the end of ${esc(m)}${d.carried_pcs ? `, ${d.carried_pcs} pieces of them from earlier months` : ''}. ${status === 'settled' ? '<b>Settled.</b>' : status === 'kept' ? 'Kept, not settled.' : 'Not yet kept or settled.'}</p>
+  <table class="t"><thead><tr><th>Item</th><th class="r">Pieces given out</th></tr></thead><tbody>
+  ${(d.items ?? []).map((i) => `<tr><td>${esc(i.name)}</td><td class="r">${i.qty}${i.unit !== 'pcs' ? ' ' + esc(i.unit) : ''}</td></tr>`).join('') || '<tr><td colspan="2">No promo items</td></tr>'}
+  <tr><td><b>Total</b></td><td class="r"><b>${d.pcs ?? 0}</b></td></tr></tbody></table>
+  <p style="margin-top:10px">Promo items are not invoiced and not owed by the vendeurs.</p>`;
   return bookHTML(c, 'Promo report', m, body, by);
 }

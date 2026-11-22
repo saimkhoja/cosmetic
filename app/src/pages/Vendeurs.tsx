@@ -222,7 +222,7 @@ function PromoReportModal({ month: m0, shopName, onClose }: { month: string; sho
   const rep = usePromoReport(month), d = rep.data;
   const kept = d?.reports.find((r) => r.month === month && r.status === 'kept');
   const close = (action: 'keep' | 'settle') => a.run(async () => {
-    if (action === 'settle' && !confirm(`Settle the promo report of ${monthName(month)}? Its ${d?.n ?? 0} promos (${fCDF(d?.value ?? 0)}) are closed and the promo count starts again at zero. The settled report is kept to view and print.`)) return;
+    if (action === 'settle' && !confirm(`Settle the promo report of ${monthName(month)}? Its ${d?.pcs ?? 0} pieces given out are closed and the promo count starts again at zero. The settled report is kept to view and print.`)) return;
     await rpc('close_promo_report', { p_month: month, p_action: action });
     await refresh('vendeurs', 'audit'); void rep.refetch();
     toast(action === 'settle' ? `Promo report of ${monthName(month)} settled; the count starts again at zero` : `Promo report of ${monthName(month)} kept; its promos stay open`);
@@ -231,21 +231,21 @@ function PromoReportModal({ month: m0, shopName, onClose }: { month: string; sho
   const shown: PromoData | undefined = view?.data ?? d;
   return (
     <Modal title="Promo report" icon="gift" xl onClose={onClose} foot={view ? <><button className="btn" onClick={() => setView(null)}>Back</button><button className="btn primary" onClick={() => printIt(view.data, view.status)}><Icon n="printer" /> Print</button></>
-      : <><button className="btn" onClick={onClose}>Close</button><span className="sp" /><button className="btn" disabled={!d?.n} onClick={() => d && printIt(d, kept ? 'kept' : 'open')}><Icon n="printer" /> Print</button>
+      : <><button className="btn" onClick={onClose}>Close</button><span className="sp" /><button className="btn" disabled={!d?.items?.length} onClick={() => d && printIt(d, kept ? 'kept' : 'open')}><Icon n="printer" /> Print</button>
         <button className="btn" id="promokeep" disabled={a.busy || !d?.n} onClick={() => void close('keep')}><Icon n="doc" /> Keep report</button>
         <button className="btn primary" id="promosettle" disabled={a.busy || !d?.n} onClick={() => void close('settle')}><Icon n="check" /> Settle</button></>}>
       {view ? <Note i="doc">{view.status === 'settled' ? 'Settled' : 'Kept'} report of {monthName(view.month)}, {dt(view.at)} by {view.by_name}.</Note>
         : <div className="frow three"><div className="field"><label htmlFor="pmonth">Month</label><input id="pmonth" className="input" type="month" value={month.slice(0, 7)} max={today().slice(0, 7)} onChange={(e) => e.target.value && setMonth(e.target.value + '-01')} /></div>
-          <div className="field"><label>Open at the end of the month</label><div style={{ paddingTop: 8 }}><b>{fCDF(d?.value ?? 0)}</b>, {d?.n ?? 0} promos{d?.carried ? <span className="code"> · {fCDF(d.carried)} from earlier months</span> : null}</div></div>
+          <div className="field"><label>Given out, open at the end of the month</label><div style={{ paddingTop: 8 }}><b>{d?.pcs ?? 0} pieces</b>{d?.carried_pcs ? <span className="code"> · {d.carried_pcs} from earlier months</span> : null}</div></div>
           <div className="field"><label>Status</label><div style={{ paddingTop: 8 }}>{kept ? <span className="chip warn">Kept {dt(kept.at)}, not settled</span> : d?.n ? <span className="chip">Not kept or settled</span> : <span className="chip ok">Nothing open</span>}</div></div></div>}
-      {rep.isLoading && !view ? <Empty i="refresh" t="Loading the report" /> : !shown?.vendeurs.length ? <Empty i="gift" t={`No promo items open up to the end of ${monthName(month)}`} /> :
-        <div className="tw"><table className="t" id="promotable"><thead><tr><th>Vendeur</th><th>Items given</th><th className="r">Promos</th><th className="r">Value</th></tr></thead><tbody>
-          {shown.vendeurs.map((v) => <tr key={v.vendeur_id}><td><b>{v.name}</b><div className="code">{ddmm(v.first)} to {ddmm(v.last)}{v.carried ? `, ${fCDF(v.carried)} from earlier months` : ''}</div></td>
-            <td>{(v.items ?? []).map((i) => `${i.qty} ${i.unit} ${i.name}`).join(', ')}</td><td className="r">{v.n}</td><td className="r nw"><b>{fCDF(v.value)}</b></td></tr>)}
-          <tr><td colSpan={2}><b>Total</b></td><td className="r"><b>{shown.n}</b></td><td className="r nw"><b>{fCDF(shown.value)}</b></td></tr></tbody></table></div>}
+      {rep.isLoading && !view ? <Empty i="refresh" t="Loading the report" /> : !shown?.items?.length ? <Empty i="gift" t={`No promo items open up to the end of ${monthName(month)}`} /> :
+        <div className="tw"><table className="t" id="promotable"><thead><tr><th>Item</th><th className="r">Pieces given out</th></tr></thead><tbody>
+          {shown.items.map((i) => <tr key={i.name}><td><b>{i.name}</b>{i.carried ? <div className="code">{i.carried} from earlier months</div> : null}</td>
+            <td className="r nw"><b>{i.qty}</b>{i.unit !== 'pcs' ? ` ${i.unit}` : ''}</td></tr>)}
+          <tr><td><b>Total</b></td><td className="r nw"><b>{shown.pcs}</b></td></tr></tbody></table></div>}
       {!view ? <Note i="gift" style={{ marginTop: 12 }}><b>Keep report</b> saves it as it is; its promos stay open and keep adding up into next month. <b>Settle</b> closes them: the promo count starts again at zero, and the settled report stays here to view and print.</Note> : null}
       {!view && d?.reports.length ? <><h3 style={{ marginTop: 16 }}><Icon n="doc" /> Reports kept and settled</h3><div className="tw"><table className="t" style={{ fontSize: 13.5 }}><tbody>{d.reports.map((r) => <tr key={r.id}><td><b>{monthName(r.month)}</b><div className="code">{dt(r.at)}, {r.by_name}</div></td>
-        <td>{r.status === 'settled' ? <span className="chip ok">Settled</span> : <span className="chip warn">Kept</span>}</td><td className="r">{r.n} promos</td><td className="r nw">{fCDF(r.total)}</td>
+        <td>{r.status === 'settled' ? <span className="chip ok">Settled</span> : <span className="chip warn">Kept</span>}</td><td className="r nw">{r.data?.pcs ?? '-'} pieces</td>
         <td style={{ width: 1 }}><button className="btn sm" onClick={() => setView(r)}><Icon n="eye" /> View</button></td></tr>)}</tbody></table></div></> : null}
       <div className="lerr">{a.err}</div>
     </Modal>

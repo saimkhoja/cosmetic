@@ -238,30 +238,23 @@ begin
   return jsonb_build_object('id', pid, 'no', pno, 'value', val, 'n', ln);
 end $$;
 
--- the promo items of a shop still open at the end of a month (those of earlier months that were kept included),
--- by vendeur, with each item given. Values at the shop price; no costs (the Shop Admin sees no cost prices).
+-- the promo items of a shop still open at the end of a month (those of earlier months that were kept included):
+-- each item and how many were given out, all vendeurs together. No vendeur names, no costs. n and value are kept for
+-- the activity log and the report's record, not shown.
 create or replace function app.promo_open(p_shop uuid, p_month date) returns jsonb
 language sql stable security definer set search_path = public, pg_temp as $$
   with z as (select tz from settings where id = 1),
   pr as (
     select p.*, (p.t at time zone (select tz from z))::date as d from vendeur_promos p
     where p.shop_id = p_shop and p.status = 'open' and (p.t at time zone (select tz from z))::date < (p_month + interval '1 month')::date
-  ), per_item as (
-    select pr.vendeur_id, i.product_id, min(i.name) as name, min(i.unit) as unit, sum(i.qty) as qty, sum(i.line) as value
-    from pr join vendeur_promo_items i on i.promo_id = pr.id group by 1, 2
-  ), per_v as (
-    select pr.vendeur_id, count(*) as n, sum(pr.value) as value, coalesce(sum(pr.value) filter (where pr.d < p_month), 0) as carried,
-      min(pr.d) as first, max(pr.d) as last,
-      jsonb_agg(jsonb_build_object('no', pr.no, 'date', pr.d, 'value', pr.value, 'note', pr.note,
-        'invoice', (select no from invoices where id = pr.invoice_id)) order by pr.t) as promos
-    from pr group by 1
+  ), it as (
+    select i.product_id, min(i.name) as name, min(i.unit) as unit, sum(i.qty) as qty, coalesce(sum(i.qty) filter (where pr.d < p_month), 0) as carried
+    from pr join vendeur_promo_items i on i.promo_id = pr.id group by i.product_id
   )
-  select jsonb_build_object('month', p_month, 'n', coalesce(sum(pv.n), 0), 'value', coalesce(sum(pv.value), 0), 'carried', coalesce(sum(pv.carried), 0),
-    'vendeurs', coalesce(jsonb_agg(jsonb_build_object('vendeur_id', v.id, 'name', v.name, 'n', pv.n, 'value', pv.value, 'carried', pv.carried,
-      'first', pv.first, 'last', pv.last, 'promos', pv.promos,
-      'items', (select jsonb_agg(jsonb_build_object('name', pi.name, 'unit', pi.unit, 'qty', pi.qty, 'value', pi.value) order by pi.value desc, pi.name)
-                from per_item pi where pi.vendeur_id = v.id)) order by pv.value desc, v.name) filter (where v.id is not null), '[]'))
-  from per_v pv join vendeurs v on v.id = pv.vendeur_id
+  select jsonb_build_object('month', p_month,
+    'n', (select count(*) from pr), 'value', (select coalesce(sum(value), 0) from pr),
+    'pcs', (select coalesce(sum(qty), 0) from it), 'carried_pcs', (select coalesce(sum(carried), 0) from it),
+    'items', (select coalesce(jsonb_agg(jsonb_build_object('name', name, 'unit', unit, 'qty', qty, 'carried', carried) order by lower(name)), '[]') from it))
 $$;
 
 -- ---------- settings: the Vendeurs switch ----------

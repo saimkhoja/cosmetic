@@ -51,11 +51,11 @@ export interface Vendeur extends VendeurState {
   credit_days: number; credit_limit: number; opening_balance: number; active: boolean; created_at: string; created_by_name: string;
 }
 export interface PromoLine { name: string; unit: string; qty: number; value?: number; line?: number }
-/** The promo items of a shop still open at the end of a month, by vendeur (values at the shop price, CDF). */
+/** The promo items of a shop still open at the end of a month: each item and how many were given out, all vendeurs
+ *  together (no vendeur names). qty is in the item's stock unit (pcs, or sets); carried, from earlier months. */
 export interface PromoData {
-  month: string; n: number; value: number; carried: number;
-  vendeurs: { vendeur_id: string; name: string; n: number; value: number; carried: number; first: string; last: string; items: PromoLine[] | null;
-    promos: { no: string; date: string; value: number; note: string; invoice: string | null }[] }[];
+  month: string; n: number; value: number; pcs: number; carried_pcs: number;
+  items: { name: string; unit: string; qty: number; carried: number }[];
 }
 export interface PromoReport extends PromoData {
   shop_id: string; shop_name: string; oldest_open: string | null;

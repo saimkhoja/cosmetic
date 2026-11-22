@@ -1481,7 +1481,8 @@ select t.ok((t.vstate('Papa Jean')->>'balance')::bigint = 20100, 'a cancelled pa
 -- the promo report: keep it (it stays open), then settle it (the count starts again)
 select t.put('pr2', public.give_promo(jsonb_build_object('vendeur_id', t.get('v1'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 2))))::text);
 select t.fails(format($$select public.give_promo('{"vendeur_id":"%s","lines":[{"product_id":"%s","qty":500}]}')$$, t.get('v1'), t.get('cgel')), 'Not enough Credit gel', 'promo items come from the stock the shop has');
-select t.ok((select (x->>'n')::int = 2 and (x->>'value')::bigint = 17100 and x->'vendeurs'->0->>'name' = 'Papa Jean' from public.promo_report(current_date) x), 'the month''s promo report, by vendeur');
+select t.ok((select (x->>'pcs')::int = 3 and jsonb_array_length(x->'items') = 1 and x->'items'->0->>'name' = 'Credit gel' and (x->'items'->0->>'qty')::int = 3
+  and x::text not like '%Papa Jean%' from public.promo_report(current_date) x), 'the month''s promo report lists each item and the pieces given out, no vendeur names');
 select public.cancel_promo((t.get('pr2')::jsonb->>'id')::uuid, 'given by mistake');
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid) = 46, 'a cancelled promo goes back into the stock');
 select t.ok((public.close_promo_report(current_date, 'keep')->>'status') = 'kept' and (t.vstate('Papa Jean')->>'promo_open')::bigint = 5700, 'a kept report leaves its promos open');
