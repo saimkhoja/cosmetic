@@ -49,9 +49,25 @@ export function PromoPicker({ products, stockOf, rate, lines, setLines }: { prod
 }
 export const promoLines = (lines: Record<string, string>) => Object.entries(lines).map(([product_id, q]) => ({ product_id, qty: parseInt(q) || 0 })).filter((l) => l.qty > 0);
 
+/** Deleting a vendeur: one created by mistake (nothing recorded) goes completely; one with goods, payments or promos is
+ *  kept and made inactive, once it owes nothing. True when it was deleted or made inactive. */
+async function deleteVendeur(v: Vendeur, toast: (m: string, t?: 'ok' | 'bad' | 'warn') => void, refresh: (...k: string[]) => Promise<unknown>) {
+  const used = v.balance !== v.opening_balance || !!v.last_payment || v.promo_open_n > 0 || v.open.some((o) => o.invoice_id);
+  if (!confirm(used
+    ? `${v.name} has goods, payments or promo items recorded, so it cannot be deleted: it is made inactive instead and keeps its history${v.balance > 0 ? ` (it still owes ${fCDF(v.balance)}: take the payment first)` : ''}. Go on?`
+    : `Delete vendeur ${v.name}? Nothing was recorded for this vendeur, so it is removed completely${v.opening_balance ? `, with the ${fCDF(v.opening_balance)} it was entered as owing` : ''}.`)) return false;
+  try {
+    const r = await rpc<string>('delete_vendeur', { p_id: v.id });
+    await refresh('vendeurs', 'audit');
+    toast(r === 'deleted' ? `Vendeur ${v.name} deleted` : `${v.name} made inactive; its history is kept`, r === 'deleted' ? 'ok' : 'warn');
+    return true;
+  } catch (e) { toast((e as Error).message, 'bad'); return false; }
+}
+
 export default function Vendeurs() {
   const { profile } = useAuth();
-  const vend = useVendeurs(), shops = useShops(), refresh = useRefresh();
+  const vend = useVendeurs(), shops = useShops(), refresh = useRefresh(), toast = useToast();
+  const removeVendeur = (v: Vendeur) => deleteVendeur(v, toast, refresh);
   const [q, setQ] = useState(''), [showOff, setShowOff] = useState(false);
   const [edit, setEdit] = useState<Vendeur | 'new' | null>(null), [pay, setPay] = useState<Vendeur | null>(null), [promo, setPromo] = useState<Vendeur | null>(null);
   const [stmt, setStmt] = useState<Vendeur | null>(null), [report, setReport] = useState<string | null>(null);
@@ -92,7 +108,8 @@ export default function Vendeurs() {
                 <button title="Take a payment" aria-label={`Take a payment from ${v.name}`} disabled={v.balance <= 0} onClick={() => setPay(v)}><Icon n="cash" /></button>
                 <button title="Give promo items" aria-label={`Give promo items to ${v.name}`} disabled={!v.active} onClick={() => setPromo(v)}><Icon n="gift" /></button>
                 <button title="Statement" aria-label={`Statement of ${v.name}`} onClick={() => setStmt(v)}><Icon n="doc" /></button>
-                <button title="Edit" aria-label={`Edit ${v.name}`} onClick={() => setEdit(v)}><Icon n="edit" /></button></div></td>
+                <button title="Edit" aria-label={`Edit ${v.name}`} onClick={() => setEdit(v)}><Icon n="edit" /></button>
+                <button title="Delete vendeur" aria-label={`Delete ${v.name}`} onClick={() => void removeVendeur(v)}><Icon n="trash" /></button></div></td>
             </tr>)}
           </tbody></table>}
       </div></div>
@@ -119,13 +136,9 @@ function VendeurForm({ v, onClose }: { v: Vendeur | null; onClose: () => void })
     await rpc('save_vendeur', { p: { id: v?.id ?? null, ...f, credit_limit: lim, credit_days: days, opening_balance: num(f.opening_balance) || 0 } });
     await refresh('vendeurs', 'audit'); toast(v ? 'Vendeur saved' : `Vendeur ${f.name.trim()} added`); onClose();
   });
-  const del = () => b.run(async () => {
-    if (!v || !confirm(`Remove vendeur ${v.name}? A vendeur with goods, payments or promos is made inactive instead, and keeps its history.`)) return;
-    const r = await rpc<string>('delete_vendeur', { p_id: v.id });
-    await refresh('vendeurs', 'audit'); toast(r === 'deleted' ? `${v.name} deleted` : `${v.name} made inactive; its history is kept`); onClose();
-  });
+  const del = () => b.run(async () => { if (v && await deleteVendeur(v, toast, refresh)) onClose(); });
   return (
-    <Modal title={v ? `Edit vendeur ${v.name}` : 'Add vendeur'} icon="user" onClose={onClose} foot={<>{v ? <button className="btn danger" disabled={b.busy} onClick={() => void del()}><Icon n="trash" /> Remove</button> : null}<span className="sp" /><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="vsave" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Save vendeur</button></>}>
+    <Modal title={v ? `Edit vendeur ${v.name}` : 'Add vendeur'} icon="user" onClose={onClose} foot={<>{v ? <button className="btn danger" disabled={b.busy} onClick={() => void del()}><Icon n="trash" /> Delete vendeur</button> : null}<span className="sp" /><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="vsave" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Save vendeur</button></>}>
       <div className="field"><label htmlFor="vname">Name of the vendeur</label><input id="vname" className="input" maxLength={40} value={f.name} onChange={set('name')} autoFocus /></div>
       <div className="frow"><div className="field"><label htmlFor="vdays">Credit period (days)</label><input id="vdays" className="input" type="number" min="0" max="365" step="1" value={f.credit_days} onChange={set('credit_days')} /><span className="hint">Goods given are due after this many days</span></div>
         <div className="field"><label htmlFor="vlim">Credit limit (CDF)</label><input id="vlim" className="input" type="number" min="1" step="1" value={f.credit_limit} onChange={set('credit_limit')} /><span className="hint">The most the vendeur should owe at once. Payments bring the credit back.</span></div></div>
