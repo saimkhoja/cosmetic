@@ -7,7 +7,7 @@ name: Update control project
 on:
   push:
     branches: [main]
-    paths: ['control/migrations/**', 'control/supabase/**', 'control/scripts/check_migrations.sql']
+    paths: ['control/migrations/**', 'control/supabase/**', 'control/scripts/check_migrations.sql', '.github/workflows/control.yml']
   workflow_dispatch:
     inputs:
       mode:
@@ -43,7 +43,7 @@ jobs:
       - name: Migrations
         run: ops/migrate.sh "$RUNNER_TEMP/db.url" "$MODE"
       - uses: supabase/setup-cli@v1
-        with: { version: latest }
+        with: { version: 2.122.1 }   # pinned: "latest" asks the GitHub API, which is rate-limited
       - name: Edge Functions
         run: |
           if [ "$MODE" = plan ]; then echo "- Would deploy the Edge Functions: signup, approve" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
