@@ -126,7 +126,7 @@ jobs:
           ops/migrate.sh "$RUNNER_TEMP/db.url" apply
       - uses: supabase/setup-cli@v1
         if: env.FUNCTIONS == 'true'
-        with: { version: latest }
+        with: { version: 2.122.1 }   # pinned: "latest" asks the GitHub API, which is rate-limited
       - name: Deploy the Edge Functions
         if: env.FUNCTIONS == 'true'
         run: |

@@ -56,7 +56,7 @@ jobs:
           ops/migrate.sh "$RUNNER_TEMP/db.url" apply
           rm -f "$RUNNER_TEMP/db.url"
       - uses: supabase/setup-cli@v1
-        with: { version: latest }
+        with: { version: 2.122.1 }   # pinned: "latest" asks the GitHub API, which is rate-limited
       - name: Their Edge Functions
         id: fn
         env:
