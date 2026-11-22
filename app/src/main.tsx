@@ -17,6 +17,10 @@ void loadTenant().then(async (r) => {
     if (r.kind === 'tenant') document.title = `${r.tenant.name} · QuickSales`;
     const { start } = await import('./boot');
     start(root);
+  } else if (r.kind === 'no-subdomain') {
+    // getquicksales.com itself (and www): the landing page and signup, without the app
+    const { Landing } = await import('./landing/Landing');
+    root.render(<React.StrictMode><Landing /></React.StrictMode>);
   } else {
     root.render(<React.StrictMode><TenantProblem r={r} /></React.StrictMode>);
   }

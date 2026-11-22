@@ -1,0 +1,54 @@
+# Keeps the control project (control/README.md) up to date with main: its migrations (control/migrations, through
+# ops/migrate.sh, backed by the same rules as the clients' databases) and its Edge Functions (signup, approve).
+# Runs on a push to main that changes control/, or by hand.
+# Secrets: SUPABASE_ACCESS_TOKEN, CONTROL_PROJECT_REF. The control project's own secrets (APPROVE_SECRET, RESEND_API_KEY…)
+# are set in its dashboard, not here.
+name: Update control project
+on:
+  push:
+    branches: [main]
+    paths: ['control/migrations/**', 'control/supabase/**', 'control/scripts/check_migrations.sql']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan = only show what would change; apply = do it'
+        type: choice
+        options: [plan, apply]
+        default: plan
+permissions:
+  contents: read
+concurrency:
+  group: update-control-project
+  cancel-in-progress: false
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MODE: ${{ github.event_name == 'push' && 'apply' || inputs.mode }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      CONTROL_PROJECT_REF: ${{ secrets.CONTROL_PROJECT_REF }}
+      PSQL: /usr/lib/postgresql/17/bin/psql
+      MIGRATIONS_DIR: control/migrations
+      BASELINE_CHECK: control/scripts/check_migrations.sql
+      BASELINE_UPTO: '20261122000001'
+      APP_TABLE: public.tenants
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: ops/install-pg17.sh
+      - name: Connect
+        run: node ops/clients.mjs db-url "$CONTROL_PROJECT_REF" "$RUNNER_TEMP/db.url"
+      - name: Migrations
+        run: ops/migrate.sh "$RUNNER_TEMP/db.url" "$MODE"
+      - uses: supabase/setup-cli@v1
+        with: { version: latest }
+      - name: Edge Functions
+        run: |
+          if [ "$MODE" = plan ]; then echo "- Would deploy the Edge Functions: signup, approve" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          for fn in signup approve; do supabase functions deploy "$fn" --project-ref "$CONTROL_PROJECT_REF" --no-verify-jwt --workdir control; done
+          echo "- Edge Functions deployed: signup, approve" >> "$GITHUB_STEP_SUMMARY"
+      - name: Clean up
+        if: always()
+        run: rm -f "$RUNNER_TEMP/db.url"

@@ -13,20 +13,40 @@ The app asks the control project once, keeps the answer on the device, and from 
 
 | What | Where |
 |---|---|
-| `migrations/` | the `tenants` table and `tenant_config()`, the only thing the public can call |
-| `scripts/add_tenant.sql` | add or update a client by hand (until signup does it, step 3) |
-| `tests/run.sh` | the tests; also run in CI |
+| `migrations/` | the `tenants` table, `tenant_config()` and `subdomain_available()` (all the public can call), and the signup functions |
+| `scripts/add_tenant.sql` | add or update a client by hand (new clients normally come through signup) |
+| `supabase/functions/` | the Edge Functions `signup` and `approve` (signups from getquicksales.com) |
+| `tests/` | the tests (SQL, Edge Functions); also run in CI |
+
+## Signups from getquicksales.com
+
+```
+visitor fills the form ──► signup function ──► tenants row, status pending ──► email to you (Review and approve)
+                                                                              └► email to them (request received)
+you open the link ──► getquicksales.com/approve ──► approve function ──► status provisioning
+                                                                      └► GitHub: "Set up a new client" (provision.yml)
+provision.yml ──► their Supabase project, sign-in settings, migrations, Edge Functions ──► status active ──► welcome email
+```
+
+- **Reject** deletes the request and frees the name. **Failed** setups keep their project; "Try again" on the same page
+  continues where it stopped (nothing is made twice).
+- Limits: 3 open requests a day from one internet address, 30 a day in all; a hidden field catches simple robots.
+- Only active and suspended clients are served, updated and backed up; requests never are.
+- The approval link carries a signature (HMAC with `APPROVE_SECRET`) of the name and the moment it was asked for. Keep the
+  emails private: anyone with the link can approve or reject that one request.
+- One-time setup: `deploy/DEPLOY.md`, section 6d.
 
 ## Setting it up (once)
 
 1. **supabase.com → New project**, named e.g. `quicksales-control`. Any region; it is asked one tiny question per device.
-2. **SQL Editor** → paste each file of `control/migrations/` in order → **Run**.
+2. **SQL Editor** → paste `control/migrations/20261122000001_tenants.sql` → **Run**. Later files are applied by the
+   **Update control project** workflow (`.github/workflows/control.yml`), with the Edge Functions; don't paste them by hand.
 3. **Settings → API**: write down the **Project URL** and the **anon / publishable** key. These go into the shared Vercel
    project as `VITE_CONTROL_URL` and `VITE_CONTROL_ANON_KEY` (`deploy/DEPLOY.md`, section 6).
 4. Add each client with `scripts/add_tenant.sql` (below).
 
-Nothing else is needed: no Auth settings, no Edge Functions. Keep the **secret / service_role** key of this project to yourself;
-signup (step 3) will use it from a server, never from the browser.
+No Auth settings are needed. Keep the **secret / service_role** key of this project to yourself; only its Edge Functions
+use it, inside Supabase.
 
 ## Adding or changing a client
 
@@ -49,6 +69,7 @@ from their next start; anything a till has not sent yet stays on the till, so fi
 
 ## Who can see what
 
-- The public (the app, anyone with the URL) can only call `tenant_config('<one subdomain>')` and gets the business name,
+- The public (the app, the signup form) can call `subdomain_available('<name>')` (free, taken, reserved or invalid) and
+  `tenant_config('<one subdomain>')` and gets the business name,
   URL, public key and active/suspended: the same things anyone gets by opening that client's site. It cannot list clients.
 - The `tenants` table (contacts, project refs, backup names) is readable only in the dashboard and with the secret key.

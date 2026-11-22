@@ -1,0 +1,80 @@
+# Sets up a new client after you approve their signup (the approve Edge Function starts this; it can also be run by
+# hand: Actions → Set up a new client → Run workflow, with the subdomain of an approved request).
+# Steps: their own Supabase project with QuickSales' sign-in settings → every migration → the Edge Functions →
+# their URL and key in the control project (the address works from then on) → welcome email. Safe to run again.
+# On failure the request is marked failed and you are emailed; "Try again" on the approval page runs it again.
+#
+# Secrets: SUPABASE_PROVISION_TOKEN (see deploy/DEPLOY.md section 6d for its permissions), CONTROL_PROJECT_REF,
+# RESEND_API_KEY, MAIL_FROM, OWNER_EMAIL. Variables (optional): SITE_DOMAIN, SUPABASE_REGION.
+name: Set up a new client
+run-name: Set up ${{ inputs.subdomain }}
+on:
+  workflow_dispatch:
+    inputs:
+      subdomain:
+        description: 'The subdomain of an approved request'
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: provision-${{ inputs.subdomain }}
+  cancel-in-progress: false
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUB: ${{ inputs.subdomain }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_PROVISION_TOKEN }}
+      CONTROL_PROJECT_REF: ${{ secrets.CONTROL_PROJECT_REF }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      MAIL_FROM: ${{ secrets.MAIL_FROM }}
+      OWNER_EMAIL: ${{ secrets.OWNER_EMAIL }}
+      SITE_DOMAIN: ${{ vars.SITE_DOMAIN || 'getquicksales.com' }}
+      SUPABASE_REGION: ${{ vars.SUPABASE_REGION }}
+      PSQL: /usr/lib/postgresql/17/bin/psql
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: ops/install-pg17.sh
+      - name: Their Supabase project
+        id: start
+        run: node ops/provision.mjs start "$SUB" 2> >(tee "$RUNNER_TEMP/err" >&2)
+      - name: Their database
+        id: db
+        env:
+          REF: ${{ steps.start.outputs.ref }}
+        run: |
+          # a new project's connection pooler can take a few minutes to accept logins
+          for i in 1 2 3 4 5 6; do
+            node ops/clients.mjs db-url "$REF" "$RUNNER_TEMP/db.url"
+            if "$PSQL" "$(cat "$RUNNER_TEMP/db.url")" -XqtAc 'select 1' >/dev/null 2>&1; then break; fi
+            [ "$i" = 6 ] && { echo "::error::The database of $REF does not accept logins yet"; exit 1; }
+            echo "Database not reachable yet, trying again in 30 s"; sleep 30
+          done
+          ops/migrate.sh "$RUNNER_TEMP/db.url" apply
+          rm -f "$RUNNER_TEMP/db.url"
+      - uses: supabase/setup-cli@v1
+        with: { version: latest }
+      - name: Their Edge Functions
+        id: fn
+        env:
+          REF: ${{ steps.start.outputs.ref }}
+        run: |
+          for fn in setup admin-users; do
+            supabase functions deploy "$fn" --project-ref "$REF" --no-verify-jwt || { sleep 20; supabase functions deploy "$fn" --project-ref "$REF" --no-verify-jwt; }
+          done
+      - name: Live, and email them
+        id: finish
+        run: node ops/provision.mjs finish "$SUB" "${{ steps.start.outputs.ref }}" 2> >(tee "$RUNNER_TEMP/err" >&2)
+      - name: Report the failure
+        if: failure()
+        env:
+          STEP: ${{ steps.start.outcome == 'failure' && 'creating their Supabase project' || steps.db.outcome == 'failure' && 'their database (migrations)' || steps.fn.outcome == 'failure' && 'deploying their Edge Functions' || steps.finish.outcome == 'failure' && 'going live' || 'getting ready' }}
+        run: |
+          why=$(grep -v '^\s*$' "$RUNNER_TEMP/err" 2>/dev/null | tail -1 | sed 's/^::error:://')
+          node ops/provision.mjs fail "$SUB" "Failed at: $STEP. ${why}" || true
+      - name: Clean up
+        if: always()
+        run: rm -f "$RUNNER_TEMP/db.url"

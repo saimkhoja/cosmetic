@@ -210,7 +210,10 @@ So a new client needs **no Vercel project, no DNS record and no build**, and one
    `trial1`) pointing at a **new, empty** Supabase project, open `https://trial1.getquicksales.com`: the **Set up QuickSales** screen
    appears. An address no client has shows "No shop at this address".
 
-### 6b. Adding a client
+### 6b. Adding a client by hand
+
+New clients normally come through the signup form (6d), which does all of this by itself. By hand:
+
 
 1. **New Supabase project** in the client's name, in the same Supabase account as the others. Do only the **Auth settings**
    of section 1 by hand. Set **Site URL** to `https://<subdomain>.getquicksales.com`.
@@ -279,6 +282,63 @@ Rules for migration files, which the workflow enforces:
 
 To see what a run would do without changing anything: **Run workflow** with mode **plan**. The first time each existing
 client is seen, it is checked with `supabase/scripts/check_migrations.sql` and recorded as complete (it was set up by hand).
+
+### 6d. Signups on getquicksales.com (setting up once)
+
+`getquicksales.com` shows the landing page (French and English) with a signup form. Each signup emails you a link;
+**Approve** on that page sets the client up by itself (their own Supabase project, the migrations, the functions) and
+emails them their address, in about 5 minutes. How it works: `control/README.md`, *Signups from getquicksales.com*.
+
+1. **Email (Resend).** Sign up at resend.com → **Domains → Add domain** `getquicksales.com`. Resend shows a few DNS records
+   (TXT and MX for a `send` name, a DKIM TXT): add each in Vercel → **Domains → getquicksales.com → DNS Records**, then
+   **Verify** in Resend. **API Keys → Create** (permission *Sending access*): copy it.
+2. **A GitHub token that can start the setup workflow.** GitHub → your avatar → **Settings → Developer settings →
+   Personal access tokens → Fine-grained tokens → Generate new token**: name `quicksales-approve`, expiry 1 year,
+   **Only select repositories** → `saimkhoja/cosmetic`, **Repository permissions → Actions: Read and write**. Nothing else.
+3. **A Supabase token that can create projects.** supabase.com → **Access Tokens → Generate new token**, name
+   `github-quicksales-provision`, longest expiry, **Organization** = the organization of your clients, and only:
+
+   | Group | Permission | Access |
+   |---|---|---|
+   | Account and organization | Organization Projects | Read-write (creates the client's project) |
+   | Project | Project Settings | Read-write |
+   | Application services | Auth Config | Read-write (the sign-in settings) |
+   | Application services | API Keys | Read (the client's public key) |
+   | Application services | Edge Functions | Read-write |
+   | Application services | Edge Function Secrets | Read-write (`SIM_ALLOWED_ORIGIN`) |
+   | Database | Database | Read-write |
+   | Database | Connection Pooling | Read |
+
+4. **Control project → Edge Functions → Secrets** (Add new secret), all of them:
+
+   | Name | Value |
+   |---|---|
+   | `APPROVE_SECRET` | 40 or more random characters (e.g. from a password manager). It signs the approval links. |
+   | `RESEND_API_KEY` | from step 1 |
+   | `OWNER_EMAIL` | your email: new signups arrive here |
+   | `MAIL_FROM` | `QuickSales <hello@getquicksales.com>` |
+   | `SITE_DOMAIN` | `getquicksales.com` |
+   | `SIGNUP_ALLOWED_ORIGIN` | `https://getquicksales.com,https://www.getquicksales.com` |
+   | `GITHUB_DISPATCH_TOKEN` | from step 2 |
+   | `GITHUB_REPO` | `saimkhoja/cosmetic` |
+
+5. **GitHub → Settings → Secrets and variables → Actions → New repository secret**:
+   `SUPABASE_PROVISION_TOKEN` (step 3), `RESEND_API_KEY`, `OWNER_EMAIL`, `MAIL_FROM` (same values as in step 4).
+   The `SUPABASE_ACCESS_TOKEN` from section 8 must also have **Edge Functions: Read-write**, to deploy the control
+   project's functions.
+6. **Vercel → `quicksales` project → Settings → Environment Variables**: `VITE_CONTACT_WHATSAPP` = your WhatsApp number
+   with the country code, digits only (e.g. `243810000000`), and optionally `VITE_CONTACT_EMAIL`. **Settings → Domains**:
+   `getquicksales.com` and `www.getquicksales.com` must be on this project (www redirecting to getquicksales.com).
+   Then **Deployments → ⋯ → Redeploy**.
+7. **Merge.** The **Update control project** workflow then applies the new control migration and deploys `signup` and
+   `approve` to the control project. Check it is green under GitHub → Actions.
+8. **Test it** with a throwaway name (e.g. `essai-1`) and your own email: the thank-you message, two emails, **Approve**,
+   the **Set up a new client** run in GitHub → Actions (about 5 minutes), the welcome email, and the address opening on
+   **Set up QuickSales**. Then remove the test: delete project `qs-essai-1` in Supabase, and in the control project's SQL
+   Editor `delete from public.tenants where subdomain = 'essai-1';`.
+
+Each approved client is a new Supabase project in your organization (about $10/month on the Pro plan). The ready email
+reminds you to add an R2 lifecycle rule for `<subdomain>/daily/` (section 8); their backups start the next night.
 
 ## 7. Going live: clearing the test data
 

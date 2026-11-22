@@ -16,7 +16,8 @@
 # - A file older than the newest one already recorded is refused: migrations re-create functions in their latest
 #   form, so running an old file after a newer one would bring back old versions. Give it a newer number.
 #
-# Settings for the tests: MIGRATIONS_DIR, BASELINE_CHECK, BASELINE_UPTO.
+# Settings for the control project and the tests: MIGRATIONS_DIR, BASELINE_CHECK, BASELINE_UPTO, APP_TABLE (a table
+# that shows the database was set up, by hand or otherwise).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 URL_FILE=${1:?usage: migrate.sh <db-url-file> plan|apply}; MODE=${2:?usage: migrate.sh <db-url-file> plan|apply}
@@ -24,6 +25,8 @@ URL_FILE=${1:?usage: migrate.sh <db-url-file> plan|apply}; MODE=${2:?usage: migr
 DIR=${MIGRATIONS_DIR:-supabase/migrations}
 BASELINE_CHECK=${BASELINE_CHECK:-supabase/scripts/check_migrations.sql}
 BASELINE_UPTO=${BASELINE_UPTO:-20261111000012}   # the newest file check_migrations.sql knows about
+APP_TABLE=${APP_TABLE:-public.settings}
+[[ $APP_TABLE =~ ^[a-z_]+\.[a-z_]+$ ]] || { echo "bad APP_TABLE"; exit 2; }
 PSQL=${PSQL:-psql}
 DB=$(<"$URL_FILE")
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
@@ -59,7 +62,7 @@ dup=$(printf '%s\n' "${files[@]}" | cut -d'|' -f1 | uniq -d | head -1)
 [[ -z $dup ]] || fail "two migration files start with $dup; each needs its own number"
 
 state=$(q -f "$TMP/role.sql" -c "select (to_regclass('supabase_migrations.schema_migrations') is not null)::text
-  || '|' || (to_regclass('public.settings') is not null)::text")
+  || '|' || (to_regclass('$APP_TABLE') is not null)::text")
 has_table=${state%%|*}; has_app=${state##*|}
 applied=""
 [[ $has_table == true ]] && applied=$(q -f "$TMP/role.sql" -c "select version from supabase_migrations.schema_migrations order by version")

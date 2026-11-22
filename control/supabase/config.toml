@@ -1,0 +1,9 @@
+# Supabase CLI settings for the CONTROL project's Edge Functions (deployed by .github/workflows/control.yml with
+# --workdir control). Both are called from the public landing page, so the gateway's login check is off.
+project_id = "quicksales-control"
+
+[functions.signup]
+verify_jwt = false
+
+[functions.approve]
+verify_jwt = false

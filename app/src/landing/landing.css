@@ -1,0 +1,91 @@
+/* getquicksales.com: uses the app's tokens (styles.css), its buttons, fields and the sign-in panel's feature cards */
+/* the wrapper is .qsl, not .lp: the till already uses .lp */
+.qsl{min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
+.qsl main{flex:1;padding:0;max-width:none;min-width:0}   /* undo the app's main{} */
+.lp-nav{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:10px clamp(16px,4vw,40px);background:var(--card);border-bottom:1px solid var(--line)}
+.lp-brand{display:flex;text-decoration:none;color:inherit}
+.lp-brand .qs-logo{font-size:34px}
+.lp-sp{flex:1}
+.lp-lang{display:flex;border:1.5px solid var(--line);border-radius:10px;overflow:hidden}
+.lp-lang button{border:0;background:transparent;padding:8px 10px;font-weight:800;font-size:13px;color:var(--muted)}
+.lp-lang button.on{background:var(--blue-l);color:var(--blue)}
+.lp-nav .btn{text-decoration:none}
+
+.lp-hero{display:grid;grid-template-columns:1.1fr 1fr;gap:clamp(24px,4vw,56px);align-items:center;padding:clamp(36px,6vw,80px) clamp(16px,5vw,64px);
+  background:linear-gradient(160deg,#0C34A8 0%,#082A8E 45%,#06216F 100%);color:#fff;position:relative;overflow:hidden}
+.lp-hero:before{content:"";position:absolute;right:-80px;top:-60px;width:380px;height:700px;background:repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 5px,transparent 5px 11px,rgba(255,255,255,.05) 11px 13px,transparent 13px 22px);transform:rotate(14deg);pointer-events:none}
+.lp-hero>*{position:relative}
+.lp-hero h1{font-size:clamp(34px,5vw,62px);line-height:1.08;margin:0;font-weight:900;letter-spacing:-.02em;max-width:15ch}
+.lp-hero h1 .biz{color:#3BB4FF;position:relative;display:inline-block;white-space:nowrap}
+.lp-hero h1 .biz svg{position:absolute;left:4%;right:-2%;bottom:-.32em;width:98%;height:.3em}
+.lp-lead{font-size:clamp(16px,1.6vw,19px);line-height:1.55;opacity:.92;max-width:46ch;margin:26px 0 30px}
+.lp-ctas{display:flex;flex-wrap:wrap;gap:12px}
+.lp-ctas .btn,.lp-contact .btn{text-decoration:none}
+.lp-big{min-height:54px;padding:0 24px;font-size:16.5px}
+.lp-hero .btn:not(.primary){background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.35);color:#fff}
+.lp-hero .btn.primary{background:#fff;border-color:#fff;color:#06328F}
+.lp-wa{gap:8px}
+.lp-feats{margin:0}
+.lp-feats .feat{min-height:140px}
+
+.lp-sec{padding:clamp(36px,5vw,64px) clamp(16px,5vw,64px);max-width:1200px;margin:0 auto;width:100%}
+.lp-sec>h2{font-size:clamp(26px,3vw,36px);font-weight:900;letter-spacing:-.02em;margin:0 0 22px}
+.lp-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;box-shadow:var(--shadow)}
+.lp-card h3{margin:0 0 6px;font-size:17px;font-weight:800}
+.lp-card p{margin:0;color:var(--muted);line-height:1.5}
+.lp-why{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.lp-how{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.lp-step{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:var(--blue);color:#fff;font-weight:900;margin-bottom:12px}
+
+.lp-split{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;align-items:start}
+.lp-side{display:flex;flex-direction:column;gap:16px}
+.lp-form h2{margin:0 0 4px;font-size:26px;font-weight:900;letter-spacing:-.02em}
+.lp-muted,.lp-card p.lp-muted{color:var(--muted);margin:0 0 18px}
+.lp-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+.lp-sub{display:flex;align-items:center;border:1.5px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
+.lp-sub:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-l)}
+.lp-sub .input{border:0;box-shadow:none!important;min-width:0;flex:1}
+.lp-domain{padding:0 13px 0 2px;color:var(--muted);font-weight:700;white-space:nowrap}
+.lp-avail{font-size:13px;font-weight:800;min-height:18px;color:var(--muted)}
+.lp-avail.ok{color:var(--ok)}
+.lp-avail.taken,.lp-avail.reserved,.lp-avail.invalid{color:var(--bad)}
+.lp-ta{min-height:84px;padding:11px 13px;resize:vertical;font-family:inherit}
+.lp-trap{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.lp-err{background:var(--bad-l);color:var(--bad);border-radius:10px;padding:10px 12px;margin:0 0 14px;font-weight:700}
+.lp-done{text-align:center;padding:36px 24px}
+.lp-tick{width:64px;height:64px;border-radius:50%;background:var(--ok-l);color:var(--ok);display:grid;place-items:center;font-size:34px;font-weight:900;margin:0 auto 14px}
+.lp-done p{max-width:44ch;margin:8px auto 0}
+.lp-mt{margin-top:12px}
+.lp-contact{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+
+.lp-narrow{max-width:680px}
+.lp-approve h2{font-size:26px;margin:8px 0 14px;font-weight:900}
+.lp-status{display:inline-block;padding:6px 12px;border-radius:999px;font-weight:800;font-size:13px;background:var(--blue-l);color:var(--blue)}
+.lp-status.active{background:var(--ok-l);color:var(--ok)}
+.lp-status.failed,.lp-status.rejected{background:var(--bad-l);color:var(--bad)}
+.lp-status.pending{background:var(--warn-l);color:var(--warn)}
+.lp-table{width:100%;border-collapse:collapse;margin:0 0 16px}
+.lp-table th{text-align:left;color:var(--muted);font-weight:700;padding:8px 12px 8px 0;vertical-align:top;white-space:nowrap;width:1%}
+.lp-table td{padding:8px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.lp-table a{color:var(--blue)}
+.lp-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+.lp-foot{padding:22px 16px;text-align:center;color:var(--muted);font-size:13.5px;border-top:1px solid var(--line)}
+
+@media (max-width:1000px){
+  .lp-hero{grid-template-columns:1fr}
+  .lp-why{grid-template-columns:repeat(2,1fr)}
+  .lp-split{grid-template-columns:1fr}
+}
+@media (max-width:640px){
+  .lp-hide-s,.lp-nav .btn{display:none}   /* the hero's own button is just below */
+  .lp-brand .qs-logo{font-size:26px}
+  .lp-hero h1 .biz{white-space:normal}
+  .lp-feats{grid-template-columns:repeat(2,1fr);gap:12px}
+  .lp-feats .feat{min-height:118px;padding:14px 8px}
+  .lp-feats .feat svg{width:48px;height:48px}
+  .lp-why,.lp-how,.lp-grid{grid-template-columns:1fr}
+  .lp-ctas .btn{width:100%}
+}
+/* dark mode: "Quick" in the logo is navy, made for light backgrounds */
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .lp-brand .qs-logo b:first-child{color:#fff}}
+:root[data-theme="dark"] .lp-brand .qs-logo b:first-child{color:#fff}

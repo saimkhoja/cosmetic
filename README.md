@@ -68,6 +68,7 @@ app/                  React app (Vite, TypeScript, PWA)
   src/pages/          screens, one file per area
   src/lib/            money, units, validation, Excel, print layouts (+ unit tests)
   src/offline/        till storage, outbox and sync
+  src/landing/        getquicksales.com: landing page, signup form, approval page (FR/EN)
   e2e/                Playwright end-to-end test
 supabase/
   migrations/         schema, access rules (RLS), business functions
