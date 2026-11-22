@@ -1,7 +1,7 @@
 // Printed documents: customer receipt, delivery note, day end slip and sales report.
 // Layouts are those approved on the demo. Printing uses the browser; for one-tap printing at
 // the till, start Chrome with --kiosk-printing and set the receipt printer as default.
-import type { Company, Delivery, Invoice, Product, Shop, Statement } from './types';
+import type { Company, Delivery, Invoice, Product, PromoData, Shop, Statement, VendeurStatement } from './types';
 import { ctnTxt, pcValue, stockValue, unitsOf } from './units';
 import { dt, esc, fCDF, fNum, fUSD, sum, toCDF, today } from './format';
 
@@ -66,6 +66,8 @@ const n0 = (n: number) => String(Math.round(Number(n) || 0));
 const n2 = (n: number) => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const rDate = (t: string) => { const d = new Date(t); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`; };
 const rTime = (t: string) => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s/g, '');
+/** 2026-11-29 as 29/11/2026 */
+const ymdFr = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 const NB = 'N.B. Vérifiez vos marchandises avant de sortir du magasin. Les marchandises vendues ne sont ni reprises ni échangées.';
 
 /** Customer invoice in the layout of the shop's paper receipts: company block, boxed invoice number, item lines, boxed total. */
@@ -83,6 +85,7 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   <tbody>${inv.items.map((it) => `<tr><td colspan="5">${esc(it.name.toUpperCase())}</td></tr><tr><td>${esc((it.piece ? 'piece' : it.unit).toUpperCase())}</td><td class="r">${it.qty}</td><td class="r">${n0(it.price)}</td><td class="r">${Number(inv.disc_pct) || 0}</td><td class="r">${n0(it.line)}</td></tr>`).join('')}</tbody></table>
   <table class="rsum"><tr><td class="small"><b>Total Items</b>&nbsp; ${sum(inv.items, (i) => i.qty)}</td><td>Total H.T</td><td class="r">${n2(inv.ht)}</td></tr>${tot(`TVA${inv.vat_rate ? ' ' + inv.vat_rate + '%' : ''}`, n2(inv.vat))}${tot('Remise', n2(inv.disc))}</table>
   <div class="rttc"><b>Total T.T.C - CDF</b><span class="rbox">${n2(inv.total)}</span></div>
+  ${inv.vendeur_id ? `<div class="c" style="margin:6px 0;font-weight:700">VENTE À CRÉDIT${inv.due_date ? ` · ÉCHÉANCE ${ymdFr(inv.due_date)}` : ''}</div><div class="c small">Montant dû par le vendeur, non payé à la caisse</div>` : ''}
   ${inv.paid_usd ? `<table class="rsum rcash"><tr><td></td><td>Paid USD</td><td class="r">${n2(inv.paid_usd)}</td></tr><tr><td></td><td class="small">= CDF</td><td class="r small">${n2(Math.round(inv.paid_usd * (inv.usd_rate || inv.rate)))}</td></tr>${inv.paid_cdf ? `<tr><td></td><td>Paid CDF</td><td class="r">${n2(inv.paid_cdf)}</td></tr>` : ''}<tr><td></td><td class="small">Rate</td><td class="r small">1 USD = ${n0(inv.usd_rate || inv.rate)} CDF</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${inv.change_usd ? `$${inv.change_usd} + ${n2(inv.change_cdf ?? 0)} CDF` : n2(inv.change)}</b></td></tr></table>`
     : opt.cash || inv.tendered > inv.total ? `<table class="rsum rcash"><tr><td></td><td>Cash received</td><td class="r">${n2(inv.tendered)}</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${n2(inv.change)}</b></td></tr></table>` : ''}
   <div class="rl">Sales Person&nbsp;&nbsp; ${esc(inv.cashier_name)}</div>${inv.prepared_by_name ? `<div class="rl small">Prepared by&nbsp;&nbsp; ${esc(inv.prepared_by_name)}</div>` : ''}
@@ -116,6 +119,8 @@ export function deliveryNoteHTML(d: Delivery, shop: Shop, c: Company, products: 
 
 export interface Slip {
   shop_name: string; n: number; value_fc: number; value_usd: number; collected: number; returned: number; collected_usd?: number; collected_cdf?: number;
+  /** goods on credit to vendeurs (in the invoice value, not in the cash collected), and the vendeurs' payments (in the cash) */
+  on_credit?: number; vendeur_paid?: number;
   /** from the second shift of the day: today's shift slips added up line by line, and where the first one started */
   day?: Omit<Slip, 'shop_name' | 'day'> & { from: string; shifts: number };
 }
@@ -131,8 +136,8 @@ export function shiftSlipHTML(s: Slip, user: string, day: string, rate: number, 
   const hr = '<tr><td colspan="2"><hr></td></tr>', bold = (a: string, b: string) => row(a, b).replace('<tr>', '<tr style="font-weight:700;font-size:13.5px">');
   return `<div class="receipt slip"><div class="c" style="font-size:19px;font-weight:700;letter-spacing:.04em;margin:4px 0 6px">Shift End Report</div><table>${hr}
   ${row('Date', when)}${row('User', esc(user))}${row('Shop', esc(s.shop_name))}${extra ? row('Till', esc(extra.till ? 'Till ' + extra.till : 'All tills')) : ''}${extra?.shift ? row('Shift', esc(extra.shift)) : ''}${row('TAUX', fc(rate))}${hr}
-  ${row('Total Invoice', s.n)}${row('Invoice Value USD', u3(s.value_usd))}${row('Invoice Value CDF', fc(s.value_fc))}${hr}
-  ${row('Collected USD', u3(cu))}${row('Collected CDF', fc(cc))}${row('Return USD', u3(0))}${row('Return CDF', fc(s.returned))}${hr}
+  ${row('Total Invoice', s.n)}${row('Invoice Value USD', u3(s.value_usd))}${row('Invoice Value CDF', fc(s.value_fc))}${Number(s.on_credit) ? row('On credit CDF', fc(Number(s.on_credit))) : ''}${hr}
+  ${row('Collected USD', u3(cu))}${row('Collected CDF', fc(cc))}${Number(s.vendeur_paid) ? row('incl. vendeurs CDF', fc(Number(s.vendeur_paid))) : ''}${row('Return USD', u3(0))}${row('Return CDF', fc(s.returned))}${hr}
   ${bold('Balance USD', u3(cu))}${bold('Balance CDF', fc(cc - s.returned))}${s.day ? daySoFar(s.day, bold, hr, fc) : ''}</table></div>`;
 }
 /** From the second shift of the day: one line with the total of the day, which is today's shift slips added up. */
@@ -232,4 +237,44 @@ export function statementHTML(st: Statement, c: Company, by: string) {
   <tr><td colspan="4"><b>Totals for the period</b></td><td class="r"><b>${fUSD(st.total_dr)}</b></td><td class="r"><b>${fUSD(st.total_cr)}</b></td><td class="r"><b>${drcr(st.closing)}</b></td></tr></tbody></table>
   <p style="margin-top:12px">Amounts in USD; lines entered in Francs show the CDF amount and its rate.${st.with_opening ? '' : ' Opening balance not included.'}</p>`;
   return bookHTML(c, 'Statement of account', `${st.from} to ${st.to}`, body, by);
+}
+
+/** A vendeur's statement in CDF: goods on credit, payments and the running balance; the promo items apart (not owed). */
+export function vendeurStatementHTML(st: VendeurStatement, c: Company, by: string) {
+  let run = st.brought_forward;
+  const v = st.vendeur, o = st.state;
+  const rows = st.lines.map((l) => { run += l.dr - l.cr; return `<tr><td>${esc(l.date)}</td><td>${esc(l.no)}</td><td>${esc(l.what)}${l.due ? `<br><small>due ${esc(l.due)}</small>` : ''}</td><td class="r">${l.dr ? fCDF(l.dr) : ''}</td><td class="r">${l.cr ? fCDF(l.cr) : ''}</td><td class="r">${fCDF(run)}</td></tr>`; }).join('');
+  const promos = st.promos.length ? `<h3 style="margin:18px 0 6px">Promo items given (not owed)</h3><table class="t"><thead><tr><th>Date</th><th>Promo</th><th>Items</th><th class="r">Value CDF</th><th>Status</th></tr></thead><tbody>
+    ${st.promos.map((p) => `<tr><td>${esc(p.date)}</td><td>${esc(p.no)}${p.invoice ? `<br><small>with ${esc(p.invoice)}</small>` : ''}</td><td>${(p.items ?? []).map((i) => `${i.qty} ${esc(i.unit)} ${esc(i.name)}`).join(', ')}${p.note ? `<br><small>${esc(p.note)}</small>` : ''}</td><td class="r">${fCDF(p.value)}</td><td>${p.status === 'settled' ? 'Settled' : 'Open'}</td></tr>`).join('')}
+    <tr><td colspan="3"><b>Total promo items</b></td><td class="r"><b>${fCDF(sum(st.promos, (p) => p.value))}</b></td><td></td></tr></tbody></table>` : '';
+  const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(v.name)}</b>, vendeur of ${esc(v.shop_name)}${v.phone ? `, ${esc(v.phone)}` : ''}<br>Credit ${v.credit_days} days, limit ${fCDF(v.credit_limit)}</p>
+  <table class="t"><thead><tr><th>Date</th><th>No.</th><th>Particulars</th><th class="r">Goods CDF</th><th class="r">Paid CDF</th><th class="r">Balance CDF</th></tr></thead><tbody>
+  <tr><td>${esc(st.from)}</td><td></td><td><b>Brought forward</b></td><td></td><td></td><td class="r">${fCDF(st.brought_forward)}</td></tr>
+  ${rows || '<tr><td colspan="6">No entries in this period</td></tr>'}
+  <tr><td colspan="3"><b>Totals for the period</b></td><td class="r"><b>${fCDF(st.total_dr)}</b></td><td class="r"><b>${fCDF(st.total_cr)}</b></td><td class="r"><b>${fCDF(st.closing)}</b></td></tr></tbody></table>
+  <p style="margin-top:10px">Owed today: <b>${fCDF(o.balance)}</b>; credit left ${fCDF(o.available)}${o.overdue ? `; <b>overdue ${fCDF(o.overdue_amount)}</b> (since ${esc(o.oldest_due ?? '')})` : ''}.</p>${promos}`;
+  return bookHTML(c, 'Vendeur statement', `${st.from} to ${st.to}`, body, by);
+}
+
+/** The receipt a vendeur takes away for a payment: the amount, what was owed before and what is still owed. */
+export function vendeurPaymentHTML(x: { no: string; at: string; amount: number; by_name: string; vendeur: string; before: number; state: { balance: number; overdue: boolean; overdue_amount: number } }, c: Company, shop: Shop) {
+  const row = (a: string, b: string) => `<tr><td>${a}</td><td class="r">${b}</td></tr>`;
+  return `<div class="receipt inv"><div class="c"><div class="big">${esc((c.name || shop.name).toUpperCase())}</div><div>${esc((shop.address || c.address || '').toUpperCase())}</div>${c.phone ? `<div>Tél: ${esc(c.phone)}</div>` : ''}</div>
+  <div class="c"><span class="rbox">REÇU # : ${esc(x.no)}</span></div>
+  <div class="rl"><b>Vendeur:</b> ${esc(x.vendeur.toUpperCase())}</div><div class="rl"><b>Date:</b> ${rDate(x.at)}&nbsp;&nbsp; <b>Time:</b> ${rTime(x.at)}</div>
+  <table class="rsum">${row('Dû avant', n2(x.before))}</table>
+  <div class="rttc"><b>Payé - CDF</b><span class="rbox">${n2(x.amount)}</span></div>
+  <table class="rsum">${row('<b>Reste à payer</b>', `<b>${n2(x.state.balance)}</b>`)}${x.state.overdue ? row('Dont en retard', n2(x.state.overdue_amount)) : ''}</table>
+  <div class="rl">Reçu par&nbsp;&nbsp; ${esc(x.by_name)}</div></div>`;
+}
+
+/** The promo report of a month: each vendeur's promo items, at the shop price. */
+export function promoReportHTML(d: PromoData, c: Company, shopName: string, by: string, status: 'open' | 'kept' | 'settled') {
+  const m = new Date(d.month + 'T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(shopName)}</b>: promo items given to vendeurs, open at the end of ${esc(m)}${d.carried ? `, ${fCDF(d.carried)} of them from earlier months` : ''}. ${status === 'settled' ? '<b>Settled.</b>' : status === 'kept' ? 'Kept, not settled.' : 'Not yet kept or settled.'}</p>
+  <table class="t"><thead><tr><th>Vendeur</th><th>Items given</th><th class="r">Promos</th><th class="r">Value CDF</th></tr></thead><tbody>
+  ${d.vendeurs.map((v) => `<tr><td><b>${esc(v.name)}</b><br><small>${esc(v.first)} to ${esc(v.last)}</small></td><td>${(v.items ?? []).map((i) => `${i.qty} ${esc(i.unit)} ${esc(i.name)}`).join(', ')}</td><td class="r">${v.n}</td><td class="r">${fCDF(v.value)}</td></tr>`).join('') || '<tr><td colspan="4">No promo items</td></tr>'}
+  <tr><td colspan="2"><b>Total</b></td><td class="r"><b>${d.n}</b></td><td class="r"><b>${fCDF(d.value)}</b></td></tr></tbody></table>
+  <p style="margin-top:10px">Promo items are not invoiced and not owed by the vendeurs. They are valued at the shop price.</p>`;
+  return bookHTML(c, 'Promo report', m, body, by);
 }

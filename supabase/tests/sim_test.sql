@@ -547,7 +547,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":true,"barcode":true,"other":true}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false,"vendeurs":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
@@ -566,11 +566,11 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb,
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false,"vendeurs":false}'::jsonb,
   'saving settings without the switches leaves them as they were, so an older app cannot turn one off');
 -- sending a switch as off does turn it off
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":false,"barcode":false}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false}'::jsonb,
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false,"vendeurs":false}'::jsonb,
   'and sending it as off does turn it off');
 reset role;
 
@@ -1378,6 +1378,139 @@ select t.as('00000000-0000-0000-0000-00000000000b');
 select t.put('grnnet', public.receive_goods(jsonb_build_object('supplier_id', t.get('sup'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('net1'), 'qty', 24))))->>'id');
 reset role;
 select t.ok((select std_cost_usd from grn_items where grn_id = t.get('grnnet')::uuid) = 0.5, 'goods in are valued at the net cost');
+
+-- ===== vendeurs: goods on credit from the shop, payments, promo items and the monthly promo report =====
+create function t.vstate(p_name text) returns jsonb language sql security definer as $$ select app.vendeur_state(v) from vendeurs v where v.name = p_name $$;
+create function t.slip_today(p_shop uuid) returns jsonb language sql security definer as $$ select app.shift_slip(p_shop, null, now() - interval '1 day', now() + interval '1 minute') $$;
+create function t.logged(p text) returns boolean language sql security definer as $$ select exists (select 1 from audit_log where action like p) $$;
+grant execute on function t.vstate(text), t.slip_today(uuid), t.logged(text) to authenticated;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('cgel', public.save_product('{"name":"Credit gel","category":"Skin care","carton_cost":24,"per_carton":24,"pc":2}')::text);
+select t.put('col0', ((public.sales_report(current_date, current_date, t.get('gom')::uuid)->'slips'->0)->>'collected'));
+reset role;
+update shop_stock set qty = 50 where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid;
+select t.put('slip0', t.slip_today(t.get('gom')::uuid)::text);
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails($$select public.vendeur_list()$$, 'not turned on', 'vendeurs are off until the Admin turns them on');
+reset role;
+update settings set features = features || '{"vendeurs": true}' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('v1', public.save_vendeur('{"name":"Papa Jean","phone":"+243 990 000 000","credit_days":7,"credit_limit":20000,"opening_balance":3000}')::text);
+select t.fails($$select public.save_vendeur('{"name":"papa JEAN","credit_days":7,"credit_limit":20000}')$$, 'already exists', 'vendeur names are unique in a shop');
+select t.fails($$select public.save_vendeur('{"name":"No limit","credit_days":7,"credit_limit":0}')$$, 'credit limit', 'a vendeur needs a credit limit');
+select t.fails($$select public.save_vendeur('{"name":"Too long","credit_days":400,"credit_limit":100}')$$, '0 to 365 days', 'the credit period is 0 to 365 days');
+-- goods on credit, with a promo item from the stock
+select t.put('cinv1', gen_random_uuid()::text);
+select t.put('cres1', public.submit_invoice(jsonb_build_object('id', t.get('cinv1'), 'no', 'GOM-T2-000900', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16,
+  'customer', 'whoever', 'vendeur_id', t.get('v1'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 2, 'price', 5700)),
+  'promo', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 1)), 'promo_note', 'opening offer'))::text);
+select t.ok((t.get('cres1')::jsonb->>'status') = 'ok' and (t.get('cres1')::jsonb->'promo'->>'value')::bigint = 5700, 'goods on credit are sold, with a promo item valued at the shop price');
+select t.ok((select vendeur_id::text = t.get('v1') and tendered = 0 and change = 0 and customer = 'Papa Jean' and total = 11400 and due_date = current_date + 7
+  from invoices where id = t.get('cinv1')::uuid), 'the invoice is the vendeur''s, nothing paid, due after the credit period');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid) = 47, 'the goods and the promo item leave the shop''s stock');
+select t.ok((select sum(qty) from invoice_items where invoice_id = t.get('cinv1')::uuid) = 2, 'the promo item is not on the invoice');
+select t.ok((t.vstate('Papa Jean')->>'balance')::bigint = 14400 and (t.vstate('Papa Jean')->>'available')::bigint = 5600
+  and not (t.vstate('Papa Jean')->>'overdue')::boolean and (t.vstate('Papa Jean')->>'promo_open')::bigint = 5700,
+  'the vendeur owes the opening balance and the goods, not the promo; the credit left is the limit less that');
+-- over the limit: the goods are still given, and the activity log says so
+select t.put('cinv2', gen_random_uuid()::text);
+select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('cinv2'), 'no', 'GOM-T2-000901', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16,
+  'vendeur_id', t.get('v1'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 2, 'price', 5700))))->>'status') = 'ok',
+  'goods on credit over the limit are still given');
+select t.ok((t.vstate('Papa Jean')->>'over_limit')::boolean and (t.vstate('Papa Jean')->>'available')::bigint = -5800, 'the vendeur is shown over the limit');
+select t.ok(t.logged('Invoice GOM-T2-000901 for Papa Jean, on credit, due %, over the credit limit of 20 000 CDF%'), 'the log notes the limit was passed');
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000902","device_id":"%s","rate":2850,"vat_rate":16,"vendeur_id":"%s","paid_usd":5,"items":[{"product_id":"%s","mult":1,"qty":1,"price":5700}]}')$$,
+  gen_random_uuid(), t.get('dev2'), t.get('v1'), t.get('cgel')), 'not paid at the till', 'goods on credit take no money at the till');
+-- payments: partial, never more than owed; the oldest goods are settled first
+select t.fails(format($$select public.vendeur_pay('{"vendeur_id":"%s","amount":30000}')$$, t.get('v1')), 'owes only', 'a payment cannot be more than the vendeur owes');
+select t.put('vp1', public.vendeur_pay(jsonb_build_object('vendeur_id', t.get('v1'), 'amount', 10000, 'note', 'cash'))::text);
+select t.ok((t.get('vp1')::jsonb->>'no') = 'GOM-VP-00001' and (t.get('vp1')::jsonb->'state'->>'balance')::bigint = 15800
+  and (t.get('vp1')::jsonb->'state'->>'available')::bigint = 4200, 'a partial payment lowers what is owed, so the credit comes back');
+select t.ok(jsonb_array_length(t.vstate('Papa Jean')->'open') = 2 and (t.vstate('Papa Jean')->'open'->0->>'owed')::bigint = 4400,
+  'the payment settles the opening balance, then the oldest goods');
+reset role;
+-- the books: the sale is owed by the vendeur, the payment is cash in the shop
+select t.ok((select string_agg(a.code || a.group_code || l.side, ',' order by l.side, a.group_code) from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+  where v.source_type = 'invoice' and v.source_id = t.get('cinv1')::uuid and l.amount = 11400) is null
+  and exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+    where v.source_type = 'invoice' and v.source_id = t.get('cinv1')::uuid and a.vendeur_id = t.get('v1')::uuid and l.side = 'Dr' and l.amount = 11400 and l.currency = 'FC')
+  and not exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+    where v.source_type = 'invoice' and v.source_id = t.get('cinv1')::uuid and a.code like 'CASH_SHOP%'), 'a sale on credit is Dr the vendeur''s ledger, not the cash');
+select t.ok((select a.group_code from accounts a where a.vendeur_id = t.get('v1')::uuid) = 'debtors', 'each vendeur has a ledger under Sundry Debtors');
+select t.ok(exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+    where v.source_type = 'vendeur_payment' and a.code = 'CASH_SHOP:' || t.get('gom') and l.side = 'Dr' and l.amount = 10000), 'a payment is Dr the shop''s cash');
+select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+    where v.source_type = 'promo' and a.code = 'PROMO_EXP' and l.side = 'Dr') = 1, 'the promo item leaves the stock at cost as a promotion expense');
+select t.ok(t.unbalanced() = 0, 'the vendeur entries keep the books balanced');
+-- the shift end slip and the day end slip count the cash only: goods on credit apart, payments in
+select t.ok((t.slip_today(t.get('gom')::uuid)->>'on_credit')::bigint - coalesce((t.get('slip0')::jsonb->>'on_credit')::bigint, 0) = 22800
+  and (t.slip_today(t.get('gom')::uuid)->>'collected')::bigint = (t.get('slip0')::jsonb->>'collected')::bigint + 10000,
+  'the shift end slip leaves goods on credit out of the cash collected and adds the vendeur''s payment');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok(((public.sales_report(current_date, current_date, t.get('gom')::uuid)->'slips'->0)->>'collected')::bigint = t.get('col0')::bigint + 10000
+  and ((public.sales_report(current_date, current_date, t.get('gom')::uuid)->'slips'->0)->>'on_credit')::bigint = 22800,
+  'the day end slip does the same');
+reset role;
+-- an overdue vendeur: goods can still be given, with a reminder
+update invoices set due_date = current_date - 3 where id = t.get('cinv1')::uuid;
+select t.ok((t.vstate('Papa Jean')->>'overdue')::boolean and (t.vstate('Papa Jean')->>'overdue_amount')::bigint = 4400 and (t.vstate('Papa Jean')->>'days_overdue')::int = 3,
+  'a vendeur past the credit period is overdue, with what is overdue');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('cinv3', gen_random_uuid()::text);
+select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('cinv3'), 'no', 'GOM-T2-000903', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16,
+  'vendeur_id', t.get('v1'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 1, 'price', 5700))))->'vendeur'->>'overdue')::boolean,
+  'goods are still given to an overdue vendeur; the answer says they are overdue');
+select t.ok(t.logged('Invoice GOM-T2-000903 for Papa Jean, on credit, due %, 4 400 CDF overdue%'), 'goods given to an overdue vendeur are logged with what is overdue');
+-- the statement
+select t.ok((select jsonb_array_length(x->'lines') = 5 and (x->>'closing')::bigint = 21500 and jsonb_array_length(x->'promos') = 1
+  from public.vendeur_statement(t.get('v1')::uuid, current_date - 30, current_date) x), 'the statement lists the opening balance, the goods and the payment; the promo apart');
+-- the Shop Admin corrects goods on credit: the vendeur owes the new total, still nothing is cash
+select public.edit_invoice(t.get('cinv2')::uuid, '[{"line_no":1,"qty":1}]', 0, 'Vendeur took one back');
+select t.ok((select tendered = 0 and change = 0 and total = 5700 from invoices where id = t.get('cinv2')::uuid) and (t.vstate('Papa Jean')->>'balance')::bigint = 15800,
+  'a corrected invoice on credit changes what the vendeur owes');
+select public.delete_invoice(t.get('cinv3')::uuid, 'entered twice');
+select t.ok((t.vstate('Papa Jean')->>'balance')::bigint = 10100, 'a deleted invoice on credit is no longer owed');
+-- a payment taken by mistake is cancelled
+select public.cancel_vendeur_payment((t.get('vp1')::jsonb->>'id')::uuid, 'wrong vendeur');
+select t.ok((t.vstate('Papa Jean')->>'balance')::bigint = 20100, 'a cancelled payment is owed again');
+-- the promo report: keep it (it stays open), then settle it (the count starts again)
+select t.put('pr2', public.give_promo(jsonb_build_object('vendeur_id', t.get('v1'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 2))))::text);
+select t.fails(format($$select public.give_promo('{"vendeur_id":"%s","lines":[{"product_id":"%s","qty":500}]}')$$, t.get('v1'), t.get('cgel')), 'Not enough Credit gel', 'promo items come from the stock the shop has');
+select t.ok((select (x->>'n')::int = 2 and (x->>'value')::bigint = 17100 and x->'vendeurs'->0->>'name' = 'Papa Jean' from public.promo_report(current_date) x), 'the month''s promo report, by vendeur');
+select public.cancel_promo((t.get('pr2')::jsonb->>'id')::uuid, 'given by mistake');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid) = 46, 'a cancelled promo goes back into the stock');
+select t.ok((public.close_promo_report(current_date, 'keep')->>'status') = 'kept' and (t.vstate('Papa Jean')->>'promo_open')::bigint = 5700, 'a kept report leaves its promos open');
+select t.ok((public.close_promo_report(current_date, 'settle')->>'status') = 'settled' and (t.vstate('Papa Jean')->>'promo_open')::bigint = 0, 'settling starts the promo count again at zero');
+select t.ok((select jsonb_array_length(x->'reports') = 1 and x->'reports'->0->>'status' = 'settled' and (x->>'n')::int = 0 from public.promo_report(current_date) x), 'the settled report replaces the kept one');
+select t.fails($$select public.close_promo_report(current_date, 'settle')$$, 'no open promo items', 'nothing left to settle');
+select t.fails(format($$select public.cancel_promo('%s', 'too late now')$$, t.get('cres1')::jsonb->'promo'->>'id'), 'settled report', 'a settled promo is not cancelled');
+-- a vendeur with history is never deleted; one without is
+select t.fails(format($$select public.delete_vendeur('%s')$$, t.get('v1')), 'still owes', 'a vendeur who owes cannot be removed');
+select t.ok(public.delete_vendeur(public.save_vendeur('{"name":"Never used","credit_days":0,"credit_limit":100}')) = 'deleted', 'a vendeur with nothing recorded is deleted');
+reset role;
+-- another shop never sees them
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000e');
+select t.ok(public.vendeur_list() = '[]'::jsonb, 'another shop does not see the vendeurs');
+select t.fails(format($$select public.vendeur_pay('{"vendeur_id":"%s","amount":100}')$$, t.get('v1')), 'Vendeur not found', 'nor take their payments');
+select t.fails($$select count(*) from vendeurs$$, 'permission denied', 'the vendeur tables are read only through the functions');
+reset role;
+-- the till operator does not give goods on credit
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.fails($$select public.vendeur_list()$$, 'permission', 'a till operator has no vendeurs');
+reset role;
+-- the Admin sees every shop's vendeurs, even with the switch off
+update settings set features = features - 'vendeurs' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.ok(jsonb_array_length(public.vendeur_list()) = 1, 'the Admin sees the vendeurs of every shop');
+reset role;
 
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;

@@ -338,6 +338,8 @@ button.catrow:hover,button.catrow.on{background:var(--blue-l)}
 .grand b{font-size:30px;font-weight:900;letter-spacing:-.02em;line-height:1.15;white-space:nowrap}
 .cact{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px}
 .cact.three{grid-template-columns:auto auto minmax(0,1fr)}
+/* with On credit: the three small buttons on one row, the pay button under them, full width */
+.cact.four{grid-template-columns:repeat(3,minmax(0,1fr))}.cact.four .paybtn{grid-column:1/-1}
 .cact .btn{min-height:64px;flex-direction:column;gap:3px;padding:0 12px;font-size:13px}
 .cact .btn svg{font-size:21px}
 .paybtn{height:64px;border:0;border-radius:14px;background:var(--btn);color:#fff;font-size:18px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:10px;padding:0 12px;line-height:1.15;text-align:center;min-width:0}

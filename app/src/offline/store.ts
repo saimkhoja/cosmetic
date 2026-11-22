@@ -47,6 +47,16 @@ export const getDevice = (shopId: string) => kvGet<Device>('device:' + shopId);
 export const setDevice = (d: Device) => kvSet('device:' + d.shop_id, d);
 
 /** Next invoice number for this till: SHOP-T1-000123. Never reuses a number, even across restarts. */
+/** The next invoice number of this till without using it up: for a sale that must reach the server first (goods on
+ *  credit). Call takeInvoiceNo with its n once the server has it, so a refused sale leaves no gap in the numbers. */
+export async function peekInvoiceNo(d: Device): Promise<{ no: string; n: number }> {
+  const cur = Math.max((await kvGet<number>('seq:' + d.id)) ?? 0, d.last_seq);
+  return { no: `${d.shop_code}-${d.code}-${String(cur + 1).padStart(6, '0')}`, n: cur + 1 };
+}
+export async function takeInvoiceNo(d: Device, n: number) {
+  const k = 'seq:' + d.id;
+  await kvSet(k, Math.max((await kvGet<number>(k)) ?? 0, n));
+}
 export async function nextInvoiceNo(d: Device): Promise<string> {
   const k = 'seq:' + d.id, cur = Math.max((await kvGet<number>(k)) ?? 0, d.last_seq);
   await kvSet(k, cur + 1);

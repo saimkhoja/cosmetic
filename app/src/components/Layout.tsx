@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { useSettings, useShops } from '../data/queries';
 import { outboxAll } from '../offline/store';
 import { syncOutbox } from '../offline/sync';
-import type { Role } from '../lib/types';
+import type { Features, Role } from '../lib/types';
 import { getTheme, nextTheme, setTheme, THEME_ICON, THEME_LABEL, type ThemePref } from '../lib/theme';
 import { CartMark } from './Brand';
 import { canSearch, GlobalSearch } from './GlobalSearch';
@@ -16,14 +16,14 @@ const ROLEICON: Record<Role, string> = { admin: 'shield', whop: 'warehouse', sho
 export const NAV: Record<Role, [string, string, string][]> = {
   admin: [['/', 'Dashboard', 'home'], ['/inventory', 'Inventory', 'box'], ['/goods-in', 'Goods in', 'download'], ['/requests', 'Requests', 'receipt'], ['/deliveries', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/shop-stock', 'Shop stock', 'store'], ['/accounts', 'Accounts', 'wallet'], ['/upkeep', 'Upkeep', 'cash'], ['/reports', 'Reports', 'chart'], ['/users', 'Users', 'users'], ['/settings', 'Settings', 'settings'], ['/activity', 'Activity', 'shield']],
   whop: [['/inventory', 'Inventory', 'box'], ['/goods-in', 'Goods in', 'download'], ['/requests', 'Requests', 'receipt'], ['/deliveries', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/shop-stock', 'Shop stock', 'store'], ['/books', 'Statements', 'doc']],
-  shopadmin: [['/', 'Home', 'home'], ['/till', 'Till', 'cart'], ['/invoices', 'Invoices', 'receipt'], ['/stock', 'Stock', 'box'], ['/requests', 'Order stock', 'plus'], ['/received', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/reports', 'Reports', 'chart']],
+  shopadmin: [['/', 'Home', 'home'], ['/till', 'Till', 'cart'], ['/invoices', 'Invoices', 'receipt'], ['/vendeurs', 'Vendeurs', 'users'], ['/stock', 'Stock', 'box'], ['/requests', 'Order stock', 'plus'], ['/received', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/reports', 'Reports', 'chart']],
   till: [['/till', 'Till', 'cart']],
 };
 
 /** Tabs that only move stock between the central store and the shops. */
 const STORE_ROUTES = new Set(['/requests', '/deliveries', '/returns', '/received']);
-/** The tabs of a role: without a central store the store-to-shop tabs are left out. */
-export const navFor = (role: Role, noWarehouse?: boolean) => NAV[role].filter((n) => !noWarehouse || !STORE_ROUTES.has(n[0]));
+/** The tabs of a role: without a central store the store-to-shop tabs are left out; Vendeurs only when it is turned on. */
+export const navFor = (role: Role, f?: Features) => NAV[role].filter((n) => (!f?.no_warehouse || !STORE_ROUTES.has(n[0])) && (n[0] !== '/vendeurs' || !!f?.vendeurs));
 
 export function useWaiting() {
   const [n, setN] = useState(0);
@@ -54,7 +54,6 @@ function useFind(main: React.RefObject<HTMLElement>) {
 export default function Layout({ children }: { children: ReactNode }) {
   const { profile, offline, signOut } = useAuth();
   const shops = useShops(), settings = useSettings();
-  const noStore = !!settings.data?.features?.no_warehouse;
   const loc = useLocation();
   const waiting = useWaiting();
   const [busy, setBusy] = useState(false), [theme, setThemeState] = useState<ThemePref>(getTheme);
@@ -85,7 +84,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
       {offline || !navigator.onLine ? <div className="offline-bar">No internet. {profile.role === 'till' || profile.role === 'shopadmin' ? 'The till keeps working; sales and orders are sent when the connection returns.' : 'Changes need the connection.'}</div> : null}
       <div className="layout">
-        <nav className="nav">{navFor(profile.role, noStore).map(([to, l, i]) => <NavLink key={to} to={to} end className={({ isActive }) => (isActive ? 'on' : '')}><Icon n={i} /><span>{l}</span></NavLink>)}</nav>
+        <nav className="nav">{navFor(profile.role, settings.data?.features).map(([to, l, i]) => <NavLink key={to} to={to} end className={({ isActive }) => (isActive ? 'on' : '')}><Icon n={i} /><span>{l}</span></NavLink>)}</nav>
         {/* a new search result opens the tab afresh, so it reads the record's filters from the link */}
         <main ref={main} key={findKey} className={pos ? 'posmain' : ''}>{children}</main>
       </div>
