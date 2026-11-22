@@ -106,6 +106,26 @@ out=$(run mt_b apply); grep -q 'Set up by hand, all 2 files up to 20260101000002
 [[ $(inq mt_b "select vat from public.settings") == 16 ]] || bad "baseline must not re-run files"
 ok "a database set up by hand is recorded as it is, then only the newer files run"
 
+# 6b. set up by hand before a newer file the check knows about: that file is not "missing", it runs
+cat > "$T/check3.sql" <<'SQL'
+select step, case when ok then 'done' else 'MISSING' end from (values
+  ('20260101000001_start.sql', to_regclass('public.settings') is not null),
+  ('20260101000002_vat.sql', exists (select 1 from information_schema.columns where table_name = 'settings' and column_name = 'vat')),
+  ('20260101000003_fn.sql', exists (select 1 from pg_proc where proname = 'rate_text'))
+) as m(step, ok);
+SQL
+run3() { MIGRATIONS_DIR=$T/m BASELINE_CHECK=$T/check3.sql BASELINE_UPTO=20260101000002 ops/migrate.sh "$T/$1.url" "$2"; }
+fresh mt_e
+for f in "$T"/m/20260101000001_start.sql "$T"/m/20260101000002_vat.sql; do psql "$(<"$T/mt_e.url")" -X -q -v ON_ERROR_STOP=1 -f "$f"; done
+out=$(run3 mt_e apply); grep -q 'Set up by hand, all 2 files up to 20260101000002 are in' <<< "$out" && grep -q 'To run (2)' <<< "$out" && grep -q 'Done: 20260101000003_fn.sql' <<< "$out" || bad "baseline before a newer file: $out"
+[[ $(inq mt_e "select public.rate_text()") == "rate 2850" ]] || bad "the newer file should have run"
+ok "a database set up by hand before a newer file gets that file run"
+# 6c. and one that already has it by hand: it is recorded as done, not run again
+fresh mt_f
+for f in "$T"/m/20260101000001_start.sql "$T"/m/20260101000002_vat.sql "$T"/m/20260101000003_fn.sql; do psql "$(<"$T/mt_f.url")" -X -q -v ON_ERROR_STOP=1 -f "$f"; done
+out=$(run3 mt_f apply); grep -q 'Set up by hand, all 3 files up to 20260101000003 are in' <<< "$out" && grep -q 'To run (1)' <<< "$out" || bad "baseline past the limit: $out"
+ok "a database set up by hand with a newer file already in records it without running it again"
+
 # 7. set up by hand with a file missing: stops without changing anything
 fresh mt_c
 psql "$(<"$T/mt_c.url")" -X -q -v ON_ERROR_STOP=1 -f "$T/m/20260101000001_start.sql"
