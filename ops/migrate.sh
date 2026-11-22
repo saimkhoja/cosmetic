@@ -24,7 +24,7 @@ URL_FILE=${1:?usage: migrate.sh <db-url-file> plan|apply}; MODE=${2:?usage: migr
 [[ $MODE == plan || $MODE == apply ]] || { echo "mode must be plan or apply"; exit 2; }
 DIR=${MIGRATIONS_DIR:-supabase/migrations}
 BASELINE_CHECK=${BASELINE_CHECK:-supabase/scripts/check_migrations.sql}
-BASELINE_UPTO=${BASELINE_UPTO:-20261111000012}   # the newest file check_migrations.sql knows about
+BASELINE_UPTO=${BASELINE_UPTO:-20261122000003}   # the newest file check_migrations.sql knows about
 APP_TABLE=${APP_TABLE:-public.settings}
 [[ $APP_TABLE =~ ^[a-z_]+\.[a-z_]+$ ]] || { echo "bad APP_TABLE"; exit 2; }
 PSQL=${PSQL:-psql}

@@ -194,11 +194,12 @@ const SWITCHES: Record<string, string> = {
   cash_change: 'Enter the cash received: the till shows the change to give and prints the cash received and the change on the receipt',
   usd_pay: 'Accept payment in USD (and CDF): the cashier enters the dollars and Francs received, the dollars counted at the internal rate; change is in CDF, or whole dollars plus CDF',
   one_copy: 'Print one copy of each invoice: the customer copy only, at every till. Off: two copies, one for the customer and one for the shop',
+  vendeurs: 'Vendeurs (goods on credit): the shop admin keeps vendeurs with a credit period and a credit limit, gives them goods on credit at the till, takes their payments, gives promo items from the stock (not invoiced) and keeps or settles the monthly promo report',
   no_warehouse: 'No central store: the business keeps no warehouse. Goods received from a supplier go straight into a shop you choose, and the tabs that move stock between the store and the shops (Deliveries, Stock requests, Returns to the store) are hidden',
 };
 /** The groups the switches are shown in on the Settings page. */
 const OPTION_GROUPS: { id: string; title: string; sub: string; icon: string; keys: string[]; note?: string }[] = [
-  { id: 'selling', title: 'Selling', sub: 'Customer name, who sells', icon: 'users', keys: ['customer_optional', 'till_sells'] },
+  { id: 'selling', title: 'Selling', sub: 'Customer name, who sells, vendeurs', icon: 'users', keys: ['customer_optional', 'till_sells', 'vendeurs'] },
   { id: 'scanning', title: 'Barcodes', sub: 'Scanning items at the till', icon: 'search', keys: ['barcode'],
     note: 'A USB barcode scanner works like a keyboard: scan into the till search box. Barcodes are entered in the item form or in the Excel import.' },
   { id: 'payment', title: 'Payment', sub: 'Cash received, US dollars', icon: 'cash', keys: ['cash_change', 'usd_pay'] },
@@ -213,7 +214,7 @@ export function SettingsPage() {
   const [f, setF] = useState<Record<string, string> | null>(null);
   // which option groups are open: all closed at first, so the page is short
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const v = f ?? (s ? { rate: String(s.rate), book_rate: String(bookRate(s)), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', usd_pay: s.features?.usd_pay ? '1' : '', one_copy: s.features?.one_copy ? '1' : '', no_warehouse: s.features?.no_warehouse ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
+  const v = f ?? (s ? { rate: String(s.rate), book_rate: String(bookRate(s)), vat: String(s.vat), customer_optional: s.features?.customer_optional ? '1' : '', barcode: s.features?.barcode ? '1' : '', till_sells: s.features?.till_sells ? '1' : '', cash_change: s.features?.cash_change ? '1' : '', usd_pay: s.features?.usd_pay ? '1' : '', one_copy: s.features?.one_copy ? '1' : '', no_warehouse: s.features?.no_warehouse ? '1' : '', vendeurs: s.features?.vendeurs ? '1' : '', ...Object.fromEntries(['name', 'phone', 'address', 'email', 'rccm', 'idnat', 'nif', 'footer'].map((k) => [k, String((s.company as Record<string, string>)[k] ?? '')])) } : null);
   const [shop, setShop] = useState({ name: '', code: '', address: '' });
   const [edit, setEdit] = useState<Shop | null>(null);
   if (!v) return <Empty i="refresh" t="Loading" tall />;
@@ -221,7 +222,7 @@ export function SettingsPage() {
   const fld = (k: string, l: string) => <div className="field"><label htmlFor={'s-' + k}>{l}</label><input id={'s-' + k} className="input" maxLength={80} value={v[k]} onChange={set(k)} /></div>;
   const sw = (k: string, l: string) => <label className="switch"><input type="checkbox" id={'s-' + k} checked={!!v[k]} onChange={(e) => setF({ ...v, [k]: e.target.checked ? '1' : '' })} /><span>{l}</span></label>;
   const save = () => a.run(async () => {
-    await rpc('save_settings', { p: { rate: Number(v.rate), book_rate: Number(v.book_rate), vat: Number(v.vat), features: { customer_optional: !!v.customer_optional, barcode: !!v.barcode, till_sells: !!v.till_sells, cash_change: !!v.cash_change, usd_pay: !!v.usd_pay, one_copy: !!v.one_copy, no_warehouse: !!v.no_warehouse }, company: { name: v.name, phone: v.phone, address: v.address, email: v.email, rccm: v.rccm, idnat: v.idnat, nif: v.nif, footer: v.footer } } });
+    await rpc('save_settings', { p: { rate: Number(v.rate), book_rate: Number(v.book_rate), vat: Number(v.vat), features: { customer_optional: !!v.customer_optional, barcode: !!v.barcode, till_sells: !!v.till_sells, cash_change: !!v.cash_change, usd_pay: !!v.usd_pay, one_copy: !!v.one_copy, no_warehouse: !!v.no_warehouse, vendeurs: !!v.vendeurs }, company: { name: v.name, phone: v.phone, address: v.address, email: v.email, rccm: v.rccm, idnat: v.idnat, nif: v.nif, footer: v.footer } } });
     await refresh('settings', 'audit'); setF(null); toast('Settings saved');
   });
   const addShop = () => b.run(async () => { await rpc('save_shop', { p: shop }); await refresh('shops', 'stock', 'audit'); setShop({ name: '', code: '', address: '' }); toast('Shop added'); });

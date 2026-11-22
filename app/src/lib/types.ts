@@ -4,7 +4,9 @@ export interface Company { name?: string; address?: string; phone?: string; emai
 /** Switches the Admin turns on in Settings; both off by default. */
 export interface Features { customer_optional?: boolean; barcode?: boolean; till_sells?: boolean; cash_change?: boolean; usd_pay?: boolean; one_copy?: boolean;
   /** the business has no central store: goods from a supplier go straight into a shop */
-  no_warehouse?: boolean }
+  no_warehouse?: boolean;
+  /** the shop admin keeps vendeurs: goods on credit, their payments, promo items and the monthly promo report */
+  vendeurs?: boolean }
 /** rate: the sales rate (prices, tickets, tills). book_rate: the internal rate (suppliers, expenses, vouchers). */
 export interface Settings {
   rate: number; book_rate?: number; vat: number; tz: string; company: Company; features?: Features;
@@ -17,7 +19,9 @@ export interface Product {
   per_carton: number; pieces_per_set: number; price_usd: number; half_dozen_usd: number; dozen_usd: number; carton_usd: number; piece_usd: number;
   reorder: number; wh_qty: number; active: boolean; archived_at?: string | null; barcode?: string | null; barcodes?: string[] | null;
 }
-export interface Cost { product_id: string; carton_cost_usd: number; cost_usd: number }
+/** An item's cost (Admin only). carton_cost_usd is the gross cost of one carton (or set); net_cost_usd the optional
+ *  net cost of one carton (or set), empty when the gross cost counts; cost_usd the cost that counts, per pc (or set). */
+export interface Cost { product_id: string; carton_cost_usd: number; net_cost_usd?: number | null; cost_usd: number }
 export interface StockRow { shop_id: string; product_id: string; qty: number; open_pieces: number }
 export interface InvoiceItem { line_no?: number; product_id: string; name: string; unit: string; mult: number; piece: boolean; qty: number; price: number; line: number }
 export interface InvoiceEdit { at: string; by_name: string; reason: string; from_total: number; to_total: number }
@@ -33,6 +37,36 @@ export interface Invoice {
   usd_rate?: number | null;
   /** the total the till operator printed, when the shop admin changed the order before approving it */
   revised_from?: number | null;
+  /** goods on credit: the vendeur who owes the invoice, and when it falls due */
+  vendeur_id?: string | null; due_date?: string | null;
+}
+/** What a vendeur owes, from the server: payments settle the oldest goods first. Amounts in CDF. */
+export interface VendeurOpen { invoice_id: string | null; no: string; date: string; due: string; amount: number; owed: number; days_overdue: number }
+export interface VendeurState {
+  balance: number; available: number; over_limit: boolean; overdue: boolean; overdue_amount: number; oldest_due: string | null; days_overdue: number;
+  open: VendeurOpen[]; last_payment: { no: string; at: string; amount: number } | null; promo_open: number; promo_open_n: number;
+}
+export interface Vendeur extends VendeurState {
+  id: string; shop_id: string; shop_name: string; name: string; phone: string; address: string; notes: string;
+  credit_days: number; credit_limit: number; opening_balance: number; active: boolean; created_at: string; created_by_name: string;
+}
+export interface PromoLine { name: string; unit: string; qty: number; value?: number; line?: number }
+/** The promo items of a shop still open at the end of a month: each item and how many were given out, all vendeurs
+ *  together (no vendeur names). qty is in the item's stock unit (pcs, or sets); carried, from earlier months. */
+export interface PromoData {
+  month: string; n: number; value: number; pcs: number; carried_pcs: number;
+  items: { name: string; unit: string; qty: number; carried: number }[];
+}
+export interface PromoReport extends PromoData {
+  shop_id: string; shop_name: string; oldest_open: string | null;
+  reports: { id: string; month: string; status: 'kept' | 'settled'; n: number; total: number; by_name: string; at: string; data: PromoData }[];
+}
+export interface VendeurStatement {
+  vendeur: Omit<Vendeur, keyof VendeurState>; from: string; to: string; brought_forward: number; total_dr: number; total_cr: number; closing: number;
+  lines: { date: string; no: string; what: string; dr: number; cr: number; due: string | null; invoice_id: string | null }[];
+  promos: { id: string; no: string; date: string; value: number; status: 'open' | 'settled'; note: string; invoice: string | null; items: { name: string; unit: string; qty: number; line: number }[] }[];
+  payments: { id: string; no: string; at: string; amount: number; note: string; status: 'ok' | 'cancelled'; by_name: string; cancel_reason: string | null }[];
+  state: VendeurState;
 }
 export interface DeliveryItem { product_id: string; qty: number; price_usd: number; received_qty?: number | null }
 export interface DeliveryEdit { at: string; by_name: string; reason: string }

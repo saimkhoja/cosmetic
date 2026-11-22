@@ -2,13 +2,13 @@
 -- Run it ONCE, by hand, in the Supabase SQL Editor of the installation that goes live. It is not a
 -- migration and never runs on its own.
 --
--- Clears:  invoices, orders, deliveries, goods in, returns (from shops and to suppliers), stock requests, upkeep, supplier bills,
---          payments and every voucher; the stock in the central store and in every shop; the opening
+-- Clears:  invoices, orders, vendeur payments, promo items and promo reports, deliveries, goods in, returns (from shops and to suppliers), stock requests, upkeep, supplier bills,
+--          payments, shift end reports and every voucher; the stock in the central store and in every shop; the opening
 --          balances of the ledgers and suppliers; the registered tills (they register again as T1, T2...
 --          and invoice numbers restart at 000001). Voucher, delivery, goods in, return and request
 --          numbers restart too.
 -- Keeps:   items (names, categories, units, prices, cost prices, barcodes, archived items), categories,
---          suppliers and the items they supply, ledger names, shops, logins and passwords, settings
+--          suppliers and the items they supply, vendeurs (owing nothing), ledger names, shops, logins and passwords, settings
 --          (company details, rate, VAT, switches) and the activity log.
 --
 -- Before: back up the database, and check every till shows nothing waiting to send.
@@ -26,7 +26,11 @@ truncate table
   public.grn_items, public.grns, public.purchases, public.upkeep,
   public.supplier_return_items, public.supplier_returns,
   public.bill_allocations, public.voucher_lines, public.vouchers,
-  public.devices;
+  public.vendeur_promo_items, public.vendeur_promos, public.promo_reports, public.vendeur_payments, public.vendeur_seq,
+  public.shift_closes, public.devices;
+
+-- vendeurs stay, owing nothing
+update public.vendeurs set opening_balance = 0 where opening_balance <> 0;
 
 -- stock: every item stays in the catalogue and in every shop, at 0
 update public.products set wh_qty = 0 where wh_qty <> 0;

@@ -11,6 +11,8 @@ import { QtyCell } from './Inventory';
 import { blankLine, per, StockPicker, type Line } from '../components/StockPicker';
 import type { Delivery, Product, Shop } from '../lib/types';
 import { useNavigate } from 'react-router-dom';
+import { impStock, readCSV, readXlsx, saveBlob, templateXlsx, type StockImportRow } from '../lib/xlsx';
+import { useNoStore } from './Stores';
 
 function DeliveryCard({ d, shop, products, store, onEdit, onCancel, onReceive, onNote, rate }: { d: Delivery; shop?: Shop; products: Map<string, Product>; store: boolean; onEdit?: () => void; onCancel?: () => void; onReceive?: () => void; onNote: () => void; rate: number }) {
   const { profile } = useAuth(), showUSD = store && profile!.role === 'admin';
@@ -200,9 +202,12 @@ export function ShopStockAll() {
   const qtyAt = (sid: string | null, p: Product) => (sid ? at.get(sid + '|' + p.id) ?? 0 : p.wh_qty);
   const worth = (sid: string | null) => { const r = live.map((p) => ({ p, qty: qtyAt(sid, p) })); return { v: stockValue(r, rate), cost: sum(r.filter((x) => x.qty > 0), (x) => (cost.get(x.p.id) ?? 0) * x.qty) }; };
   const one = only !== 'all' && isAdmin ? only : null;
+  // without a central store nothing is sent from it: the Admin adds stock straight into the shops (typed or from Excel)
+  const noStore = useNoStore(), [stockIn, setStockIn] = useState(false);
   return (
     <>
-      <Head t="Shop stock" s="What each outlet has right now, next to the central store, best sellers of the last 30 days first. Send stock straight from here." a={<><button className="btn ghost" onClick={() => setCount(true)}><Icon n="printer" /> Print stock count sheet</button><button className="btn primary" onClick={() => setSend({ pid: '' })}><Icon n="truck" /> New delivery</button></>} />
+      <Head t="Shop stock" s={noStore ? 'What each shop has right now, best sellers of the last 30 days first. Add stock straight into the shops from here, typed or from an Excel file.' : 'What each outlet has right now, next to the central store, best sellers of the last 30 days first. Send stock straight from here.'} a={<><button className="btn ghost" onClick={() => setCount(true)}><Icon n="printer" /> Print stock count sheet</button>{noStore ? (isAdmin ? <button className="btn primary" id="stockin" onClick={() => setStockIn(true)}><Icon n="plus" /> Add stock to shops</button> : null)
+          : <button className="btn primary" onClick={() => setSend({ pid: '' })}><Icon n="truck" /> New delivery</button>}</>} />
       <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Search by name, code or category" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <select className="input" style={{ width: 'auto' }} value={only} onChange={(e) => setOnly(e.target.value)}><option value="all">All outlets</option>{(shops.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
         <span className="chip warn">5 or fewer</span><span className="chip bad">None or sold on order</span></div>
@@ -213,9 +218,10 @@ export function ShopStockAll() {
           {list.map((p) => <tr key={p.id}><td><b>{p.name}</b><div className="code">{p.sku} · {p.category}</div></td><td className="r"><QtyCell p={p} q={p.wh_qty} cls={p.wh_qty <= p.reorder ? 'bad' : ''} /></td>
             {cols.map((s) => { const v = at.get(s.id + '|' + p.id), c = coming.get(s.id + '|' + p.id); return <td key={s.id} className="r">{v === undefined ? <span className="code">Not stocked</span> : <QtyCell p={p} q={v} cls={v <= 0 ? 'bad' : v <= 5 ? 'warn' : 'ok'} />}{c ? <div className="code">+{c} on the way</div> : null}</td>; })}
             {one ? (() => { const q = qtyAt(one, p), pr = toCDF(pcValue(p), rate); return <td className="r nw"><b>{q > 0 ? fCDF(pr * q) : '-'}</b><div className="code">{fCDF(pr)} per {p.is_bundle ? 'set' : 'pc'}</div></td>; })() : null}
-            <td><div className="act"><button title="Send to shops" onClick={() => setSend({ pid: p.id, sid: only !== 'all' ? only : undefined })}><Icon n="truck" /></button></div></td></tr>)}
+            <td>{noStore ? null : <div className="act"><button title="Send to shops" onClick={() => setSend({ pid: p.id, sid: only !== 'all' ? only : undefined })}><Icon n="truck" /></button></div>}</td></tr>)}
         </tbody></table>}</div></div>
       {send ? <DeliveryModal d={null} pid={send.pid || undefined} sid={send.sid} onClose={() => setSend(null)} /> : null}
+      {stockIn ? <StockInModal sid={only !== 'all' ? only : undefined} onClose={() => setStockIn(false)} /> : null}
       {count ? <CountSheet onClose={() => setCount(false)} first={only} values={isAdmin} print={(where, sid, zero, values) => {
         const all = live.map((p) => ({ p, qty: qtyAt(sid, p) })).filter((r) => zero || r.qty !== 0).sort((a, b) => a.p.category.localeCompare(b.p.category) || a.p.name.localeCompare(b.p.name));
         printHTML(values ? stockValueHTML(settings.data?.company ?? {}, where, profile!.name, all, rate, (p) => cost.get(p.id) ?? 0) : stockCountHTML(settings.data?.company ?? {}, where, profile!.name, all)); setCount(false);
@@ -234,6 +240,78 @@ function CountSheet({ first, values, onClose, print }: { first: string; values: 
       <div className="field"><label>Where</label><select id="cntwhere" className="input" value={w} onChange={(e) => setW(e.target.value)}><option value="store">Central store</option>{(shops.data ?? []).filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
       <label className="switch"><input type="checkbox" checked={zero} onChange={(e) => setZero(e.target.checked)} /><span>Include items with no stock in the system</span></label>
       {values ? <label className="switch"><input id="cntvalue" type="checkbox" checked={val} onChange={(e) => setVal(e.target.checked)} /><span>Print the stock valuation instead: price per pc, value of each item, totals at selling price and at cost</span></label> : null}
+    </Modal>
+  );
+}
+
+/** Without a central store: stock goes straight into the shops ticked, typed item by item or read from an Excel file in
+ *  the item template. Items not in the catalogue are made from the file with its details (gross and net cost, prices);
+ *  items already in it only get the quantity. Booked at cost as opening stock. */
+function StockInModal({ sid, onClose }: { sid?: string; onClose: () => void }) {
+  const shops = useShops(), products = useProducts(), stock = useStock(), settings = useSettings(), refresh = useRefresh(), toast = useToast(), a = useAction();
+  const [sel, setSel] = useState<string[]>(sid ? [sid] : []), [lines, setLines] = useState<Record<string, Line>>({});
+  const [imp, setImp] = useState<{ file: string; rows: StockImportRow[] } | null>(null), [reading, setReading] = useState(false), [impErr, setImpErr] = useState('');
+  const pcsOf = (p: Product) => { const l = lines[p.id]; if (!l) return 0; const n = Math.max(0, parseInt(l.n) || 0); return l.u === 'ctn' ? n * per(p) : n; };
+  const setLine = (p: Product, patch: Partial<Line>) => setLines((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? blankLine(p)), ...patch } }));
+  const stockAt = (s: string, p: string) => stock.data?.find((r) => r.shop_id === s && r.product_id === p)?.qty ?? 0;
+  const all = (products.data ?? []).filter((p) => p.active), chosen = all.filter((p) => pcsOf(p) > 0), k = sel.length;
+  const newRows = imp?.rows.filter((r) => r.kind === 'new') ?? [], bad = imp?.rows.filter((r) => r.kind === 'bad') ?? [], none = imp?.rows.filter((r) => r.kind === 'none') ?? [];
+  const units = sum(chosen, pcsOf) + sum(newRows, (r) => r.qty);
+  const toggle = (s: string, on: boolean) => setSel(on ? [...new Set([...sel, s])] : sel.filter((x) => x !== s));
+  const pick = async (f?: File) => {
+    if (!f) return; setImpErr(''); setImp(null); setReading(true);
+    try {
+      const ext = f.name.toLowerCase().split('.').pop();
+      if (ext === 'xls') throw new Error('Old .xls files are not supported. In Excel choose File, Save As, Excel Workbook (.xlsx).');
+      const sheet = ext === 'xlsx' ? await readXlsx(await f.arrayBuffer()) : ext === 'csv' || ext === 'txt' ? readCSV(await f.text()) : null;
+      if (!sheet) throw new Error('Choose an .xlsx or .csv file');
+      const rows = impStock(sheet, products.data ?? []);
+      // items already in the catalogue: the file's quantities go into the list (in cartons when they come to whole cartons)
+      const tot = new Map<string, number>();
+      rows.filter((r) => r.kind === 'existing').forEach((r) => tot.set(r.product_id!, (tot.get(r.product_id!) ?? 0) + r.qty));
+      setLines((x) => { const n = { ...x }; tot.forEach((q, id) => { const p = all.find((y) => y.id === id); const c = p ? per(p) : 0; n[id] = c && q % c === 0 ? { n: String(q / c), u: 'ctn' } : { n: String(q), u: 'pcs' }; }); return n; });
+      setImp({ file: f.name, rows });
+    } catch (e) { setImpErr((e as Error).message); } finally { setReading(false); }
+  };
+  const save = () => a.run(async () => {
+    if (!k) throw new Error('Tick at least one shop');
+    if (bad.length) throw new Error(`${bad.length} row${bad.length === 1 ? '' : 's'} of ${imp!.file} ${bad.length === 1 ? 'has an error' : 'have errors'}. Fix ${bad.length === 1 ? 'it' : 'them'} in Excel and choose the file again`);
+    if (!chosen.length && !newRows.length) throw new Error('Enter a quantity for at least one item, or import an Excel file');
+    const res = await rpc<{ created: number; items: number; units: number; shops: number }>('stock_in_shops', {
+      p_shops: sel, p_lines: chosen.map((p) => ({ product_id: p.id, qty: pcsOf(p) })),
+      p_new: newRows.map(({ n, row: { o, sku, barcode } }) => ({ row: n, name: o.name, category: o.category, carton_cost: o.carton_cost, net_cost: isNaN(o.net_cost) ? null : o.net_cost,
+        per_carton: o.per_carton, pc: o.pc, half: o.half, dzn: o.dzn, ctn: o.ctn, open_cartons: o.open_cartons, open_pcs: o.open_pcs, reorder: o.reorder, sku, barcode })),
+      p_file: imp?.file ?? '' });
+    await refresh('products', 'costs', 'stock', 'audit', 'categories');
+    toast(`${res.units} units of ${res.items} items added to ${res.shops === 1 ? shops.data?.find((s) => s.id === sel[0])?.name : `each of ${res.shops} shops`}${res.created ? `; ${res.created} new item${res.created === 1 ? '' : 's'} made` : ''}`);
+    onClose();
+  });
+  return (
+    <Modal title="Add stock to shops" icon="plus" xl onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="stockgo" disabled={a.busy || reading} onClick={() => void save()}><Icon n="check" /> Add stock{chosen.length + newRows.length ? ` · ${chosen.length + newRows.length} items` : ''}</button></>}>
+      <div className="field"><label>Add to these shops</label>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{(shops.data ?? []).filter((s) => s.active).map((s) => <label key={s.id} className="chip" style={{ cursor: 'pointer', padding: '8px 12px', fontSize: 14, ...(sel.includes(s.id) ? { background: 'var(--btn)', color: '#fff' } : {}) }}><input type="checkbox" checked={sel.includes(s.id)} onChange={(e) => toggle(s.id, e.target.checked)} /> {s.name}</label>)}</div>
+        <span className="hint">There is no central store: the stock goes straight into each shop ticked, the same quantities in each.</span></div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0 12px' }}>
+        <label className="btn" style={{ cursor: 'pointer' }}><Icon n="download" /> Import from Excel<input id="stockfile" type="file" accept=".xlsx,.csv,.txt" style={{ display: 'none' }} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }} /></label>
+        <button className="btn ghost" onClick={() => saveBlob(templateXlsx(), 'QuickSales-items-template.xlsx')}><Icon n="download" /> Download Excel template</button>
+        <span className="hint">The item template: gross and net carton cost, prices, and the cartons and pcs to add (Opening cartons, Opening pcs). Items not in the catalogue are made from the file; items already in it only get the quantity.</span>
+      </div>
+      {reading ? <Empty i="refresh" t="Reading the file" /> : null}
+      {impErr ? <Note i="alert" warn>{impErr}</Note> : null}
+      {imp ? <div className={`note ${bad.length ? 'warn' : ''}`} id="stockimp" style={{ marginBottom: 12 }}><Icon n={bad.length ? 'alert' : 'doc'} /><div style={{ flex: 1, minWidth: 0 }}>
+        <b>{imp.file}</b>: {(() => { const n = imp.rows.filter((r) => r.kind === 'existing').length; return `${n} item${n === 1 ? '' : 's'}`; })()} already in the catalogue (their quantities are in the list below), {newRows.length} new item{newRows.length === 1 ? '' : 's'} to make{none.length ? `, ${none.length} with no quantity` : ''}{bad.length ? <>, <b>{bad.length} with errors</b></> : null}.
+        {newRows.length || bad.length ? <div className="tw" style={{ marginTop: 8, maxHeight: '30vh', overflow: 'auto' }}><table className="t" style={{ fontSize: 13 }}><thead><tr><th>Row</th><th>Item</th><th>Carton cost</th><th className="r">Per pc</th><th className="r">Per dozen</th><th className="r">Per carton</th><th className="r">To add</th><th>Status</th></tr></thead><tbody>
+          {[...bad, ...newRows].map((r) => { const o = r.row.o; return <tr key={r.n}><td className="code">{r.n}</td><td><b>{r.name || '(no name)'}</b><div className="code">{o.category}{r.row.sku ? ' · ' + r.row.sku : ''}</div></td>
+            <td className="nw">{isNaN(o.carton_cost) ? '-' : fUSD(o.carton_cost)}{!isNaN(o.net_cost) ? <div className="code">net {fUSD(o.net_cost)}</div> : null}<div className="code">{isNaN(o.per_carton) ? '-' : o.per_carton} pcs</div></td>
+            <td className="r nw">{o.pc ? fUSD(o.pc) : '-'}</td><td className="r nw">{o.dzn ? fUSD(o.dzn) : '-'}</td><td className="r nw">{o.ctn ? fUSD(o.ctn) : '-'}</td><td className="r nw">{r.kind === 'new' ? `${r.qty} pcs` : ''}</td>
+            <td>{r.kind === 'new' ? <span className="chip ok">New item</span> : <span className="chip bad">{r.msg}</span>}</td></tr>; })}
+        </tbody></table></div> : null}
+      </div></div> : null}
+      <StockPicker all={all} qty={{ lines, setLine, pcsOf }} codes={!!settings.data?.features?.barcode}
+        cols={sel.map((s) => ({ th: `${shops.data?.find((x) => x.id === s)?.code} has`, td: (p: Product) => { const v = stockAt(s, p.id); return <QtyCell p={p} q={v} cls={v <= 0 ? 'bad' : v <= 5 ? 'warn' : 'ok'} />; } }))}
+        qtyHead="Add" aria={(p) => `Add ${p.name}`} sideTitle="To add" sideNote={k ? (k === 1 ? `Into ${shops.data?.find((x) => x.id === sel[0])?.name}` : `Into each of ${k} shops`) : 'No shop ticked yet'} />
+      <div className={`note ${!k ? 'warn' : ''}`} style={{ marginTop: 12 }}><Icon n="store" /><div>{chosen.length + newRows.length} item{chosen.length + newRows.length === 1 ? '' : 's'}{newRows.length ? ` (${newRows.length} new)` : ''}, {units} units into {k ? (k === 1 ? shops.data?.find((x) => x.id === sel[0])?.name : `each of ${k} shops`) : <b>no shop yet</b>}. Booked at cost as opening stock.</div></div>
+      <div className="lerr">{a.err}</div>
     </Modal>
   );
 }

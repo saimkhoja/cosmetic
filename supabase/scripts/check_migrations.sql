@@ -1,4 +1,4 @@
--- QuickSales: which database updates (migrations 10 to 34) this installation has.
+-- QuickSales: which database updates (migrations 10 to 37) this installation has.
 -- Paste it into the Supabase SQL Editor and click Run. It only reads; it changes nothing.
 -- Each "MISSING" file must be run, in order. A migration re-creates functions from the newest version it knows, so
 -- after running a missing older file, run every later file again too (they are safe to run twice). For example,
@@ -28,5 +28,8 @@ select step, case when ok then 'done' else 'MISSING: run this file' end as statu
   (31, '20261111000009_daily_sales_limit.sql', exists (select 1 from pg_proc where proname = 'sales_report' and pg_get_functiondef(oid) like '%capped%')),
   (32, '20261111000010_usd_at_till_rate.sql',  exists (select 1 from pg_proc where proname = 'sales_report' and pg_get_functiondef(oid) like '%coalesce(usd_rate, rate)%')),
   (33, '20261111000011_keep_switches.sql',     exists (select 1 from pg_proc where proname = 'save_settings' and pg_get_functiondef(oid) like '%cur->>k%')),
-  (34, '20261111000012_shift_day_total.sql',   exists (select 1 from pg_proc where proname = 'shift_end_report' and pg_get_functiondef(oid) like '%dsum%'))
+  (34, '20261111000012_shift_day_total.sql',   exists (select 1 from pg_proc where proname = 'shift_end_report' and pg_get_functiondef(oid) like '%dsum%')),
+  (35, '20261122000001_net_cost.sql',          exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'product_costs' and column_name = 'net_cost_usd')),
+  (36, '20261122000002_vendeurs.sql',          exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'vendeurs')),
+  (37, '20261122000003_shop_stock_in.sql',     exists (select 1 from pg_proc where proname = 'stock_in_shops'))
 ) as m(n, step, ok) order by n;

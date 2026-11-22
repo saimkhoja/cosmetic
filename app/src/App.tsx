@@ -12,6 +12,7 @@ import { Invoices, ShopHome, ShopStock } from './pages/Shop';
 import { Books, GoodsIn, Returns } from './pages/Stores';
 import Accounts from './pages/Accounts';
 import Requests from './pages/Requests';
+import Vendeurs from './pages/Vendeurs';
 import { Empty } from './components/ui';
 import { startSync } from './offline/sync';
 import { useSettings } from './data/queries';
@@ -27,13 +28,14 @@ export default function App() {
   if (locked) return <Lock />;
   if (profile.must_change_password) return <ChangePassword />;
   // the tabs of this role: without a central store the store-to-shop ones are left out, address and all
-  const nav = navFor(profile.role, !!settings.data?.features?.no_warehouse);
+  // while the settings load, the Vendeurs address is kept, so opening or reloading /vendeurs does not jump to the first tab
+  const nav = navFor(profile.role, settings.data ? settings.data.features : { vendeurs: true });
   const allowed = new Set(nav.map((n) => n[0]));
   const page: Record<string, JSX.Element> = {
     '/': profile.role === 'admin' ? <AdminHome /> : <ShopHome />, '/inventory': <Inventory />, '/deliveries': <Deliveries />, '/shop-stock': <ShopStockAll />,
     '/upkeep': <Upkeep />, '/reports': <Reports />, '/users': <Users />, '/settings': <SettingsPage />, '/activity': <Activity />,
     '/till': <Till />, '/invoices': <Invoices />, '/stock': <ShopStock />, '/received': <Received />,
-    '/goods-in': <GoodsIn />, '/returns': <Returns />, '/books': <Books />, '/accounts': <Accounts />, '/requests': <Requests />,
+    '/goods-in': <GoodsIn />, '/returns': <Returns />, '/books': <Books />, '/accounts': <Accounts />, '/requests': <Requests />, '/vendeurs': <Vendeurs />,
   };
   return (
     <Layout>

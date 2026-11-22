@@ -20,6 +20,9 @@ export function ShopHome() {
   const sid = profile!.shop_id!;
   const shops = useShops(), rep = useReport(today(), today(), sid), stock = useStock(sid), products = useProducts(), dels = useDeliveries(sid);
   const shop = shops.data?.find((s) => s.id === sid), r = rep.data;
+  // with vendeurs, goods on credit are sales but not cash, and the vendeurs' payments are cash: the day slip has both
+  const vendeursOn = !!useSettings().data?.features?.vendeurs, slip = r?.slips?.[0];
+  const cash = vendeursOn && slip ? Number(slip.collected) - Number(slip.returned) : r?.total ?? 0, onCredit = Number(slip?.on_credit ?? 0);
   const byId = new Map((products.data ?? []).map((p) => [p.id, p]));
   const low = (stock.data ?? []).filter((x) => x.qty <= 5 && byId.has(x.product_id)).sort((a, b) => a.qty - b.qty);
   const lastDel = dels.data?.find((d) => d.status === 'received');
@@ -30,7 +33,7 @@ export function ShopHome() {
       <Head t={`Good ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, ${profile!.name.split(' ')[0]}`} s={`${shop?.name ?? ''}, ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}`} />
       <div className="kpis">
         <Kpi i="chart" l="Sales today" tone="ok"><Dual2 b={fCDF(r?.total ?? 0)} s={`${r?.n ?? 0} invoices${r?.capped ? ' · up to the shop limit' : ''}`} /></Kpi>
-        <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(r?.total ?? 0)} s={r?.capped ? 'cash only · up to the shop limit' : 'cash only'} /></Kpi>
+        <Kpi i="cash" l="Cash taken"><Dual2 b={fCDF(cash)} s={`cash only${vendeursOn && onCredit ? ` · ${fCDF(onCredit)} on credit` : ''}${r?.capped ? ' · up to the shop limit' : ''}`} /></Kpi>
         <Kpi i="edit" l="Invoices edited today" tone={r?.edited ? 'warn' : ''}><Dual2 b={r?.edited ?? 0} s="by the shop admin" /></Kpi>
         <Kpi i="alert" l="Items running low" tone={low.length ? 'bad' : ''}><Dual2 b={low.length} s="5 or fewer left" /></Kpi>
       </div>
