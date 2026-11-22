@@ -178,39 +178,86 @@ If the update has new files in `supabase/migrations/`, run `supabase db push` fr
 - **Auto-cut**: invoices and day end slips print on an 80 mm page as long as the receipt, one page per copy (customer and shop). Install the printer maker's Windows driver (not "Generic / Text Only") and in the printer's **Printing preferences** set the paper to the 80 mm roll and **Paper cut** to cut at the end of each page (on some drivers "Cut each page" or "Page end cut"; on Xprinter, *Printer Settings → Paper Cutter: Cut paper per page* and *Paper Saving: Both*, set under Advanced → Printing Defaults so it applies to every Windows user). Each copy is a page, so cutting per job would leave the copies joined. Each copy then prints and is cut just under its last line, with no print window.
 - **Without internet** the till keeps selling and printing. Sales are kept on the till and sent automatically when the connection returns; the pill at the top shows how many are waiting. Do not clear the browser data on a till that shows sales waiting.
 
-## 6. Another client (a separate installation)
+## 6. Clients on getquicksales.com (one site, a database each)
 
-Each client has **their own Supabase project and their own website**, built from the same code. Their data, logins and backups are completely separate: a site only talks to the project whose URL and key it was built with. Nothing you do for a new client touches an existing client's project.
+Each client has **their own Supabase project** (their data, logins and backups are completely separate), but every client
+uses **the same website**: one Vercel project answers for `*.getquicksales.com`, and the address picks the database.
+`sapcongo.getquicksales.com` asks the **control project** (a short list of clients, see `control/README.md`) where
+sapcongo's database is, and the device remembers the answer so it also opens offline.
 
-1. **New Supabase project** in the client's name (supabase.com → New project). Do all of section 1 for it: every migration file, the `setup` and `admin-users` functions with **Verify JWT off**, and the Auth settings. Write down its Project URL and publishable key.
-2. **New Vercel project** for the same repository (section 3a again: Add New → Project → import `saimkhoja/cosmetic`, Root Directory `app`). Give it a name such as `sim-clientname`, and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to **the new project's** values. Give it its `getquicksales.com` subdomain (see *Client addresses* below).
-3. In the **new** Supabase project set **Site URL** (and the `SIM_ALLOWED_ORIGIN` secret if you use it) to the new site's address.
-4. The client opens the new site: the **Set up QuickSales** screen asks for their name, Admin username and password, company details for the invoices, rate, VAT and their shops (section 4). Their Admin then creates the other logins.
-5. Features they need are turned on under **Settings → Till options**:
-   - **Customer name optional**: walk-in sales and orders without typing a name. The invoice then has no Client line, and lists show "Walk-in".
-   - **Till operators sell directly**: the till operator takes the cash and prints the invoice without the shop admin approving an order. Only the shop admin gives discounts; the invoice names the till operator as the Sales Person.
-   - **Enter the cash received**: under "To pay" the cashier types the amount the customer gives (or taps Exact or a round note); the till shows the change to give and won't print until the cash covers the total. The receipt prints "Cash received" and "Change".
-   - **Accept payment in USD (and CDF)**: the till shows what is due in USD at the sales rate; the cashier enters the dollars and/or Francs received (or taps a note), sees what is still due or the change, and can give whole dollars back with the rest in CDF. The receipt shows Paid USD, Paid CDF, the rate and the change; the dollars go to the shop's "Cash USD" ledger and the day end slip shows Collected USD and Collected CDF.
-   - **Barcode scanning** (several barcodes per item, "+ Add another barcode" in the item form; several in one Excel cell separated with ;): a Barcode field in the item form and a `Barcode` column in the Excel template. At the till a USB scanner (it works as a keyboard, no driver needed) scans into the search box: the item goes into the sale as 1 pc, and the unit can be changed in the cart. Price check finds barcodes too.
-
-### Client addresses on getquicksales.com
-
-Each client gets a subdomain of `getquicksales.com`, pointing at that client's own Vercel project:
+So a new client needs **no Vercel project, no DNS record and no build**, and one push to `main` updates every client's site.
 
 | Client | Address | Backup name |
 |---|---|---|
-| Client 1 | not moved yet (still its `….vercel.app` link) | `client1` |
+| Client 1 | not moved yet (still its own `….vercel.app` project) | `client1` |
 | Client 2 | `https://sapcongo.getquicksales.com` | `client2` |
 
-**Adding or changing a client's subdomain.** No code changes and no data is touched; items, stock, invoices, logins and Settings all stay in the client's Supabase project.
+### 6a. Setting up the shared site (once)
 
-1. **Vercel**: the client's project → **Settings → Domains → Add**, type the subdomain (e.g. `name.getquicksales.com`). Vercel shows a **CNAME** record to add.
-2. **DNS** at the registrar of `getquicksales.com`: add that CNAME (Name = the part before `.getquicksales.com`, Value = what Vercel shows). Vercel shows **Valid Configuration** and sets up HTTPS on its own.
-3. **Supabase** (the client's project): **Authentication → URL Configuration → Site URL** = the new address. If `SIM_ALLOWED_ORIGIN` is set (Edge Functions → Secrets), list the new address and, during the changeover, the old one too, separated by a comma.
-4. **Tills.** A new address is a new site to the browser, so what a till keeps on the device does not follow. On each till, while still on the **old** address: nothing waiting to send, no parked sales. Then sign in **online** at the new address (the till registers again with a new code, e.g. T3, and its invoice numbers continue under that code), install the app from it, and point the `--kiosk-printing` shortcut at `https://new-address/till`.
-5. **Only when every till has moved**: in Vercel → **Domains**, set the old `….vercel.app` domain to **Redirect to** the new one (308), and leave only the new address in `SIM_ALLOWED_ORIGIN`.
+1. **Control project**: set it up as in `control/README.md` (a new Supabase project, one SQL file). Write down its URL and public key.
+2. **Vercel → Add New → Project** → import `saimkhoja/cosmetic`, Root Directory `app`, name e.g. `quicksales`.
+   Environment variables: `VITE_CONTROL_URL` and `VITE_CONTROL_ANON_KEY` = the **control** project's values.
+   **Do not** set `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` here: they would send every address to that one database.
+3. **Wildcard domain.** Vercel can only give `*.getquicksales.com` HTTPS when it runs the domain's DNS:
+   1. Vercel → **Domains** → add `getquicksales.com`. Before changing anything at the registrar, open its DNS page there
+      and **copy every record that is not a QuickSales site** (email MX and TXT records above all) into Vercel → Domains →
+      `getquicksales.com` → **DNS Records**. Records you leave behind stop working when the nameservers move.
+   2. At the registrar, change the **nameservers** to the two Vercel shows. This can take up to a day; Vercel then shows the domain as valid.
+   3. In the `quicksales` project → **Settings → Domains → Add** `*.getquicksales.com`.
+   Subdomains already added to a client's old Vercel project (such as `sapcongo`) keep going to that project: a named
+   subdomain wins over the wildcard. That is how the existing clients move one at a time (6c).
+4. **Try it** before moving anyone: add a test row with `control/scripts/add_tenant.sql` for a throwaway subdomain (e.g.
+   `trial1`) pointing at a **new, empty** Supabase project, open `https://trial1.getquicksales.com`: the **Set up QuickSales** screen
+   appears. An address no client has shows "No shop at this address".
 
-**Updating every client.** Every Vercel project redeploys by itself when `main` changes. A new migration file has to be run on **each** client's Supabase project (section 1, only the new files), at the same time; back up that client's database first (section 8). The app keeps working on a project that has not run the newest file yet, but the new features stay off there.
+### 6b. Adding a client
+
+1. **New Supabase project** in the client's name. Do all of section 1 for it: every migration file, the `setup` and
+   `admin-users` functions with **Verify JWT off**, and the Auth settings. Set **Site URL** (and `SIM_ALLOWED_ORIGIN`
+   if you use it) to `https://<subdomain>.getquicksales.com`.
+2. **Control project → SQL Editor**: `control/scripts/add_tenant.sql` with the subdomain, business name, the new project's
+   URL, public key and ref, and a backup name. The address works straight away.
+3. Send the client `https://<subdomain>.getquicksales.com`. The **Set up QuickSales** screen asks for their name, Admin
+   username and password, company details, rate, VAT and their shops (section 4). Their Admin then creates the other logins.
+
+Features they need are turned on under **Settings → Till options**:
+- **Customer name optional**: walk-in sales and orders without typing a name. The invoice then has no Client line, and lists show "Walk-in".
+- **Till operators sell directly**: the till operator takes the cash and prints the invoice without the shop admin approving an order. Only the shop admin gives discounts; the invoice names the till operator as the Sales Person.
+- **Enter the cash received**: under "To pay" the cashier types the amount the customer gives (or taps Exact or a round note); the till shows the change to give and won't print until the cash covers the total. The receipt prints "Cash received" and "Change".
+- **Accept payment in USD (and CDF)**: the till shows what is due in USD at the sales rate; the cashier enters the dollars and/or Francs received (or taps a note), sees what is still due or the change, and can give whole dollars back with the rest in CDF. The receipt shows Paid USD, Paid CDF, the rate and the change; the dollars go to the shop's "Cash USD" ledger and the day end slip shows Collected USD and Collected CDF.
+   - **Barcode scanning** (several barcodes per item, "+ Add another barcode" in the item form; several in one Excel cell separated with ;): a Barcode field in the item form and a `Barcode` column in the Excel template. At the till a USB scanner (it works as a keyboard, no driver needed) scans into the search box: the item goes into the sale as 1 pc, and the unit can be changed in the cart. Price check finds barcodes too.
+
+### 6c. Moving an existing client onto the shared site
+
+**Client 2 (`sapcongo.getquicksales.com`)**: the address stays the same, so the tills keep everything they hold on the device.
+1. Add sapcongo to the control project (`add_tenant.sql`, with client 2's URL and public key; backup name `client2`).
+2. In client 2's **old** Vercel project → **Settings → Domains**, remove `sapcongo.getquicksales.com`. The wildcard now answers
+   for it within a minute or two. Open it: it shows the client's normal sign-in page.
+3. Keep the old Vercel project for a week as a way back (add the domain to it again), then delete it.
+
+**Client 1** (still on its `….vercel.app` address): add it to the control project with its new subdomain, then follow
+*Changing a client's address* below: a new address is a new site to the browser.
+
+### Changing a client's address
+
+No data is touched; items, stock, invoices, logins and Settings all stay in the client's Supabase project.
+
+1. **Control project**: `update public.tenants set subdomain = 'newname' where subdomain = 'oldname';` (or add the client with
+   `add_tenant.sql` if it was not listed yet). The new address works straight away.
+2. **Supabase** (the client's project): **Authentication → URL Configuration → Site URL** = the new address. If `SIM_ALLOWED_ORIGIN`
+   is set (Edge Functions → Secrets), list the new address and, during the changeover, the old one too, separated by a comma.
+3. **Tills.** What a till keeps on the device does not follow to a new address. On each till, while still on the **old** address:
+   nothing waiting to send, no parked sales. Then sign in **online** at the new address (the till registers again with a new code,
+   e.g. T3, and its invoice numbers continue under that code), install the app from it, and point the `--kiosk-printing` shortcut
+   at `https://new-address/till`.
+4. **Only when every till has moved**: leave only the new address in `SIM_ALLOWED_ORIGIN`. A client that had its own Vercel
+   project: set its old `….vercel.app` domain to **Redirect to** the new address (308) instead of deleting that project.
+
+### Updating every client
+
+The shared site redeploys by itself when `main` changes, for every client at once. A new migration file still has to be run on
+**each** client's Supabase project (section 1, only the new files), after backing up that client's database (section 8); making this
+automatic is the next step. The app keeps working on a project that has not run the newest file yet, but the new features stay off there.
 
 ## 7. Going live: clearing the test data
 

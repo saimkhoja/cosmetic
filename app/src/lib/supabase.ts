@@ -1,7 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
+import { connection } from './tenant';
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+// main.tsx has already decided which client's database this is (the build's own project, or the one
+// the control project gave for this address) before this file is loaded.
+const conn = connection();
+const url = conn?.url, key = conn?.key;
 export const configured = !!(url && key);
 export const supabase = createClient(url || 'http://localhost:54321', key || 'missing-anon-key', {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: 'sim-auth' },

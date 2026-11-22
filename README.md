@@ -74,6 +74,7 @@ supabase/
   functions/          Edge Functions: setup, admin-users
   tests/              SQL tests for every role and rule (run.sh)
   local/              local Supabase-compatible stack for development and tests
+control/              the control project: which database each client's subdomain uses (README.md)
 deploy/               Dockerfile, Caddyfile, docker-compose.yml, DEPLOY.md
 demo/                 the approved single-file demo
 ```
