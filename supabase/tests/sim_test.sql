@@ -1513,6 +1513,45 @@ select t.as('00000000-0000-0000-0000-00000000000a');
 select t.ok(jsonb_array_length(public.vendeur_list()) = 1, 'the Admin sees the vendeurs of every shop');
 reset role;
 
+-- ===== no central store: stock added straight into the shops, typed or from the item Excel template =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.fails(format($$select public.stock_in_shops(array['%s']::uuid[], '[{"product_id":"%s","qty":5}]')$$, t.get('gom'), t.get('cgel')), 'by delivery', 'with a central store, stock goes to the shops by delivery');
+reset role;
+update settings set features = features || '{"no_warehouse": true}' where id = 1;
+select t.put('sin_gom0', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid));
+select t.put('sin_lim0', (select coalesce((select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('cgel')::uuid), 0)::text));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.fails(format($$select public.stock_in_shops(array['%s']::uuid[], '[]', '[{"row":2,"name":"Import mask","category":"Face","carton_cost":24,"per_carton":12,"pc":1,"open_cartons":1}]')$$, t.get('gom')),
+  'Nothing was added', 'a new item priced below its cost stops the whole import');
+select t.ok(not exists (select 1 from products where name = 'Import mask') and not exists (select 1 from categories where name = 'Face'), 'nothing of the failed import was saved');
+select t.fails(format($$select public.stock_in_shops(array['%s']::uuid[], '[]', '[{"row":2,"name":"credit GEL","category":"Skin care","carton_cost":24,"per_carton":24,"pc":2,"open_pcs":1}]')$$, t.get('gom')),
+  'already exists', 'a row for an item already in the catalogue cannot make it again');
+select t.put('sin', public.stock_in_shops(array[t.get('gom'), t.get('lim')]::uuid[],
+  jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 10)),
+  '[{"row":2,"name":"Import mask","category":"Face","carton_cost":24,"net_cost":18,"per_carton":12,"pc":2.5,"ctn":28,"open_cartons":2,"open_pcs":3,"sku":"IM-1","barcode":"6001112223334"}]',
+  'shop stock.xlsx')::text);
+select t.ok((t.get('sin')::jsonb->>'created')::int = 1 and (t.get('sin')::jsonb->>'units')::int = 37 and (t.get('sin')::jsonb->>'shops')::int = 2, 'the import adds an item from the catalogue and makes the new one');
+select t.ok((select c.carton_cost_usd = 24 and c.net_cost_usd = 18 and c.cost_usd = 1.5 and p.sku = 'IM-1' and p.barcodes = array['6001112223334'] and p.carton_usd = 28 and p.wh_qty = 0
+  from products p join product_costs c on c.product_id = p.id where p.name = 'Import mask'), 'the new item is made with the file''s details: gross and net cost, prices, code, barcode; nothing in the store');
+select t.ok(exists (select 1 from categories where name = 'Face'), 'a category the file names is made');
+reset role;
+select t.ok((select qty from shop_stock s join products p on p.id = s.product_id where s.shop_id = t.get('gom')::uuid and p.name = 'Import mask') = 27
+  and (select qty from shop_stock s join products p on p.id = s.product_id where s.shop_id = t.get('lim')::uuid and p.name = 'Import mask') = 27,
+  'the new item goes into each shop ticked: 2 cartons of 12 + 3 pcs');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid) = t.get('sin_gom0')::int + 10
+  and (select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('cgel')::uuid) = t.get('sin_lim0')::int + 10, 'the item from the catalogue gets its quantity in each shop');
+select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id where v.type = 'opening' and v.narration like 'Stock added to SIM Gombe (shop stock.xlsx)%'
+    and l.account_id = t.shop_acc('INV_SHOP', t.get('gom')::uuid) and l.side = 'Dr') = round(27 * 1.5 + 10 * (select cost_usd from product_costs where product_id = t.get('cgel')::uuid), 2),
+  'each shop''s stock is booked at cost (the net cost) as opening stock');
+select t.ok(t.unbalanced() = 0, 'adding stock keeps the books balanced');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails(format($$select public.stock_in_shops(array['%s']::uuid[], '[{"product_id":"%s","qty":5}]')$$, t.get('gom'), t.get('cgel')), 'permission', 'only the Admin adds stock this way');
+reset role;
+update settings set features = features - 'no_warehouse' where id = 1;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

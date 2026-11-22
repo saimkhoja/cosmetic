@@ -1,5 +1,5 @@
 // Excel (.xlsx) and CSV reading/writing with no outside library, so import works offline.
-import { itemProblem, MAX_BARCODES, splitBarcodes } from './items';
+import { barcodesOf, itemProblem, MAX_BARCODES, splitBarcodes } from './items';
 
 export const IMPCOLS = ['Name', 'Category', 'Gross carton cost USD', 'Net carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per half dozen USD', 'Price per dozen USD', 'Price per carton USD', 'Opening cartons', 'Opening pcs', 'Reorder at (pcs)', 'SKU', 'Barcode'];
 const IMPKEYS: Record<string, string[]> = {
@@ -163,4 +163,31 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
 export function saveBlob(blob: Blob, name: string) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/** A row of the item template read for adding stock to shops: an item already in the catalogue (only its quantity is
+ *  used), a new item to make from the row, a row with nothing to add, or a row with an error. */
+export interface StockImportRow { n: number; kind: 'existing' | 'new' | 'none' | 'bad'; msg: string; product_id: string | null; name: string; qty: number; row: ImportRow }
+type Known = { id: string; name: string; sku: string; active: boolean; is_bundle: boolean; per_carton: number; barcode?: string | null; barcodes?: string[] | null };
+/** Reads the item template for stock: each row is matched to the catalogue by code, barcode or name. A match adds its
+ *  cartons and pcs (with the item's own pcs per carton) and keeps its details as they are; any other row must be a
+ *  complete new item, checked like the item import. */
+export function impStock(rows: Cell[][], products: Known[]): StockImportRow[] {
+  const parsed = impParse(rows, [], [], []);
+  return parsed.map((r) => {
+    const codes = r.barcode ? r.barcode.split(';') : [], nm = r.o.name.toLowerCase();
+    const p = (r.sku ? products.find((x) => x.sku.toLowerCase() === r.sku.toLowerCase()) : undefined)
+      ?? products.find((x) => codes.length > 0 && barcodesOf(x).some((b) => codes.includes(b)))
+      ?? products.find((x) => x.active && x.name.trim().toLowerCase() === nm);
+    const base = { n: r.n, name: r.o.name, row: r, product_id: null, qty: 0 };
+    if (p) {
+      if (!p.active) return { ...base, kind: 'bad', msg: `${p.name} is archived: restore it in Inventory first`, product_id: p.id, name: p.name };
+      const oc = r.o.open_cartons, op = r.o.open_pcs;
+      if (!(oc >= 0) || !(op >= 0) || oc % 1 || op % 1) return { ...base, kind: 'bad', msg: 'Cartons and pcs must be whole numbers of 0 or more', product_id: p.id, name: p.name };
+      const qty = (p.is_bundle ? 0 : oc * Math.max(1, p.per_carton)) + op;
+      return { ...base, kind: qty > 0 ? 'existing' : 'none', msg: qty > 0 ? '' : 'No quantity to add', product_id: p.id, name: p.name, qty };
+    }
+    if (r.status === 'ok') return { ...base, kind: 'new', msg: '', qty: r.qty };
+    return { ...base, kind: 'bad', msg: r.status === 'skip' ? 'This new item is in the file twice' : r.msg };
+  });
 }
