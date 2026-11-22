@@ -7,6 +7,7 @@
 //   APPROVE_SECRET          the same as for the signup function
 //   GITHUB_DISPATCH_TOKEN   a GitHub fine-grained token for saimkhoja/cosmetic with "Actions: Read and write"
 //   GITHUB_REPO             saimkhoja/cosmetic
+//   GITHUB_DISPATCH_REF     optional: the branch the setup workflow runs from (default main)
 //   SIGNUP_ALLOWED_ORIGIN   optional, as for the signup function
 //
 // Only someone holding the link can act on a request: the link carries an HMAC of the subdomain and the time
@@ -60,7 +61,7 @@ async function startWorkflow(subdomain: string) {
   const res = await fetch(`${env('GITHUB_API_URL', 'https://api.github.com')}/repos/${repo}/actions/workflows/provision.yml/dispatches`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json', 'User-Agent': 'quicksales-control' },
-    body: JSON.stringify({ ref: env('GITHUB_REF', 'main'), inputs: { subdomain } }),
+    body: JSON.stringify({ ref: env('GITHUB_DISPATCH_REF', 'main'), inputs: { subdomain } }),
   });
   if (res.status !== 204) throw new Error(`GitHub did not start the workflow: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
 }
