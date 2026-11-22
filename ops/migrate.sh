@@ -10,8 +10,10 @@
 #
 # - Each file runs in its own transaction with its record: a file that fails leaves no trace and stops the run.
 # - A database that has never been recorded but already has QuickSales (set up by hand in the SQL Editor) is
-#   checked with supabase/scripts/check_migrations.sql: if every file up to BASELINE_UPTO is in, they are recorded as
-#   done without running them again. If one is missing the run stops: that client needs a look first.
+#   checked with supabase/scripts/check_migrations.sql. Every file up to BASELINE_UPTO (the newest file that was ever
+#   run by hand) must be in, or the run stops: that client needs a look first. Those files, and the newer ones the
+#   check finds already in (one after another, with no gap), are recorded as done without running them again;
+#   the files after that run as usual.
 # - An empty database gets every file.
 # - A file older than the newest one already recorded is refused: migrations re-create functions in their latest
 #   form, so running an old file after a newer one would bring back old versions. Give it a newer number.
@@ -24,7 +26,7 @@ URL_FILE=${1:?usage: migrate.sh <db-url-file> plan|apply}; MODE=${2:?usage: migr
 [[ $MODE == plan || $MODE == apply ]] || { echo "mode must be plan or apply"; exit 2; }
 DIR=${MIGRATIONS_DIR:-supabase/migrations}
 BASELINE_CHECK=${BASELINE_CHECK:-supabase/scripts/check_migrations.sql}
-BASELINE_UPTO=${BASELINE_UPTO:-20261122000003}   # the newest file check_migrations.sql knows about
+BASELINE_UPTO=${BASELINE_UPTO:-20261111000012}   # the newest file a database set up by hand must already have
 APP_TABLE=${APP_TABLE:-public.settings}
 [[ $APP_TABLE =~ ^[a-z_]+\.[a-z_]+$ ]] || { echo "bad APP_TABLE"; exit 2; }
 PSQL=${PSQL:-psql}
@@ -71,10 +73,19 @@ recorded_state=$([[ -n $applied ]] && echo recorded || echo none)
 baseline=()
 if [[ $recorded_state == none && $has_app == true ]]; then
   # set up by hand: check what is there
-  missing=$(q -F '|' -f "$TMP/role.sql" -f "$BASELINE_CHECK" | awk -F'|' '$2 != "done" {print $1}')
-  [[ -z $missing ]] || fail "this database was set up by hand and is missing: $(echo $missing | tr '\n' ' '). Run supabase/scripts/check_migrations.sql in its SQL Editor and follow it, then run this again."
-  for e in "${files[@]}"; do v=${e%%|*}; [[ $v > $BASELINE_UPTO ]] || baseline+=("$e"); done
-  note "Set up by hand, all ${#baseline[@]} files up to $BASELINE_UPTO are in: recorded as done."
+  # the check lists each file as done or MISSING, oldest first. Up to BASELINE_UPTO every file must be done; after
+  # it, the files done one after another are in too, and the first one missing is where the run starts.
+  checked=$(q -F '|' -f "$TMP/role.sql" -f "$BASELINE_CHECK")
+  missing=""; upto=$BASELINE_UPTO; gap=""
+  while IFS='|' read -r step st; do
+    [[ -n $step ]] || continue
+    v=${step%%_*}
+    if [[ $st == done ]]; then [[ -z $gap && $v > $upto ]] && upto=$v
+    else [[ $v > $BASELINE_UPTO ]] && gap=1 || missing+="$step "; fi
+  done <<< "$checked"
+  [[ -z $missing ]] || fail "this database was set up by hand and is missing: $missing. Run supabase/scripts/check_migrations.sql in its SQL Editor and follow it, then run this again."
+  for e in "${files[@]}"; do v=${e%%|*}; [[ $v > $upto ]] || baseline+=("$e"); done
+  note "Set up by hand, all ${#baseline[@]} files up to $upto are in: recorded as done."
 elif [[ $recorded_state == none ]]; then
   note "Empty database: every file will run."
 fi
