@@ -1493,6 +1493,14 @@ select t.fails(format($$select public.cancel_promo('%s', 'too late now')$$, t.ge
 -- a vendeur with history is never deleted; one without is
 select t.fails(format($$select public.delete_vendeur('%s')$$, t.get('v1')), 'still owes', 'a vendeur who owes cannot be removed');
 select t.ok(public.delete_vendeur(public.save_vendeur('{"name":"Never used","credit_days":0,"credit_limit":100}')) = 'deleted', 'a vendeur with nothing recorded is deleted');
+select t.ok(public.delete_vendeur(public.save_vendeur('{"name":"Typed by mistake","credit_days":7,"credit_limit":5000,"opening_balance":3000}')) = 'deleted',
+  'a vendeur created by mistake is deleted even with an amount it was entered as owing');
+select t.ok(not exists (select 1 from jsonb_array_elements(public.vendeur_list()) x where x->>'name' = 'Typed by mistake'), 'it is gone from the list');
+select t.put('v_paid', public.save_vendeur('{"name":"Paid up","credit_days":7,"credit_limit":50000}')::text);
+select t.ok((public.submit_invoice(jsonb_build_object('id', gen_random_uuid(), 'no', 'GOM-T2-000910', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16,
+  'vendeur_id', t.get('v_paid'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 1, 'price', 5700))))->>'status') = 'ok', 'goods on credit to a second vendeur');
+select t.ok((public.vendeur_pay(jsonb_build_object('vendeur_id', t.get('v_paid'), 'amount', 5700))->'state'->>'balance')::bigint = 0, 'the second vendeur pays it all');
+select t.ok(public.delete_vendeur(t.get('v_paid')::uuid) = 'inactive', 'a vendeur with history that owes nothing is kept, made inactive');
 reset role;
 -- another shop never sees them
 set role authenticated;
@@ -1510,7 +1518,7 @@ reset role;
 update settings set features = features - 'vendeurs' where id = 1;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
-select t.ok(jsonb_array_length(public.vendeur_list()) = 1, 'the Admin sees the vendeurs of every shop');
+select t.ok(jsonb_array_length(public.vendeur_list()) = 2, 'the Admin sees the vendeurs of every shop');
 reset role;
 
 -- ===== no central store: stock added straight into the shops, typed or from the item Excel template =====
