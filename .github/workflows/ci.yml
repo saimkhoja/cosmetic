@@ -21,6 +21,10 @@ jobs:
       - uses: actions/checkout@v4
       # the runner image already has psql; install it only if it is missing, so a mirror outage does not fail the tests
       - run: command -v psql || (sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client)
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: v2.x }
       - run: supabase/tests/run.sh
       - run: control/tests/run.sh
   ops:

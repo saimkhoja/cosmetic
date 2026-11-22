@@ -13,5 +13,12 @@ export PGPASSWORD=postgres
 for i in $(seq 1 60); do psql -h 127.0.0.1 -p $PORT -U postgres -tAc 'select 1' >/dev/null 2>&1 && break; sleep 2; done
 sleep 3
 for f in control/migrations/*.sql; do psql -h 127.0.0.1 -p $PORT -U postgres -v ON_ERROR_STOP=1 -q -f "$f"; done
+set +e
 psql -h 127.0.0.1 -p $PORT -U postgres -v ON_ERROR_STOP=1 -q -f control/tests/control_test.sql 2>&1 | sed -e 's/^psql:[^:]*:[0-9]*: //' -e '/^\s*$/d'
-exit ${PIPESTATUS[0]}
+rc=${PIPESTATUS[0]}
+set -e
+[ "$rc" = 0 ] || exit "$rc"
+# the Edge Functions and the provision script, against the same database
+export CONTROL_TEST_DB="postgresql://postgres:postgres@127.0.0.1:$PORT/postgres"
+node --test ops/tests/provision.test.mjs
+if command -v deno >/dev/null; then deno test -A --no-lock control/tests/functions_test.ts; else echo "deno not installed: Edge Function tests skipped"; fi
