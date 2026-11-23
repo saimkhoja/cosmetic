@@ -1,0 +1,129 @@
+# Puts back ONE client's stock that was "on order" (below zero) before all its stock was cleared (zero-stock.yml),
+# from the backup taken just before. Physical stock stays cleared; sales made since are kept. See
+# supabase/scripts/restore_on_order.sql.
+#
+# By hand only (Actions → Put back on-order stock from a backup → Run workflow):
+#   "plan" shows, place by place, what would come back and its value at cost, and changes nothing;
+#   "apply" backs the database up first, then does it. Apply also needs the client's subdomain typed again in "confirm".
+# backup: the file in the backup bucket (e.g. client2/daily/client2-2026-11-22-1928-before-zero-stock.dump.gpg);
+#         empty = the client's newest "before-zero-stock" backup.
+name: Put back on-order stock from a backup
+on:
+  workflow_dispatch:
+    inputs:
+      client:
+        description: 'The client (its subdomain, e.g. sapcongo)'
+        required: true
+      backup:
+        description: 'The backup file in the bucket. Empty = the newest before-zero-stock backup of this client'
+        required: false
+        default: ''
+      mode:
+        description: 'plan = only show what would come back; apply = back up, then put it back'
+        type: choice
+        options: [plan, apply]
+        default: plan
+      confirm:
+        description: 'For apply: type the subdomain again'
+        required: false
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: update-client-databases
+  cancel-in-progress: false
+jobs:
+  clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      clients: ${{ steps.list.outputs.clients }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Find the client
+        id: list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          CONTROL_PROJECT_REF: ${{ secrets.CONTROL_PROJECT_REF }}
+          ONLY: ${{ inputs.client }}
+          CONFIRM: ${{ inputs.confirm }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          [ -n "$(echo "$ONLY" | tr -d ' ')" ] || { echo "::error::Name the client"; exit 1; }
+          if [ "$MODE" = apply ] && [ "$(echo "$CONFIRM" | tr -d ' ' | tr A-Z a-z)" != "$(echo "$ONLY" | tr -d ' ' | tr A-Z a-z)" ]; then
+            echo "::error::To put the stock back, type the client's subdomain again in confirm"; exit 1
+          fi
+          node ops/clients.mjs list "$ONLY"
+          grep -q '^count=1$' "$GITHUB_OUTPUT" || { echo "::error::No active client called $ONLY"; exit 1; }
+
+  restore:
+    needs: clients
+    name: ${{ matrix.client.subdomain }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        client: ${{ fromJSON(needs.clients.outputs.clients) }}
+    env:
+      MODE: ${{ inputs.mode }}
+      REF: ${{ matrix.client.ref }}
+      FOLDER: ${{ matrix.client.folder }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PSQL: /usr/lib/postgresql/17/bin/psql
+      PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+      PG_RESTORE: /usr/lib/postgresql/17/bin/pg_restore
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: ops/install-pg17.sh
+      - name: Get the backup
+        env:
+          WANTED: ${{ inputs.backup }}
+        run: |
+          key=$(echo "$WANTED" | tr -d ' ')
+          if [ -z "$key" ]; then
+            key=$(aws s3 ls "s3://$R2_BUCKET/$FOLDER/daily/" --endpoint-url "$R2_ENDPOINT" | awk '{print $4}' | grep -- '-before-zero-stock\.dump\.gpg$' | sort | tail -1)
+            [ -n "$key" ] || { echo "::error::No before-zero-stock backup found for $FOLDER"; exit 1; }
+            key="$FOLDER/daily/$key"
+          fi
+          case "$key" in "$FOLDER"/*) ;; *) echo "::error::The backup must be one of this client's ($FOLDER/...)"; exit 1;; esac
+          echo "## ${{ matrix.client.subdomain }}: put back on-order stock ($MODE)" >> "$GITHUB_STEP_SUMMARY"
+          aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          f="$RUNNER_TEMP/$(basename "$key")"
+          gpg --quiet --batch --pinentry-mode loopback --passphrase-fd 0 --decrypt --output "${f%.gpg}" "$f" <<< "$BACKUP_PASSPHRASE"
+          rm -f "$f"; echo "DUMP=${f%.gpg}" >> "$GITHUB_ENV"; echo "Using $key"
+      - name: Connect
+        env:
+          OWN_URL: ${{ secrets[matrix.client.db_secret] }}
+        run: |
+          if [ -n "$OWN_URL" ]; then
+            printf '%s' "$OWN_URL" > "$RUNNER_TEMP/db.url"; echo "Using the saved secret ${{ matrix.client.db_secret }}"
+          else
+            node ops/clients.mjs db-url "$REF" "$RUNNER_TEMP/db.url"
+          fi
+          chmod 600 "$RUNNER_TEMP/db.url"
+      - name: What would come back
+        run: ops/restore-on-order.sh "$RUNNER_TEMP/db.url" "$DUMP" plan
+      - name: Back up first
+        if: env.MODE == 'apply'
+        run: ops/backup.sh "$RUNNER_TEMP/db.url" "$FOLDER" before-on-order
+      - name: Put back the on-order stock
+        if: env.MODE == 'apply'
+        env:
+          OWN_URL: ${{ secrets[matrix.client.db_secret] }}
+        run: |
+          # a temporary login may have expired during the backup: get a fresh one
+          if [ -z "$OWN_URL" ]; then node ops/clients.mjs db-url "$REF" "$RUNNER_TEMP/db.url"; fi
+          ops/restore-on-order.sh "$RUNNER_TEMP/db.url" "$DUMP" apply
+      - name: Clean up
+        if: always()
+        run: rm -f "$RUNNER_TEMP/db.url" "$RUNNER_TEMP"/*.dump
