@@ -1578,4 +1578,14 @@ select t.ok((select count(*) from products) = 0, 'disabled account reads nothing
 select t.fails($$select public.register_device()$$, 'permission', 'disabled account cannot sell');
 reset role;
 
+-- the live API (Supabase's safeupdate) refuses a DELETE or UPDATE without WHERE; these tests run as the owner, where
+-- it does not apply, so every function is checked for one here instead
+select t.ok(not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace, regexp_matches(p.prosrc, '(delete\s+from\s+[a-z_.]+\s*;)', 'gi') m
+    where n.nspname in ('public', 'app')
+    union all
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace, regexp_matches(p.prosrc, '(update\s+[a-z_.]+(\s+[a-z]+)?\s+set\s[^;]*;)', 'gi') m
+    where n.nspname in ('public', 'app') and m[1] !~* '\swhere\s'),
+  'no function has a DELETE or UPDATE without WHERE (the live API refuses them)');
+
 \echo ALL TESTS PASSED
