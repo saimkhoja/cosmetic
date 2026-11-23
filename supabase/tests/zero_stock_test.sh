@@ -29,6 +29,12 @@ grep -q 'Central store:' <<< "$out" && grep -q 'Plan only' <<< "$out" && grep -q
 [[ $(stock) == "$before" && $(books) == "$b0" ]] || bad "plan changed something"
 ok "plan shows what would be cleared, place by place, and changes nothing"
 
+# the backup the workflow takes just before (used below to put the on-order stock back)
+TMPD=$(mktemp -d); trap 'rm -rf "$TMPD"' EXIT
+pg_dump "$DB" --format=custom --no-owner --no-privileges --schema=public --file="$TMPD/client-before-zero-stock.dump" 2>/dev/null
+neg=$(q "select count(*) from shop_stock where qty < 0"); [[ $neg -gt 0 ]] || bad "the test data should have stock on order"
+q "create table public.zs_before as select shop_id, product_id, qty from shop_stock" >/dev/null
+
 # apply: every quantity to zero, sales untouched, the value booked, the books balanced
 value=$(q "select round(coalesce((select sum(p.wh_qty * coalesce(c.cost_usd, 0)) from products p left join product_costs c on c.product_id = p.id), 0)
   + coalesce((select sum((s.qty - s.open_pieces::numeric / greatest(p.pieces_per_set, 1)) * coalesce(c.cost_usd, 0)) from shop_stock s join products p on p.id = s.product_id
@@ -50,3 +56,25 @@ ok "apply sets every quantity to zero, keeps every sale, and books the value rem
 out=$(ops/zero-stock.sh "$URL_FILE" apply)
 grep -q 'nothing to clear' <<< "$out" || bad "second run: $out"
 ok "a second run finds nothing to clear"
+
+# putting the on-order stock back from that backup: only what was below zero, added to what has happened since
+q "update shop_stock set qty = qty - 2 where (shop_id, product_id) in (select shop_id, product_id from zs_before order by qty limit 1)" >/dev/null   # a sale since
+q "update shop_stock set qty = qty - 1 where (shop_id, product_id) in (select shop_id, product_id from zs_before where qty > 0 order by qty desc limit 1)" >/dev/null
+b0=$(books)
+out=$(ops/restore-on-order.sh "$URL_FILE" "$TMPD/client-before-zero-stock.dump" plan)
+grep -q 'back on order' <<< "$out" && grep -q 'Plan only' <<< "$out" || bad "restore plan: $out"
+[[ $(books) == "$b0" ]] || bad "restore plan changed the books"
+out=$(ops/restore-on-order.sh "$URL_FILE" "$TMPD/client-before-zero-stock.dump" apply)
+grep -q 'Done: the on-order stock is back' <<< "$out" || bad "restore apply: $out"
+[[ $(q "select count(*) from zs_before b join shop_stock s using (shop_id, product_id) where b.qty < 0 and s.qty <> b.qty
+  - case when (b.shop_id, b.product_id) = (select shop_id, product_id from zs_before order by qty limit 1) then 2 else 0 end") == 0 ]] || bad "on-order quantities not as they were (plus the sale since)"
+[[ $(q "select count(*) from zs_before b join shop_stock s using (shop_id, product_id) where b.qty >= 0 and s.qty > 0") == 0 ]] || bad "physical stock came back"
+[[ $(q "select count(*) from shop_stock where qty = -1") -ge 1 ]] || bad "the sale since the clean-up of an item that was in stock should stay"
+[[ $(q "select count(*) from (select v.id from vouchers v join voucher_lines l on l.voucher_id = v.id group by v.id
+  having abs(sum(case when l.side = 'Dr' then l.base else -l.base end)) > 0.011) x") == 0 ]] || bad "unbalanced vouchers after the restore"
+ok "the on-order stock comes back from the backup, with the sales made since; physical stock stays cleared"
+if out=$(ops/restore-on-order.sh "$URL_FILE" "$TMPD/client-before-zero-stock.dump" apply 2>&1); then bad "restored twice: $out"; fi
+grep -q 'already put back' <<< "$out" || bad "second restore: $out"
+ok "the same backup cannot put it back twice"
+q "drop table public.zs_before" >/dev/null
+

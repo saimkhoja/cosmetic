@@ -372,6 +372,8 @@ When a client's stock figures are wrong and they want to start counting again wi
 3. Run it again with **apply** and the subdomain typed again in **confirm**. It backs the database up first (`<folder>-…-before-zero-stock`), then clears the stock in one transaction.
 4. Enter the real stock through **Goods in**, **Add stock to shops** (no central store) or deliveries.
 
+**Putting the on-order stock back.** If the client wants to keep the quantities that were *on order* (below zero: sold before the stock was entered), **Actions → Put back on-order stock from a backup** reads them from the backup taken just before the clean-up (by default the client's newest `…-before-zero-stock` backup) and adds them back. Physical stock stays cleared, and sales made since are kept (the old figure is added to today's). The value goes back as a stock adjustment. Run it with **plan** first, then **apply** with the subdomain in **confirm** (it backs up first, as `…-before-on-order`). The same backup can only be put back once.
+
 The same script, `supabase/scripts/zero_stock.sql`, can be run by hand in the client's SQL Editor; it only changes anything with `\set apply true` (psql) and otherwise shows the plan and rolls back.
 
 ## 8. Backups and exporting data
