@@ -21,7 +21,10 @@ NAME=$(basename "$DUMP" .gpg); NAME=${NAME%.dump}
 "$PG_RESTORE" --data-only --schema=public --table=shop_stock --table=products --file="$TMP/data.sql" "$DUMP"
 grep -q '^COPY public.shop_stock ' "$TMP/data.sql" && grep -q '^COPY public.products ' "$TMP/data.sql" \
   || { echo "This backup has no shop stock or items: is it a QuickSales backup?"; exit 1; }
-sed -i -e 's/^COPY public\.shop_stock /COPY pg_temp.zs_old_stock /' -e 's/^COPY public\.products /COPY pg_temp.zs_old_products /' "$TMP/data.sql"
+# only the rows: the session settings pg_restore writes around them depend on its version (pg_restore 17 writes
+# "SET transaction_timeout", which an older server rejects), and none of them is needed to read two tables
+sed -i -e '/^SET /d' -e '/^SELECT pg_catalog.set_config/d' \
+  -e 's/^COPY public\.shop_stock /COPY pg_temp.zs_old_stock /' -e 's/^COPY public\.products /COPY pg_temp.zs_old_products /' "$TMP/data.sql"
 
 cat > "$TMP/run.sql" <<SQL
 set client_min_messages = warning;
