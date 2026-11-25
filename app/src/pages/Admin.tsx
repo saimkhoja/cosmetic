@@ -67,7 +67,7 @@ function ExpenseFields({ f, setF, rate, payFrom, cats }: { f: ExpenseForm; setF:
 
 export function Upkeep() {
   const upkeep = useUpkeep(), settings = useSettings(), ledgers = useLedgers(), refresh = useRefresh(), toast = useToast(), a = useAction();
-  const [f, setF] = useState<ExpenseForm>({ d: today(), c: UPCATS[0], desc: '', amt: '', cur: 'USD', from: '' }), [edit, setEdit] = useState<Upkeep | null>(null);
+  const [f, setF] = useState<ExpenseForm>({ d: today(), c: UPCATS[0], desc: '', amt: '', cur: 'USD', from: '' }), [edit, setEdit] = useState<Upkeep | null>(null), [del, setDel] = useState<Upkeep | null>(null);
   const payFrom = (ledgers.data ?? []).filter((l) => l.active && (l.group_code === 'cash' || l.group_code === 'bank'));
   const rate = bookRate(settings.data), m = today().slice(0, 7), list = upkeep.data ?? [], month = list.filter((u) => u.date.startsWith(m));
   const cats = [...UPCATS, ...new Set(month.map((u) => u.category).filter((c) => !UPCATS.includes(c)))];
@@ -75,7 +75,7 @@ export function Upkeep() {
   const save = () => a.run(async () => { await rpc('add_upkeep', { p_date: f.d, p_category: f.c, p_desc: f.desc, p_amount: Number(f.amt), p_currency: f.cur, p_from: f.from || null }); await refresh('upkeep', 'audit'); setF({ ...f, desc: '', amt: '' }); toast('Expense saved and booked as a payment'); });
   return (
     <>
-      <Head t="Store upkeep" s="Running costs: rent, fuel, wages, transport, paid in USD or Francs. Each one is booked in the accounts as a payment from the cash or bank you choose, and can be corrected afterwards." />
+      <Head t="Store upkeep" s="Running costs: rent, fuel, wages, transport, paid in USD or Francs. Each one is booked in the accounts as a payment from the cash or bank you choose, and can be corrected or deleted afterwards." />
       <div className="kpis"><Kpi i="wallet" l="Total this month" tone="warn"><Dual usd={sum(month, (u) => u.amount_usd)} rate={rate} /></Kpi><Kpi i="receipt" l="Expenses recorded this month"><Dual2 b={month.length} s="entries" /></Kpi></div>
       <div className="cols"><div className="card"><h3><Icon n="plus" /> Record an expense</h3>
         <ExpenseFields f={f} setF={setF} rate={rate} payFrom={payFrom} cats={UPCATS} />
@@ -85,9 +85,33 @@ export function Upkeep() {
         <td className="nw">{u.date}</td><td><span className="chip">{u.category}</span></td><td>{u.description}</td>
         <td><Dual usd={u.amount_usd} rate={u.rate || rate} />{u.currency === 'FC' && u.amount ? <div className="code">paid {fCDF(u.amount)}</div> : null}</td>
         <td>{u.by_name}{u.edited_at ? <div className="code">corrected by {u.edited_by_name}, {dt(u.edited_at)}</div> : null}</td>
-        <td><div className="act"><button title="Correct this expense" aria-label={`Correct the expense ${u.description}`} onClick={() => setEdit(u)}><Icon n="edit" /></button></div></td></tr>)}</tbody></table> : <Empty i="wallet" t="No expenses recorded yet" />}</div></div>
+        <td><div className="act"><button title="Correct this expense" aria-label={`Correct the expense ${u.description}`} onClick={() => setEdit(u)}><Icon n="edit" /></button><button title="Delete this expense" aria-label={`Delete the expense ${u.description}`} onClick={() => setDel(u)}><Icon n="trash" /></button></div></td></tr>)}</tbody></table> : <Empty i="wallet" t="No expenses recorded yet" />}</div></div>
       {edit ? <UpkeepEditModal u={edit} payFrom={payFrom} rate={rate} onClose={() => setEdit(null)} /> : null}
+      {del ? <UpkeepDeleteModal u={del} rate={rate} onClose={() => setDel(null)} /> : null}
     </>
+  );
+}
+
+/** Deleting an expense, with a reason: it leaves the list and its payment voucher is cancelled, so the money is back
+ *  in the cash or bank it was paid from. The voucher stays in Accounts as cancelled; the activity log keeps the rest. */
+function UpkeepDeleteModal({ u, rate, onClose }: { u: Upkeep; rate: number; onClose: () => void }) {
+  const refresh = useRefresh(), toast = useToast(), a = useAction(), [why, setWhy] = useState('');
+  const go = () => a.run(async () => {
+    if (why.trim().length < 4) throw new Error('Write a short reason for deleting this expense');
+    const r = await rpc<{ voucher: string | null; cancelled: boolean }>('delete_upkeep', { p_id: u.id, p_reason: why });
+    await refresh('upkeep', 'audit'); toast(r.cancelled ? `Expense deleted; payment voucher ${r.voucher} cancelled` : 'Expense deleted', 'warn'); onClose();
+  });
+  return (
+    <Modal title="Delete this expense?" icon="trash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Keep it</button><button className="btn danger" id="upkdel" disabled={a.busy || why.trim().length < 4} onClick={() => void go()}><Icon n="trash" /> Delete expense</button></>}>
+      <div className="tw" style={{ marginBottom: 12 }}><table className="t"><tbody>
+        <tr><td>Date</td><td className="r">{u.date}</td></tr><tr><td>Type</td><td className="r"><span className="chip">{u.category}</span></td></tr>
+        <tr><td>Description</td><td className="r">{u.description}</td></tr>
+        <tr><td>Amount</td><td className="r"><b>{u.currency === 'FC' && u.amount ? fCDF(u.amount) : fUSD(u.amount_usd)}</b>{u.currency === 'FC' ? <div className="code">{fUSD(u.amount_usd)}</div> : <div className="code">{fCDF(u.amount_usd * (u.rate || rate))}</div>}</td></tr>
+      </tbody></table></div>
+      <Note warn i="alert">{u.voucher_id ? 'Its payment voucher is cancelled, so the money goes back into the cash or bank it was paid from. The voucher stays in Accounts as cancelled.' : 'No payment voucher was found for this old expense: it only leaves the list. If it was booked, cancel the payment under Accounts too.'} This cannot be undone; the activity log keeps what it was.</Note>
+      <div className="field"><label htmlFor="upkwhy">Reason</label><input id="upkwhy" className="input" maxLength={100} value={why} onChange={(e) => setWhy(e.target.value)} placeholder="e.g. Entered twice" autoFocus /></div>
+      <div className="lerr">{a.err}</div>
+    </Modal>
   );
 }
 
