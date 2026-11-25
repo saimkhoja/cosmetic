@@ -1,6 +1,7 @@
 // Book keeping, like Tally: suppliers and their bills, vouchers (payment, receipt, contra, journal,
 // debit and credit notes), ledgers in groups, statements, day book, trial balance, profit and loss,
 // balance sheet and money owed to suppliers. Every entry is in USD or CDF; reports are in USD.
+import { apiLines, lineBase, lineTargets, type VLine } from '../lib/vouchers';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -176,19 +177,20 @@ function Bills() {
 }
 
 // ---------- vouchers ----------
-type VLine = { account: string; side: 'Dr' | 'Cr'; amount: string; currency: Cur; rate: string; memo: string };
 function VoucherModal({ type: t0, party, onClose }: { type: string; party?: Payable; onClose: () => void }) {
   const ledgers = useLedgers(), settings = useSettings(), pay = usePayables(), refresh = useRefresh(), toast = useToast(), a = useAction();
   const L = (ledgers.data ?? []).filter((l) => l.active), rate0 = String(bookRate(settings.data));
   const cash = L.find((l) => l.code === 'CASH_HO');
   const supAcc = party ? (ledgers.data ?? []).find((l) => l.supplier_id === party.id) : undefined;
-  const blank = (side: 'Dr' | 'Cr', account = ''): VLine => ({ account, side, amount: '', currency: (L.find((l) => l.id === account)?.currency ?? 'USD'), rate: rate0, memo: '' });
+  const blank = (side: 'Dr' | 'Cr', account = ''): VLine => ({ account, side, cdf: '', usd: '', rate: rate0, memo: '' });
   const [t, setT] = useState(t0), [date, setDate] = useState(today()), [narr, setNarr] = useState(party ? `Payment to ${party.name}` : ''), [ref, setRef] = useState('');
   const [lines, setLines] = useState<VLine[]>(() => t0 === 'payment' ? [blank('Dr', supAcc?.id), blank('Cr', cash?.id)] : t0 === 'receipt' ? [blank('Dr', cash?.id), blank('Cr')] : [blank('Dr'), blank('Cr')]);
   const [alloc, setAlloc] = useState<Record<string, string>>({});
-  const base = (l: VLine) => { const n = Number(l.amount) || 0; return l.currency === 'FC' ? n / (Number(l.rate) || Number(rate0) || 1) : n; };
+  const base = (l: VLine) => lineBase(l, Number(rate0));
   const dr = sum(lines.filter((l) => l.side === 'Dr'), base), cr = sum(lines.filter((l) => l.side === 'Cr'), base), diff = usd2(dr - cr);
-  const upd = (i: number, patch: Partial<VLine>) => setLines(lines.map((l, k) => { if (k !== i) return l; const n = { ...l, ...patch }; if (patch.account) n.currency = L.find((x) => x.id === patch.account)?.currency ?? n.currency; return n; }));
+  const upd = (i: number, patch: Partial<VLine>) => setLines(lines.map((l, k) => (k === i ? { ...l, ...patch } : l)));
+  // a shop's cash is two ledgers: say where each currency of the line goes
+  const split = (l: VLine) => { const t = lineTargets(l.account, L); return t.cdf !== t.usd && Number(l.cdf) > 0 && Number(l.usd) > 0 ? `CDF to ${L.find((x) => x.id === t.cdf)?.name}, USD to ${L.find((x) => x.id === t.usd)?.name}` : ''; };
   // bills of the supplier being paid (or debited), to settle bill by bill
   const supLines = lines.filter((l) => l.side === 'Dr' && L.find((x) => x.id === l.account)?.supplier_id);
   const sid = supLines.length ? L.find((x) => x.id === supLines[0].account)?.supplier_id : null;
@@ -199,7 +201,7 @@ function VoucherModal({ type: t0, party, onClose }: { type: string; party?: Paya
     if (Math.abs(diff) > 0.01) throw new Error(`Debit and credit are not equal: difference ${fUSD(diff)}`);
     if (allocated > supPaid + 0.01) throw new Error('More is matched to bills than is paid');
     const r = await rpc<{ no: string }>('post_voucher', { p: { type: t, date, narration: narr, ref,
-      lines: lines.filter((l) => l.account && Number(l.amount) > 0).map((l) => ({ account: l.account, side: l.side, amount: Number(l.amount), currency: l.currency, rate: Number(l.rate) || Number(rate0), memo: l.memo })),
+      lines: apiLines(lines, L, Number(rate0)),
       allocations: Object.entries(alloc).filter(([, v]) => Number(v) > 0).map(([bill_id, v]) => ({ bill_id, amount: Number(v) })) } });
     await refresh('books', 'ledgers', 'audit'); toast(`${VTYPES[t]} ${r.no} saved`); onClose();
   });
@@ -210,12 +212,12 @@ function VoucherModal({ type: t0, party, onClose }: { type: string; party?: Paya
         <div className="field"><label>Date</label><input type="date" className="input" value={date} max={today()} onChange={(e) => setDate(e.target.value)} /></div>
         <div className="field"><label>Reference (optional)</label><input className="input" maxLength={60} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="cheque, receipt no." /></div></div>
       <Note i="doc">{hint[t]}</Note>
-      <div className="tw"><table className="t vlines"><thead><tr><th style={{ width: 70 }}>Dr/Cr</th><th>Ledger</th><th style={{ width: 130 }}>Amount</th><th style={{ width: 90 }}>In</th><th style={{ width: 100 }}>Rate</th><th className="r">USD</th><th /></tr></thead><tbody>
+      <div className="tw"><table className="t vlines"><thead><tr><th style={{ width: 70 }}>Dr/Cr</th><th>Ledger</th><th style={{ width: 130 }}>CDF</th><th style={{ width: 95 }}>Rate</th><th style={{ width: 110 }}>USD</th><th className="r">Worth USD</th><th /></tr></thead><tbody>
         {lines.map((l, i) => <tr key={i}><td><select className="input" value={l.side} onChange={(e) => upd(i, { side: e.target.value as 'Dr' | 'Cr' })} aria-label="Side"><option>Dr</option><option>Cr</option></select></td>
-          <td><select className="input vacc" value={l.account} onChange={(e) => upd(i, { account: e.target.value })} aria-label="Ledger"><option value="">Choose a ledger</option>{groupOptions(L)}</select></td>
-          <td><input className="input vamt" type="number" min="0" step="0.01" value={l.amount} onChange={(e) => upd(i, { amount: e.target.value })} aria-label="Amount" /></td>
-          <td><select className="input" value={l.currency} onChange={(e) => upd(i, { currency: e.target.value as Cur })} aria-label="Currency"><option>USD</option><option value="FC">CDF</option></select></td>
-          <td>{l.currency === 'FC' ? <input className="input" type="number" min="1" value={l.rate} onChange={(e) => upd(i, { rate: e.target.value })} aria-label="Rate" /> : <span className="code">-</span>}</td>
+          <td><select className="input vacc" value={l.account} onChange={(e) => upd(i, { account: e.target.value })} aria-label="Ledger"><option value="">Choose a ledger</option>{groupOptions(L)}</select>{split(l) ? <div className="code">{split(l)}</div> : null}</td>
+          <td><input className="input vcdf" type="number" min="0" step="1" value={l.cdf} onChange={(e) => upd(i, { cdf: e.target.value })} aria-label="Amount in CDF" placeholder="0" /></td>
+          <td>{Number(l.cdf) > 0 ? <input className="input" type="number" min="1" value={l.rate} onChange={(e) => upd(i, { rate: e.target.value })} aria-label="Rate" /> : <span className="code">-</span>}</td>
+          <td><input className="input vamt" type="number" min="0" step="0.01" value={l.usd} onChange={(e) => upd(i, { usd: e.target.value })} aria-label="Amount in USD" placeholder="0" /></td>
           <td className={`r ${l.side === 'Dr' ? 'dr' : 'cr'}`}>{fUSD(base(l))}</td>
           <td>{lines.length > 2 ? <button className="rbtn bad" title="Remove line" onClick={() => setLines(lines.filter((_, k) => k !== i))}><Icon n="x" /></button> : null}</td></tr>)}
         <tr><td colSpan={2}><button className="btn sm" onClick={() => setLines([...lines, blank(diff > 0 ? 'Cr' : 'Dr')])}><Icon n="plus" /> Add line</button></td><td colSpan={3} className="r"><b>Dr {fUSD(dr)} · Cr {fUSD(cr)}</b></td><td className="r">{Math.abs(diff) > 0.01 ? <span className="chip bad">off by {fUSD(Math.abs(diff))}</span> : <span className="chip ok">balanced</span>}</td><td /></tr>
