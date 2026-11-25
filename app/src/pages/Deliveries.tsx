@@ -17,7 +17,7 @@ import { useNoStore } from './Stores';
 function DeliveryCard({ d, shop, products, store, onEdit, onCancel, onReceive, onNote, rate }: { d: Delivery; shop?: Shop; products: Map<string, Product>; store: boolean; onEdit?: () => void; onCancel?: () => void; onReceive?: () => void; onNote: () => void; rate: number }) {
   const { profile } = useAuth(), showUSD = store && profile!.role === 'admin';
   const ed = d.delivery_edits.length ? [...d.delivery_edits].sort((a, b) => a.at.localeCompare(b.at)).at(-1)! : null;
-  const cdf = (u: number) => Math.round((u * d.rate) / 10) * 10, got = d.status === 'received';
+  const cdf = (u: number) => toCDF(u, d.rate), got = d.status === 'received';
   const shortLines = got && d.delivery_items.some((i) => (i.received_qty ?? i.qty) < i.qty);
   const status = d.status === 'pending' ? <span className="chip warn"><Icon n="clock" /> Waiting for the shop to receive</span>
     : d.status === 'cancelled' ? <span className="chip bad"><Icon n="x" /> Cancelled</span>

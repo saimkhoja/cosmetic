@@ -6,9 +6,9 @@ import { useAuth } from '../auth/AuthProvider';
 import { rpc, rows, supabase } from '../lib/supabase';
 import { CARTON_PARTS, cartPriced, cashNotes, hotSet, hotSort, overLimit, payment, takeLocal, totals, unitLabel, unitNote, unitsOf, usdNotes, type CartLine, type Disc, type PayIn } from '../lib/units';
 import { catIcon, custName, findByCode } from '../lib/items';
-import { bookRate, dt, fCDF, fNum, fUSD, ld, tm, toCDF, today } from '../lib/format';
+import { bookRate, dt, fCDF, fNum, fUSD, ld, roundedBy, tm, toCDF, today } from '../lib/format';
 import { orderRef, printHTML, receiptHTML, saleCopies } from '../lib/print';
-import { Empty, Modal, Note, useAction, useToast } from '../components/ui';
+import { Empty, Modal, Note, Rounded, useAction, useToast } from '../components/ui';
 import { DiscFields, discProblem } from '../components/Discount';
 import { QtyBox } from '../components/QtyBox';
 import { TicketsModal } from '../components/Tickets';
@@ -464,7 +464,7 @@ export default function Till() {
       {pick ? (() => { const p = byId.get(pick.pid)!, s = st(p); return (
         <Modal title={pick.k ? 'Change the unit' : 'How is it sold?'} icon={p.is_bundle ? 'gift' : 'layers'} onClose={() => setPick(null)} foot={<button className="btn" onClick={() => setPick(null)}>Cancel</button>}>
           <p><b>{p.name}</b><br /><span className="code">{s.qty >= 0 ? s.qty : Math.abs(s.qty) + ' on order'} {p.stock_unit} in the shop{p.is_bundle ? `, ${s.open_pieces} pieces sold from an open set` : ''}</span></p>
-          <div className="ugrid">{unitsOf(p).map((u, i) => ({ u, i })).sort((a, b) => a.u.mult - b.u.mult).map(({ u, i }) => <button key={i} className="ubtn" onClick={() => { setPick(null); if (pick.k) setUnit(pick.k, i); else add(pick.pid, i); }}><b>{unitLabel(u)}</b><span>{unitNote(p, u)}</span><em>{fCDF(toCDF(u.usd, rate))}</em></button>)}</div>
+          <div className="ugrid">{unitsOf(p).map((u, i) => ({ u, i })).sort((a, b) => a.u.mult - b.u.mult).map(({ u, i }) => <button key={i} className="ubtn" onClick={() => { setPick(null); if (pick.k) setUnit(pick.k, i); else add(pick.pid, i); }}><b>{unitLabel(u)}</b><span>{unitNote(p, u)}</span><em>{fCDF(toCDF(u.usd, rate))}</em><Rounded by={roundedBy(u.usd, rate)} /></button>)}</div>
           {p.is_bundle ? <Note i="tag">The piece price is the last price set by the Admin. It cannot be changed at the shop.</Note> : null}
         </Modal>); })() : null}
       {check ? <PriceCheck products={snap.products} stock={snap.stock} rate={rate} onClose={() => setCheck(false)} /> : null}
@@ -500,7 +500,7 @@ function PriceCheck({ products, stock, rate, onClose }: { products: Product[]; s
     <Modal title="Price check" icon="tag" wide onClose={onClose} foot={<button className="btn" onClick={onClose}>Close</button>}>
       <div className="field"><label>Search</label><input className="input" placeholder="Item name or barcode" value={q} onChange={(e) => setQ(e.target.value)} autoFocus /></div>
       {list.length ? <div className="tw"><table className="t"><thead><tr><th>Item</th><th>Unit</th><th className="r">Price</th><th className="r">In shop</th></tr></thead><tbody>
-        {list.flatMap((p) => unitsOf(p).map((u, i) => { const s = stock[p.id]?.qty ?? 0; return <tr key={p.id + i}><td>{i === 0 ? <><b>{p.name}</b>{p.is_bundle ? <div className="code">mixed set</div> : null}</> : null}</td><td><span className="uchip">{unitLabel(u)}</span>{u.piece ? <span className="code"> last price</span> : null}</td><td className="r"><b>{fCDF(toCDF(u.usd, rate))}</b></td><td className="r">{i === 0 ? (s < 0 ? Math.abs(s) + ' on order' : s) : ''}</td></tr>; }))}
+        {list.flatMap((p) => unitsOf(p).map((u, i) => { const s = stock[p.id]?.qty ?? 0; return <tr key={p.id + i}><td>{i === 0 ? <><b>{p.name}</b>{p.is_bundle ? <div className="code">mixed set</div> : null}</> : null}</td><td><span className="uchip">{unitLabel(u)}</span>{u.piece ? <span className="code"> last price</span> : null}</td><td className="r nw"><b>{fCDF(toCDF(u.usd, rate))}</b><Rounded by={roundedBy(u.usd, rate)} /></td><td className="r">{i === 0 ? (s < 0 ? Math.abs(s) + ' on order' : s) : ''}</td></tr>; }))}
       </tbody></table></div> : <Empty i="search" t="No item matches" />}
     </Modal>
   );
@@ -528,7 +528,8 @@ function CashModal({ total, info, prints, rate, usdRate, usdPay, onClose, onPay 
         </> : cashNotes(total).map((n) => <button key={n} type="button" className={!u && P.cdf === n ? 'on' : ''} onClick={() => setV(String(n))}>{n === total ? 'Exact' : fCDF(n)}</button>)}</div>
         <div id="cashchange" className={`paychange ${!any ? '' : odd || P.short ? 'bad' : 'ok'}`}>
           <span>{odd ? 'Check the amount' : any && P.short ? (usdPay ? 'Still to pay' : 'Not enough cash') : 'Change to give'}</span>
-          <b>{!any || odd ? '-' : P.short ? (usdPay ? `${fCDF(P.short)} (≈ ${fUSD(Math.ceil((P.short / P.rate) * 100) / 100)})` : fCDF(P.short)) : P.changeUsd ? `$${P.changeUsd} + ${fCDF(P.changeCdf)}` : fCDF(P.change)}</b></div>
+          <b>{!any || odd ? '-' : P.short ? (usdPay ? `${fCDF(P.toPay)} (≈ ${fUSD(Math.ceil((P.short / P.rate) * 100) / 100)})` : fCDF(P.toPay)) : P.changeUsd ? `$${P.changeUsd} + ${fCDF(P.changeCdf)}` : fCDF(P.change)}</b></div>
+        {any && !odd && P.toPay > P.short ? <div id="payround" className="paynote">Exactly {fCDF(P.short)}, rounded up by {fNum(P.toPay - P.short)} FC</div> : null}
         {usdPay && P.maxDollars > 0 && !odd ? <button id="dollarsback" type="button" className={`btn sm full ${back ? 'primary' : 'ghost'}`} onClick={() => setBack(!back)}>
           {back ? `Giving $${P.maxDollars} + ${fCDF(rest)}: tap for all in CDF` : `Give dollars back: $${P.maxDollars} + ${fCDF(rest)}`}</button> : null}
       </div>

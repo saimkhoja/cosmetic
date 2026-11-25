@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Icon } from '../lib/icons';
-import { fCDF, fUSD } from '../lib/format';
+import { fCDF, fNum, fUSD } from '../lib/format';
 
 export const Head = ({ t, s, a }: { t: string; s?: ReactNode; a?: ReactNode }) => (
   <div className="head"><div><h1>{t}</h1>{s ? <p>{s}</p> : null}</div>{a ? <div className="toolbar" style={{ margin: 0 }}>{a}</div> : null}</div>
@@ -10,6 +10,8 @@ export const Kpi = ({ i, l, children, tone = '' }: { i: string; l: string; child
 );
 export const Dual2 = ({ b, s }: { b: ReactNode; s: ReactNode }) => <span className="dual"><b>{b}</b><small>{s}</small></span>;
 export const Dual = ({ usd, rate }: { usd: number; rate: number }) => <Dual2 b={fUSD(usd)} s={fCDF(usd * rate)} />;
+/** The Francs added by rounding a price up to the next 50: a small tag beside the price, nothing when it was already round. */
+export const Rounded = ({ by }: { by: number }) => (by > 0 ? <span className="rnd" title={`Rounded up by ${fNum(by)} FC to end in 50 or 00`}>+{fNum(by)} rounded</span> : null);
 export const Empty = ({ i, t, tall }: { i: string; t: string; tall?: boolean }) => <div className={`empty ${tall ? 'tall' : ''}`}><Icon n={i} /><p>{t}</p></div>;
 export const Note = ({ i = 'lock', warn, children, style }: { i?: string; warn?: boolean; children: ReactNode; style?: React.CSSProperties }) => (
   <div className={`note ${warn ? 'warn' : ''}`} style={style}><Icon n={i} /><div>{children}</div></div>
