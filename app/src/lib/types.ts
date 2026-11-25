@@ -6,10 +6,14 @@ export interface Features { customer_optional?: boolean; barcode?: boolean; till
   /** the business has no central store: goods from a supplier go straight into a shop */
   no_warehouse?: boolean;
   /** the shop admin keeps vendeurs: goods on credit, their payments, promo items and the monthly promo report */
-  vendeurs?: boolean }
+  vendeurs?: boolean;
+  /** the shop admin changes money at the counter: buys and sells dollars at the rates set in Settings */
+  money_exchange?: boolean }
 /** rate: the sales rate (prices, tickets, tills). book_rate: the internal rate (suppliers, expenses, vouchers). */
 export interface Settings {
   rate: number; book_rate?: number; vat: number; tz: string; company: Company; features?: Features;
+  /** money exchange at the counter: the shop buys dollars at fx_buy_rate and sells them at fx_sell_rate (1 USD in CDF) */
+  fx_buy_rate?: number | null; fx_sell_rate?: number | null;
   /** sales worth more than this (USD, at the rate of the sale) are not shown to the Shop Admin; empty = no limit */
   shop_sales_limit_usd?: number | null;
 }

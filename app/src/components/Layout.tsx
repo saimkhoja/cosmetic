@@ -15,18 +15,18 @@ import { clearFind, showFind } from '../lib/search';
 export const R: Record<Role, string> = { admin: 'Admin', whop: 'Warehouse Operator', shopadmin: 'Shop Admin', till: 'Till Operator' };
 const ROLEICON: Record<Role, string> = { admin: 'shield', whop: 'warehouse', shopadmin: 'store', till: 'cart' };
 export const NAV: Record<Role, [string, string, string][]> = {
-  admin: [['/', 'Dashboard', 'home'], ['/inventory', 'Inventory', 'box'], ['/goods-in', 'Goods in', 'download'], ['/requests', 'Requests', 'receipt'], ['/deliveries', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/shop-stock', 'Shop stock', 'store'], ['/accounts', 'Accounts', 'wallet'], ['/upkeep', 'Upkeep', 'cash'], ['/reports', 'Reports', 'chart'], ['/users', 'Users', 'users'], ['/settings', 'Settings', 'settings'], ['/activity', 'Activity', 'shield']],
+  admin: [['/', 'Dashboard', 'home'], ['/inventory', 'Inventory', 'box'], ['/goods-in', 'Goods in', 'download'], ['/requests', 'Requests', 'receipt'], ['/deliveries', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/shop-stock', 'Shop stock', 'store'], ['/accounts', 'Accounts', 'wallet'], ['/upkeep', 'Upkeep', 'cash'], ['/exchange', 'Exchange', 'dollar'], ['/reports', 'Reports', 'chart'], ['/users', 'Users', 'users'], ['/settings', 'Settings', 'settings'], ['/activity', 'Activity', 'shield']],
   whop: [['/inventory', 'Inventory', 'box'], ['/goods-in', 'Goods in', 'download'], ['/requests', 'Requests', 'receipt'], ['/deliveries', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/shop-stock', 'Shop stock', 'store'], ['/books', 'Statements', 'doc']],
-  shopadmin: [['/', 'Home', 'home'], ['/till', 'Till', 'cart'], ['/invoices', 'Invoices', 'receipt'], ['/vendeurs', 'Vendeurs', 'users'], ['/stock', 'Stock', 'box'], ['/requests', 'Order stock', 'plus'], ['/received', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/reports', 'Reports', 'chart']],
+  shopadmin: [['/', 'Home', 'home'], ['/till', 'Till', 'cart'], ['/invoices', 'Invoices', 'receipt'], ['/vendeurs', 'Vendeurs', 'users'], ['/exchange', 'Exchange', 'dollar'], ['/stock', 'Stock', 'box'], ['/requests', 'Order stock', 'plus'], ['/received', 'Deliveries', 'truck'], ['/returns', 'Returns', 'exchange'], ['/reports', 'Reports', 'chart']],
   till: [['/till', 'Till', 'cart']],
 };
 
 /** Tabs that only move stock between the central store and the shops. */
 const STORE_ROUTES = new Set(['/requests', '/deliveries', '/returns', '/received']);
-/** The tabs of a role: without a central store the store-to-shop tabs are left out; Vendeurs only when it is turned on. */
+/** The tabs of a role: without a central store the store-to-shop tabs are left out; Vendeurs and Exchange only when turned on. */
 // without a central store, Returns stays for the Shop Admin (sending goods back) and the Admin (deciding where they go)
 const keepNoStore = (role: Role, to: string) => to === '/returns' && (role === 'shopadmin' || role === 'admin');
-export const navFor = (role: Role, f?: Features) => NAV[role].filter((n) => (!f?.no_warehouse || !STORE_ROUTES.has(n[0]) || keepNoStore(role, n[0])) && (n[0] !== '/vendeurs' || !!f?.vendeurs));
+export const navFor = (role: Role, f?: Features) => NAV[role].filter((n) => (!f?.no_warehouse || !STORE_ROUTES.has(n[0]) || keepNoStore(role, n[0])) && (n[0] !== '/vendeurs' || !!f?.vendeurs) && (n[0] !== '/exchange' || !!f?.money_exchange));
 
 export function useWaiting() {
   const [n, setN] = useState(0);

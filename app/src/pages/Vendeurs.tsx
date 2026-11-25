@@ -6,6 +6,7 @@ import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { usePromoReport, useProducts, useRefresh, useSettings, useShops, useStock, useVendeurs } from '../data/queries';
 import { rpc } from '../lib/supabase';
+import { getDevice } from '../offline/store';
 import { pcValue } from '../lib/units';
 import { bookRate, dt, fCDF, fUSD, ld, sum, toCDF, today } from '../lib/format';
 import { printHTML, promoReportHTML, vendeurPaymentHTML, vendeurStatementHTML } from '../lib/print';
@@ -164,7 +165,9 @@ function PayModal({ v, onClose }: { v: Vendeur; onClose: () => void }) {
   const go = () => a.run(async () => {
     if (!any) throw new Error('Enter the amount paid, in USD or CDF');
     if (P.err) throw new Error(P.err);
-    const r = await rpc<VendeurPaid>('vendeur_pay', { p: { vendeur_id: v.id, paid_cdf: P.cdf, paid_usd: P.usd, usd_rate: P.usd > 0 ? P.rate : null, note } });
+    // the till this is taken on, so that till's own shift end report counts it too
+    const dev = await getDevice(v.shop_id);
+    const r = await rpc<VendeurPaid>('vendeur_pay', { p: { vendeur_id: v.id, paid_cdf: P.cdf, paid_usd: P.usd, usd_rate: P.usd > 0 ? P.rate : null, note, device_id: dev?.id ?? null } });
     const shop = shops.data?.find((s) => s.id === v.shop_id);
     if (print && shop) printHTML(vendeurPaymentHTML(r, settings.data?.company ?? {}, shop));
     await refresh('vendeurs', 'audit', 'report');

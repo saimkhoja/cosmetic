@@ -82,6 +82,11 @@ export const useStockRequests = (enabled = true) => useQuery({ queryKey: ['reque
 /** After a change, refresh everything that may show it. */
 /** The Shop Admin's vendeurs (the Admin: every shop's), with what each owes. Needs the connection. */
 export const useVendeurs = (enabled = true) => useQuery({ queryKey: ['vendeurs'], enabled, staleTime: 0, queryFn: () => rpc<Vendeur[]>('vendeur_list', { p_shop: null }) });
+/** Money changed at the counter between two days: the Shop Admin's shop, or for the Admin one shop or all (null). */
+export interface MoneyExchange { id: string; no: string; shop_id: string; shop_name: string; dir: 'buy' | 'sell'; usd: number; cdf: number; rate: number; book_rate: number; gain_usd: number;
+  customer: string; note: string; status: 'ok' | 'cancelled'; by_name: string; at: string; cancel_reason: string | null; cancelled_by_name: string | null }
+export interface ExchangeList { list: MoneyExchange[]; bought_usd: number; sold_usd: number; cdf_in: number; cdf_out: number; gain_usd: number; n: number }
+export const useExchanges = (from: string, to: string, shop: string | null) => useQuery({ queryKey: ['exchanges', from, to, shop], staleTime: 0, queryFn: () => rpc<ExchangeList>('exchange_list', { p_from: from, p_to: to, p_shop: shop }) });
 export const usePromoReport = (month: string, enabled = true) => useQuery({ queryKey: ['vendeurs', 'promo', month], enabled, staleTime: 0, queryFn: () => rpc<PromoReport>('promo_report', { p_month: month }) });
 export function useRefresh() {
   const qc = useQueryClient();
