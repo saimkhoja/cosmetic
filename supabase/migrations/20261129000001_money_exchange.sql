@@ -16,6 +16,8 @@
 -- * the expenses the Admin paid from the shop's cash (Store upkeep, paid from Cash – shop or Cash USD – shop),
 --   taken off the balance. They count in the report of all tills (by the day of the expense on the day end slip,
 --   and by when it was recorded on a shift end report).
+-- The Admin's daily cash report of a shop (Reports, a shop chosen): every move of the shop's two cash drawers from
+-- the books, day by day, in CDF and USD side by side, with the balance, and the totals at the end.
 -- Already running QuickSales? Run this file once, after 20261128000001_upkeep_delete.sql. It changes no amounts.
 
 -- stop at once if the update before this one was not run
@@ -427,8 +429,66 @@ begin
       'n', (select count(*) from e where status = 'ok')));
 end $$;
 
+-- ---------- the shop's cash book: every move of its two cash drawers, day by day ----------
+-- For the Admin's daily cash report of one shop: what came in and went out of Cash – shop (CDF) and Cash USD – shop,
+-- from the books, with the balance brought forward. Cash sales are one line a day; each vendeur's payments one line a
+-- day; each exchange, each expense paid from the shop's cash and each other entry (such as cash taken to head office)
+-- a line of its own.
+create or replace function public.cash_book(p_from date, p_to date, p_shop uuid) returns jsonb
+language plpgsql stable security definer set search_path = public, pg_temp as $$
+declare u public.profiles := app.req('admin'); cf uuid; cu uuid; ob_cdf numeric := 0; ob_usd numeric := 0; res jsonb;
+begin
+  if p_shop is null then raise exception 'Choose the shop'; end if;
+  if p_from is null or p_to is null then raise exception 'Choose the dates'; end if;
+  if p_from > p_to then select p_to, p_from into p_from, p_to; end if;
+  select id into cf from accounts where code = 'CASH_SHOP:' || p_shop;
+  select id into cu from accounts where code = 'CASH_SHOP_USD:' || p_shop;
+  -- brought forward: the opening balances of the two drawers and everything before the first day
+  select coalesce(sum(case when a.opening_currency = 'FC' then (case when a.opening_side = 'Dr' then 1 else -1 end) * a.opening_amount else 0 end), 0),
+         coalesce(sum(case when a.opening_currency = 'USD' then (case when a.opening_side = 'Dr' then 1 else -1 end) * a.opening_amount else 0 end), 0)
+    into ob_cdf, ob_usd from accounts a where a.id in (cf, cu);
+  select ob_cdf + coalesce(sum(case when l.currency = 'FC' then case when l.side = 'Dr' then l.amount else -l.amount end else 0 end), 0),
+         ob_usd + coalesce(sum(case when l.currency = 'USD' then case when l.side = 'Dr' then l.amount else -l.amount end else 0 end), 0)
+    into ob_cdf, ob_usd
+    from voucher_lines l join vouchers v on v.id = l.voucher_id and v.status = 'posted'
+    where l.account_id in (cf, cu) and v.date < p_from;
+  with m as (
+    -- each voucher that moved the drawers, with what went in and out in each currency
+    select v.id, v.date, v.created_at, v.type, v.source_type, v.source_id, v.narration, v.no,
+      sum(case when l.side = 'Dr' and l.currency = 'FC' then l.amount else 0 end) in_cdf, sum(case when l.side = 'Dr' and l.currency = 'USD' then l.amount else 0 end) in_usd,
+      sum(case when l.side = 'Cr' and l.currency = 'FC' then l.amount else 0 end) out_cdf, sum(case when l.side = 'Cr' and l.currency = 'USD' then l.amount else 0 end) out_usd
+    from vouchers v join voucher_lines l on l.voucher_id = v.id
+    where v.status = 'posted' and l.account_id in (cf, cu) and v.date between p_from and p_to
+    group by v.id
+  ), r as (
+    select date, 1 as ord, min(created_at) t, 'Cash sales (' || count(*) || ' invoice' || case when count(*) = 1 then '' else 's' end || ')' as what, 'Shop' as kind,
+      sum(in_cdf) in_cdf, sum(in_usd) in_usd, sum(out_cdf) out_cdf, sum(out_usd) out_usd
+    from m where source_type = 'invoice' group by date
+    union all
+    select m.date, 2, min(m.created_at), 'Vendeur payment: ' || vd.name, 'Credit collection', sum(in_cdf), sum(in_usd), sum(out_cdf), sum(out_usd)
+    from m join vendeur_payments x on x.id = m.source_id join vendeurs vd on vd.id = x.vendeur_id where m.source_type = 'vendeur_payment' group by m.date, vd.name
+    union all
+    select m.date, 3, m.created_at, 'Exchange @ ' || trim_scale(x.rate) || case when x.dir = 'buy' then ', dollars bought' else ', dollars sold' end
+        || coalesce(', ' || nullif(x.customer, ''), ''), 'Exchange', in_cdf, in_usd, out_cdf, out_usd
+    from m join money_exchanges x on x.id = m.source_id where m.source_type = 'money_exchange'
+    union all
+    select m.date, 4, m.created_at, x.description, x.category, in_cdf, in_usd, out_cdf, out_usd
+    from m join upkeep x on x.id = m.source_id where m.source_type = 'upkeep'
+    union all
+    select m.date, 5, m.created_at, coalesce(nullif(m.narration, ''), initcap(replace(m.type, '_', ' ')) || ' ' || m.no),
+      case m.type when 'contra' then 'Transfer' else initcap(replace(m.type, '_', ' ')) end, in_cdf, in_usd, out_cdf, out_usd
+    from m where coalesce(m.source_type, '') not in ('invoice', 'vendeur_payment', 'money_exchange', 'upkeep')
+  )
+  select jsonb_build_object('shop_id', p_shop, 'shop_name', (select name from shops where id = p_shop), 'from', p_from, 'to', p_to,
+    'opening', jsonb_build_object('cdf', ob_cdf, 'usd', ob_usd),
+    'rows', (select coalesce(jsonb_agg(jsonb_build_object('date', date, 'ord', ord, 'what', what, 'kind', kind,
+        'in_cdf', in_cdf, 'in_usd', in_usd, 'out_cdf', out_cdf, 'out_usd', out_usd) order by date, ord, t), '[]') from r
+      where in_cdf <> 0 or in_usd <> 0 or out_cdf <> 0 or out_usd <> 0)) into res;
+  return res;
+end $$;
+
 revoke execute on all functions in schema public from public, anon;
 revoke execute on all functions in schema app from public, anon;
 grant execute on function public.setup_needed() to anon, authenticated;
-grant execute on function public.exchange_money(jsonb), public.cancel_exchange(uuid, text), public.exchange_list(date, date, uuid) to authenticated;
+grant execute on function public.exchange_money(jsonb), public.cancel_exchange(uuid, text), public.exchange_list(date, date, uuid), public.cash_book(date, date, uuid) to authenticated;
 revoke execute on function public.app_setup(uuid, text, text, jsonb) from authenticated;

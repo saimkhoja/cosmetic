@@ -1645,6 +1645,27 @@ select t.ok((t.slip_today(t.get('gom')::uuid)->>'exp_cdf')::bigint - coalesce((t
   'expenses paid from the shop''s cash are on its shift end slip; one from head office is not');
 select t.ok((t.get('xrep')::jsonb->'slips'->0->>'exp_cdf')::bigint >= 20000 and (t.get('xrep')::jsonb->'slips'->0->>'exp_usd')::numeric >= 5
   and (t.get('xrep')::jsonb->'slips'->0->>'fx_n')::int = 4, 'the day end slip has the expenses and the exchanges too');
+-- the Admin's cash book of the shop: every move of its two cash drawers, with the balance
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('cb', public.cash_book(current_date, current_date, t.get('gom')::uuid)::text);
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails(format($$select public.cash_book(current_date, current_date, '%s')$$, t.get('gom')), 'permission', 'the cash book is the Admin''s');
+reset role;
+select t.ok(exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'kind' = 'Shop' and r->>'what' like 'Cash sales (%')
+  and exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'what' = 'Vendeur payment: Dollar payer' and r->>'kind' = 'Credit collection' and (r->>'in_usd')::numeric = 25)
+  and (select count(*) from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'kind' = 'Exchange') = 4
+  and exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'what' = 'Staff lunch at the shop' and r->>'kind' = 'Food expense' and (r->>'out_cdf')::numeric = 20000)
+  and exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'what' = 'Moto fuel' and (r->>'out_usd')::numeric = 5)
+  and not exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'what' = 'Head office rent'),
+  'the cash book lists the cash sales, each vendeur''s payment, each exchange and the expenses paid from the shop''s cash; not head office''s');
+select t.ok((t.get('cb')::jsonb->'opening'->>'cdf')::numeric + (select sum((r->>'in_cdf')::numeric - (r->>'out_cdf')::numeric) from jsonb_array_elements(t.get('cb')::jsonb->'rows') r)
+    = (select sum(case when l.side = 'Dr' then l.amount else -l.amount end) from voucher_lines l join vouchers v on v.id = l.voucher_id and v.status = 'posted'
+       where l.account_id = t.acc('CASH_SHOP:' || t.get('gom')) and l.currency = 'FC' and v.date <= current_date)
+  and (t.get('cb')::jsonb->'opening'->>'usd')::numeric + (select sum((r->>'in_usd')::numeric - (r->>'out_usd')::numeric) from jsonb_array_elements(t.get('cb')::jsonb->'rows') r)
+    = (select sum(case when l.side = 'Dr' then l.amount else -l.amount end) from voucher_lines l join vouchers v on v.id = l.voucher_id and v.status = 'posted'
+       where l.account_id = t.acc('CASH_SHOP_USD:' || t.get('gom')) and l.currency = 'USD' and v.date <= current_date),
+  'the cash book ends on what the shop''s two cash ledgers hold');
 -- another shop never sees them
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000e');
