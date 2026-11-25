@@ -106,7 +106,7 @@ export function supplierReturnNoteHTML(r: { no: string; kind: string; reason: st
 }
 
 export function deliveryNoteHTML(d: Delivery, shop: Shop, c: Company, products: Map<string, Product>, showUSD: boolean) {
-  const r = d.rate, cdf = (u: number) => Math.round((u * r) / 10) * 10, ed = d.delivery_edits?.length ? [...d.delivery_edits].sort((a, b) => a.at.localeCompare(b.at)).at(-1)! : null;
+  const r = d.rate, cdf = (u: number) => toCDF(u, r), ed = d.delivery_edits?.length ? [...d.delivery_edits].sort((a, b) => a.at.localeCompare(b.at)).at(-1)! : null;
   const total = sum(d.delivery_items, (i) => i.price_usd * i.qty), totalCDF = sum(d.delivery_items, (i) => cdf(i.price_usd) * i.qty);
   return `<div class="doc"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2>${esc(c.name)}</h2><div>Central store, ${esc(c.address)}</div><div>RCCM ${esc(c.rccm)}, NIF ${esc(c.nif)}</div></div><div style="text-align:right"><h2>Delivery note${ed ? ' (REVISED)' : ''}${d.status === 'cancelled' ? ' (CANCELLED)' : ''}</h2><div><b>DN-${esc(d.no.slice(4))}</b></div><div>${dt(d.created_at)}</div></div></div>
   <hr style="border:0;border-top:1px solid #ccc;margin:14px 0"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><div><b>Deliver to:</b> ${esc(shop.name)}, ${esc(shop.address)}</div><div><b>Rate:</b> 1 USD = ${fCDF(r)}</div></div>

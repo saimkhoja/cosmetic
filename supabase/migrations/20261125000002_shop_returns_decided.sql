@@ -11,12 +11,12 @@
 -- Books: sending is Dr goods in transit, Cr the shop's stock (as before). Deciding clears the goods in transit:
 --   supplier: Dr the supplier, Cr goods in transit (the debit note);  shop: Dr the other shop's stock;
 --   writeoff and short: Dr stock adjustment.
--- Already running QuickSales? Run this file once, after 20261123000001_stock_in_fix.sql. It keeps your data.
+-- Already running QuickSales? Run this file once, after 20261125000001_round_50.sql. It keeps your data.
 
 -- stop at once if the update before this one was not run
 do $$ begin
-  if not exists (select 1 from pg_proc where proname = 'stock_in_shops' and pg_get_functiondef(oid) like '%delete from stock_in_lines where true%') then
-    raise exception 'Run supabase/migrations/20261123000001_stock_in_fix.sql (and every earlier file) first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
+  if not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'app' and p.proname = 'to_cdf' and pg_get_functiondef(p.oid) like '%/ 50%') then
+    raise exception 'Run supabase/migrations/20261125000001_round_50.sql (and every earlier file) first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
   end if;
 end $$;
 

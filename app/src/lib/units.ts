@@ -1,5 +1,5 @@
 import type { Product, Rank } from './types';
-import { toCDF } from './format';
+import { toCDF, up50 } from './format';
 
 export interface Unit { u: string; mult: number; piece?: boolean; usd: number }
 /** Parts of a carton: sold at that part of the carton price, carried by name (a half carton can be as many pcs as a dozen). */
@@ -96,7 +96,8 @@ export function payment(total: number, rate: number, usd: number | string, cdf: 
   const maxDollars = ur > 0 ? Math.max(0, Math.min(Math.floor(u), Math.floor(change / ur))) : 0;
   const changeUsd = dollarsBack ? maxDollars : 0, changeCdf = change - Math.round(changeUsd * ur);
   const pay: PayIn = { tendered: value, paid_usd: u, paid_cdf: c, change_usd: changeUsd, usd_rate: ur };
-  return { usd: u, cdf: c, value, change, short, maxDollars, changeUsd, changeCdf, pay, rate: ur, due: ur > 0 ? Math.ceil((total / ur) * 100) / 100 : 0 };
+  // toPay: the Francs still to collect, rounded up to the next 50 FC (what the cashier asks for)
+  return { usd: u, cdf: c, value, change, short, toPay: up50(short), maxDollars, changeUsd, changeCdf, pay, rate: ur, due: ur > 0 ? Math.ceil((total / ur) * 100) / 100 : 0 };
 }
 /** USD notes worth offering: the smallest ones that cover what is due, and the common bigger ones. */
 export const usdNotes = (due: number) => { const up = [1, 5, 10, 20, 50, 100].filter((n) => n >= due).slice(0, 3); return up.length ? up : [100]; };

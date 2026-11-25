@@ -364,6 +364,9 @@ button.catrow:hover,button.catrow.on{background:var(--blue-l)}
 .paychange.ok{background:var(--ok-l);color:var(--ok)}.paychange.bad{background:var(--bad-l);color:var(--bad)}
 .paytotal .due{font-weight:900;font-size:16px}
 .pact{display:flex;gap:6px;justify-content:flex-end;align-items:center}
+.rnd{display:inline-block;margin-left:6px;padding:0 7px;border-radius:999px;background:var(--warn-l);color:var(--warn);font-size:11px;font-weight:800;line-height:1.7;white-space:nowrap;vertical-align:middle}
+.ubtn .rnd{margin:0;align-self:flex-start}
+.paynote{margin:-4px 0 10px;text-align:right;font-size:13px;font-weight:700;color:var(--warn)}
 .paytotal{background:var(--top);color:#fff;border-radius:16px;padding:16px;text-align:center;margin-bottom:16px}
 .paytotal small{display:block;opacity:.85;font-weight:700;margin:2px 0}
 .paytotal b{font-size:40px;font-weight:900;letter-spacing:-.02em}

@@ -7,8 +7,8 @@ import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSet, hotSort, marginPct, pcValue, unitLabel, unitsOf } from '../lib/units';
 import { barcodesOf, costThatCounts, hasNet, itemProblem, MAX_BARCODES, MONTHS, type ItemInput } from '../lib/items';
 import { ReceiveGoodsModal, useNoStore } from './Stores';
-import { bookRate, fCDF, fUSD, toCDF } from '../lib/format';
-import { Dual, Empty, Head, Modal, Note, num, useAction, useToast } from '../components/ui';
+import { bookRate, fCDF, fUSD, roundedBy, toCDF } from '../lib/format';
+import { Dual, Empty, Head, Modal, Note, num, Rounded, useAction, useToast } from '../components/ui';
 import { IMPCOLS, impParse, readCSV, readXlsx, saveBlob, templateXlsx, type ImportRow } from '../lib/xlsx';
 import type { Category, Cost, Product } from '../lib/types';
 
@@ -60,7 +60,7 @@ export default function Inventory() {
                 <td className="r"><QtyCell p={p} q={qtyOf(p)} cls={qtyOf(p) <= p.reorder ? 'bad' : 'ok'} /></td>
                 {isAdmin ? <td>{c ? (hasNet(c.net_cost_usd) ? <><Dual usd={c.net_cost_usd} rate={book} /><div className="code">net per {p.is_bundle ? 'set' : `carton, ${fUSD(c.cost_usd)} per pc`}</div><div className="code">gross {fUSD(c.carton_cost_usd)}</div></>
                   : p.is_bundle ? <><Dual usd={c.cost_usd} rate={book} /><div className="code">per set</div></> : <><Dual usd={c.carton_cost_usd} rate={book} /><div className="code">per carton, {fUSD(c.cost_usd)} per pc</div></>) : '-'}</td> : null}
-                <td>{unitsOf(p).map((u, k) => <div key={k} style={{ whiteSpace: 'nowrap' }}><span className="uchip">{unitLabel(u)}</span> <b>{fCDF(toCDF(u.usd, rate))}</b>{isAdmin ? <span className="code"> {fUSD(u.usd)}</span> : null}</div>)}</td>
+                <td>{unitsOf(p).map((u, k) => <div key={k} style={{ whiteSpace: 'nowrap' }}><span className="uchip">{unitLabel(u)}</span> <b>{fCDF(toCDF(u.usd, rate))}</b>{isAdmin ? <span className="code"> {fUSD(u.usd)}</span> : null}<Rounded by={roundedBy(u.usd, rate)} /></div>)}</td>
                 {isAdmin ? <td className="r"><b>{c && pcValue(p) > 0 ? (marginPct(pcValue(p), Number(c.cost_usd)) ?? '-') : '-'}{c && pcValue(p) > 0 && Number(c.cost_usd) > 0 ? '%' : ''}</b><div className="code">per {p.is_bundle ? 'set' : 'pc'}</div></td> : null}
                 <td><div className="act">{!p.active ? <button title="Restore this item" onClick={() => void restore(p)}><Icon n="refresh" /></button>
                   : isAdmin ? <><button title="Edit item and prices" onClick={() => setEdit(p)}><Icon n="edit" /></button>{noStore ? null : <button title="Stock count: correct the store quantity" onClick={() => setCount(p)}><Icon n="layers" /></button>}<button title="Delete item" onClick={() => void del(p)}><Icon n="trash" /></button></>
@@ -99,7 +99,7 @@ function ItemModal({ p, cost, rate, barcodes, onClose, onCats }: { p: Product | 
   // the cost that counts, of one carton or one set: the net cost if given, else the gross cost
   const ctnCost = costThatCounts(o.carton_cost, o.net_cost), setCost = costThatCounts(o.set_cost, o.net_cost);
   const problem = itemProblem(o), below = !!problem && /below/.test(problem);
-  const row = (u: string, price: number, c: number) => (price > 0 ? <tr key={u}><td><b>{u}</b></td><td className="r"><b>{fCDF(toCDF(price, rate))}</b></td><td className="r">{fUSD(price)}</td><td className="r">{c >= 0 ? fUSD(c) : '-'}</td><td className="r">{c >= 0 ? <span className={`chip ${price < c ? 'bad' : 'ok'}`}>{marginPct(price, c) ?? '-'}{c > 0 ? '%' : ''}</span> : null}</td></tr> : null);
+  const row = (u: string, price: number, c: number) => (price > 0 ? <tr key={u}><td><b>{u}</b></td><td className="r nw"><b>{fCDF(toCDF(price, rate))}</b><Rounded by={roundedBy(price, rate)} /></td><td className="r">{fUSD(price)}</td><td className="r">{c >= 0 ? fUSD(c) : '-'}</td><td className="r">{c >= 0 ? <span className={`chip ${price < c ? 'bad' : 'ok'}`}>{marginPct(price, c) ?? '-'}{c > 0 ? '%' : ''}</span> : null}</td></tr> : null);
   const cpc = ctnCost >= 0 && o.per_carton >= 1 ? ctnCost / o.per_carton : -1;
   const rows = o.is_bundle ? [row('1 set', o.set_price, setCost), row('1 piece', o.piece, setCost >= 0 && o.pcs > 1 ? setCost / o.pcs : -1)]
     : [row('1 pc', o.pc || (o.per_carton === 1 ? o.ctn : 0), cpc), o.per_carton !== 6 ? row('half dozen (6 pcs)', o.half, cpc >= 0 ? cpc * 6 : -1) : null, o.per_carton !== 12 ? row('1 dozen (12 pcs)', o.dzn, cpc >= 0 ? cpc * 12 : -1) : null, o.per_carton !== 1 ? row(`1 carton${o.per_carton > 1 ? ` (${o.per_carton} pcs)` : ''}`, o.ctn, ctnCost >= 0 ? ctnCost : -1) : null];

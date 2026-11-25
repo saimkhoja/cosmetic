@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fCDF, toCDF } from './format';
+import { fCDF, toCDF, up50 } from './format';
 import { cashNotes, ctnTxt, hotSort, marginPct, overLimit, payment, pcValue, pctOf, stockValue, takeLocal, totals, unitsOf, usdNotes } from './units';
 import { barcodesOf, costThatCounts, custName, findByCode, itemProblem, pickList, scanInQty, splitBarcodes } from './items';
 import { crc32, impParse, inum, readCSV } from './xlsx';
@@ -9,8 +9,11 @@ const P = (o: Partial<Product>): Product => ({ id: 'p', sku: 'SK-1', name: 'X', 
   price_usd: 1.5, half_dozen_usd: 0, dozen_usd: 16, carton_usd: 30, piece_usd: 0, reorder: 0, wh_qty: 0, active: true, ...o });
 
 describe('money', () => {
-  it('rounds shop prices to the nearest 10 CDF like the demo', () => {
-    expect(toCDF(1.5, 2850)).toBe(4280);
+  it('rounds shop prices up to the next 50 CDF', () => {
+    expect(toCDF(1.5, 2850)).toBe(4300);   // 4 275
+    expect(toCDF(1.48, 2850)).toBe(4250);  // 4 218
+    expect(toCDF(0.1, 3000)).toBe(300);    // 300.00000000000006 stays 300
+    expect([up50(4201), up50(4249), up50(4250), up50(4251), up50(4300), up50(0)]).toEqual([4250, 4250, 4250, 4300, 4300, 0]);
     expect(toCDF(16, 2850)).toBe(45600);
     expect(toCDF(30, 2850)).toBe(85500);
     expect(fCDF(1234567)).toBe('1 234 567 CDF');
@@ -198,6 +201,11 @@ describe('payment in USD and CDF', () => {
     expect(payment(40000, 2850, 10, 5000).short).toBe(6500);
     expect(payment(40000, 2850, 0, 0).due).toBe(14.04);
   });
+  it('asks for the Francs still to pay rounded up to 50', () => {
+    const p = payment(30000, 2850, 10, '', false, 2833);   // $10 = 28 330
+    expect([p.short, p.toPay]).toEqual([1670, 1700]);
+    expect(payment(40000, 2850, 10, 5000).toPay).toBe(6500);
+  });
   it('never gives back more dollars than were received', () => {
     expect(payment(1000, 2850, 0, 20000, true).changeUsd).toBe(0);
     expect(payment(1000, 2850, 2, 20000, true).changeUsd).toBe(2);
@@ -231,7 +239,7 @@ describe('goods in and delivery lists', () => {
 describe('stock at selling price', () => {
   it('values each pc at its shop price, as at the till', () => {
     const v = stockValue([{ p: P({ price_usd: 1.5 }), qty: 10 }, { p: P({ price_usd: 0, dozen_usd: 16 }), qty: 24 }], 2850);
-    expect(v.cdf).toBe(10 * 4280 + 24 * toCDF(16 / 12, 2850));   // 4 280 per pc; a dozen-only item at its dozen price / 12
+    expect(v.cdf).toBe(10 * 4300 + 24 * toCDF(16 / 12, 2850));   // 4 300 per pc; a dozen-only item at its dozen price / 12
     expect(v.usd).toBeCloseTo(15 + 32);
     expect(v).toMatchObject({ lines: 2, units: 34 });
   });
