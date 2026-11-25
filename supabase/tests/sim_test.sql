@@ -1560,6 +1560,82 @@ select t.fails(format($$select public.stock_in_shops(array['%s']::uuid[], '[{"pr
 reset role;
 update settings set features = features - 'no_warehouse' where id = 1;
 
+-- ===== no central store: the Admin decides where a shop's returned goods go =====
+update settings set features = features || '{"no_warehouse": true}' where id = 1;
+create function t.transit_of(p_refs text[]) returns numeric language sql security definer as $$
+  select coalesce(sum(case when l.side = 'Dr' then l.base else -l.base end), 0) from voucher_lines l join vouchers v on v.id = l.voucher_id
+  where v.status = 'posted' and v.ref = any(p_refs) and l.account_id = app.acc('TRANSIT') $$;
+grant execute on function t.transit_of(text[]) to authenticated;
+select t.put('dr_g0', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid));
+select t.put('dr_l0', (select qty::text from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('cgel')::uuid));
+select t.put('dr_cost', (select cost_usd::text from product_costs where product_id = t.get('cgel')::uuid));
+select t.put('dr_wh0', (select wh_qty::text from products where id = t.get('cgel')::uuid));
+select t.put('dr_owes0', t.sup_owes()::text);
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('dr_s', public.create_return(jsonb_build_object('reason', 'Expired goods', 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 4))))->>'id');
+select t.put('dr_t', public.create_return(jsonb_build_object('reason', 'Not selling here', 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 3))))->>'id');
+select t.put('dr_w', public.create_return(jsonb_build_object('reason', 'Damaged in the shop', 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 2))))->>'id');
+select t.put('dr_z', public.create_return(jsonb_build_object('reason', 'Counted wrong', 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 1))))->>'id');
+select t.fails(format($$select public.decide_return('{"id":"%s","outcome":"writeoff"}')$$, t.get('dr_w')), 'permission', 'a shop admin does not decide what happens to a return');
+select t.as('00000000-0000-0000-0000-00000000000b');
+select t.fails(format($$select public.decide_return('{"id":"%s","outcome":"writeoff"}')$$, t.get('dr_w')), 'permission', 'the warehouse does not decide either: only the Admin');
+reset role;
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid) = t.get('dr_g0')::int - 10, 'returned goods leave the shop at once, waiting for the Admin');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.fails(format($$select public.decide_return('{"id":"%s","outcome":"store"}')$$, t.get('dr_s')), 'Choose where the goods go', 'the Admin must choose where the goods go');
+select t.fails(format($$select public.decide_return('{"id":"%s","outcome":"supplier"}')$$, t.get('dr_s')), 'Choose the supplier', 'back to the supplier needs the supplier');
+select t.fails(format($$select public.decide_return('{"id":"%s","outcome":"shop","shop_id":"%s"}')$$, t.get('dr_t'), t.get('gom')), 'choose another shop', 'goods cannot go back to the shop they came from this way');
+select t.fails(format($$select public.decide_return('{"id":"%s","outcome":"supplier","supplier_id":"%s","lines":[{"product_id":"%s","qty":5}]}')$$, t.get('dr_s'), t.get('sup'), t.get('cgel')),
+  'more than was sent', 'cannot count more than was sent');
+select t.fails(format($$select public.decide_return('{"id":"%s","outcome":"supplier","supplier_id":"%s","lines":[{"product_id":"%s","qty":3}]}')$$, t.get('dr_s'), t.get('sup'), t.get('cgel')),
+  'came back short', 'a short return needs a note');
+select t.fails(format($$select public.decide_return('{"id":"%s","outcome":"shop","shop_id":"%s","note":"lost all","lines":[{"product_id":"%s","qty":0}]}')$$, t.get('dr_z'), t.get('lim'), t.get('cgel')),
+  'Nothing came back', 'nothing came back: it can only be thrown away');
+-- back to the supplier: 3 of 4 came back
+select t.put('dr_rs', public.decide_return(jsonb_build_object('id', t.get('dr_s'), 'outcome', 'supplier', 'supplier_id', t.get('sup'), 'note', 'One tube missing',
+  'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 3))))::text);
+select t.ok((t.get('dr_rs')::jsonb->>'supplier_return') like 'RTS-%' and (t.get('dr_rs')::jsonb->>'received')::int = 3, 'back to the supplier makes a return to supplier');
+select t.ok((select r.status || ':' || r.kind || ':' || i.qty from supplier_returns r join supplier_return_items i on i.return_id = r.id
+  where r.no = t.get('dr_rs')::jsonb->>'supplier_return' and r.from_return_id = t.get('dr_s')::uuid) = 'open:return:3', 'with the 3 pcs that came back, open until the Admin settles it');
+select t.ok((select status || ':' || outcome || ':' || (supplier_return_id is not null) from shop_returns where id = t.get('dr_s')::uuid) = 'received:supplier:true', 'the shop''s return shows it went to the supplier');
+-- into another shop, and thrown away
+select public.decide_return(jsonb_build_object('id', t.get('dr_t'), 'outcome', 'shop', 'shop_id', t.get('lim')));
+select public.decide_return(jsonb_build_object('id', t.get('dr_w'), 'outcome', 'writeoff'));
+select public.decide_return(jsonb_build_object('id', t.get('dr_z'), 'outcome', 'writeoff', 'note', 'It was never there', 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 0))));
+select t.fails(format($$select public.decide_return('{"id":"%s","outcome":"writeoff"}')$$, t.get('dr_w')), 'already received', 'a return is decided once');
+select t.fails(format($$select public.cancel_return('%s', 'changed my mind')$$, t.get('dr_w')), 'already received', 'a decided return can no longer be cancelled');
+reset role;
+select t.ok(t.sup_owes() = t.get('dr_owes0')::numeric - round(3 * t.get('dr_cost')::numeric, 2), 'what we owe the supplier drops at item cost');
+select t.ok((select qty from shop_stock where shop_id = t.get('lim')::uuid and product_id = t.get('cgel')::uuid) = t.get('dr_l0')::int + 3, 'the other shop gets the goods');
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid) = t.get('dr_g0')::int - 10, 'nothing comes back into the shop that sent them');
+select t.ok((select wh_qty from products where id = t.get('cgel')::uuid) = t.get('dr_wh0')::int, 'nothing goes into a central store');
+select t.ok((select outcome || ':' || to_shop_id from shop_returns where id = t.get('dr_t')::uuid) = 'shop:' || t.get('lim'), 'the return shows which shop got the goods');
+select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id where v.source_type = 'return_in' and v.source_id = t.get('dr_t')::uuid
+  and l.account_id = t.shop_acc('INV_SHOP', t.get('lim')::uuid) and l.side = 'Dr') = round(3 * t.get('dr_cost')::numeric, 2), 'the other shop''s stock is booked at cost');
+select t.ok((select sum(l.amount) from voucher_lines l join vouchers v on v.id = l.voucher_id where v.source_type = 'return_in' and v.source_id in (t.get('dr_w')::uuid, t.get('dr_z')::uuid, t.get('dr_s')::uuid)
+  and l.account_id = t.acc('STOCK_ADJ') and l.side = 'Dr') = round(2 * t.get('dr_cost')::numeric, 2) + 2 * round(t.get('dr_cost')::numeric, 2), 'thrown away and missing goods are booked as a stock adjustment');
+select t.put('dr_refs', (select string_agg(no, ',') from shop_returns where id in (t.get('dr_s')::uuid, t.get('dr_t')::uuid, t.get('dr_w')::uuid, t.get('dr_z')::uuid)) || ',' || (t.get('dr_rs')::jsonb->>'supplier_return'));
+select t.ok(t.transit_of(string_to_array(t.get('dr_refs'), ',')) = 0, 'deciding clears the goods in transit');
+select t.ok(t.unbalanced() = 0, 'decided returns keep the books balanced');
+-- the Shop Admin sees what became of their returns
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((select string_agg(outcome, ',' order by no) from shop_returns where id in (t.get('dr_s')::uuid, t.get('dr_t')::uuid, t.get('dr_w')::uuid)) = 'supplier,shop,writeoff', 'the Shop Admin sees what the Admin decided');
+-- cancelling that return to supplier puts the goods back in the shop they came from
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.cancel_supplier_return((select id from supplier_returns where no = t.get('dr_rs')::jsonb->>'supplier_return'), 'Supplier refused it');
+reset role;
+select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid) = t.get('dr_g0')::int - 7, 'a cancelled return to supplier puts the goods back in the shop they came from');
+select t.ok((select wh_qty from products where id = t.get('cgel')::uuid) = t.get('dr_wh0')::int, 'and not in a central store');
+select t.ok(t.sup_owes() = t.get('dr_owes0')::numeric, 'the supplier is owed exactly as before');
+select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id where v.source_type = 'return_back' and v.status = 'posted'
+  and l.account_id = t.shop_acc('INV_SHOP', t.get('gom')::uuid) and l.side = 'Dr') = round(3 * t.get('dr_cost')::numeric, 2), 'the goods are booked back into the shop''s stock');
+select t.ok(t.transit_of(string_to_array(t.get('dr_refs'), ',')) = 0, 'and nothing stays in transit');
+select t.ok(t.unbalanced() = 0, 'cancelling keeps the books balanced');
+update settings set features = features - 'no_warehouse' where id = 1;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

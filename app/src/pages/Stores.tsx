@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useGrns, useLedgers, useProducts, useRefresh, useReturns, useSettings, useShops, useStock, useSupplierReturns, useSupplierReturnValues, useSuppliers } from '../data/queries';
+import { useCosts, useGrns, useLedgers, useProducts, useRefresh, useReturns, useSettings, useShops, useStock, useSupplierReturns, useSupplierReturnValues, useSuppliers } from '../data/queries';
 
 /** With no central store, goods from a supplier go straight into a shop. */
 export const useNoStore = () => !!useSettings().data?.features?.no_warehouse;
@@ -147,10 +147,10 @@ function SettleReturnModal({ r, value, supplier, onClose }: { r: SupplierReturn;
 }
 function CancelReturnModal({ r, onClose }: { r: SupplierReturn; onClose: () => void }) {
   const refresh = useRefresh(), toast = useToast(), a = useAction(), [why, setWhy] = useState('');
-  const go = () => a.run(async () => { await rpc('cancel_supplier_return', { p_id: r.id, p_reason: why }); await refresh('products', 'sreturns', 'audit'); toast(`${r.no} cancelled`, 'warn'); onClose(); });
+  const go = () => a.run(async () => { await rpc('cancel_supplier_return', { p_id: r.id, p_reason: why }); await refresh('products', 'sreturns', 'stock', 'returns', 'audit'); toast(`${r.no} cancelled`, 'warn'); onClose(); });
   return (
     <Modal title={`Cancel ${r.no}`} icon="x" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Keep it</button><button className="btn danger" disabled={a.busy} onClick={() => void go()}><Icon n="x" /> Cancel {r.no}</button></>}>
-      <p>{r.kind === 'return' ? 'The goods come back into the central store and the debit note is cancelled.' : 'The claim is dropped and the bill is owed in full again.'}</p>
+      <p>{r.kind === 'short' ? 'The claim is dropped and the bill is owed in full again.' : r.from_return_id ? 'The goods go back into the shop that sent them and the debit note is cancelled.' : 'The goods come back into the central store and the debit note is cancelled.'}</p>
       <div className="field"><label>Reason</label><input className="input" maxLength={80} value={why} onChange={(e) => setWhy(e.target.value)} placeholder="e.g. supplier refused the return" autoFocus /></div>
       <div className="lerr">{a.err}</div>
     </Modal>
@@ -184,46 +184,61 @@ export function GoodsIn() {
   );
 }
 
-function ReturnCard({ x, shop, byId, onReceive, onCancel }: { x: ShopReturn; shop: string; byId: Map<string, Product>; onReceive?: () => void; onCancel?: () => void }) {
+const OUTCOME: Record<string, [string, string]> = { supplier: ['Back to the supplier', 'exchange'], shop: ['Moved to another shop', 'store'], writeoff: ['Thrown away', 'trash'] };
+function ReturnCard({ x, shop, toShop, noStore, rts, decide, byId, onReceive, onCancel }: { x: ShopReturn; shop: string; toShop: string; noStore: boolean; rts?: string; decide: boolean; byId: Map<string, Product>; onReceive?: () => void; onCancel?: () => void }) {
   const short = x.status === 'received' && x.return_items.some((i) => (i.received_qty ?? i.qty) < i.qty);
+  const decided = x.status === 'received' && !!x.outcome && x.outcome !== 'store', came = decided || noStore ? 'Came back' : 'Arrived';
+  const status = x.status === 'pending' ? <span className="chip warn"><Icon n="clock" /> {noStore ? 'Waiting for the Admin' : 'On the way to the central store'}</span>
+    : x.status === 'cancelled' ? <span className="chip bad"><Icon n="x" /> Cancelled</span>
+    : decided ? <span className={`chip ${x.outcome === 'writeoff' ? 'bad' : 'ok'}`}><Icon n={OUTCOME[x.outcome!][1]} /> {x.outcome === 'shop' && toShop ? `Moved to ${toShop}` : OUTCOME[x.outcome!][0]}{rts ? `, ${rts}` : ''}{short ? ', some short' : ''}</span>
+    : <span className={`chip ${short ? 'warn' : 'ok'}`}><Icon n="check" /> Received{short ? ', some short' : ''}</span>;
+  const by = x.received_by_name ? `. ${decided ? 'Decided' : 'Received'} by ${x.received_by_name} on ${dt(x.received_at!)}` : '';
   return (
     <div className="card p0">
       <div style={{ padding: '14px 16px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderBottom: '1px solid var(--line)' }}>
-        <b style={{ fontSize: 17 }}>{x.no}</b>{x.status === 'pending' ? <span className="chip warn"><Icon n="clock" /> On the way to the central store</span> : x.status === 'cancelled' ? <span className="chip bad"><Icon n="x" /> Cancelled</span> : <span className={`chip ${short ? 'warn' : 'ok'}`}><Icon n="check" /> Received{short ? ', some short' : ''}</span>}
+        <b style={{ fontSize: 17 }}>{x.no}</b>{status}
         <span style={{ color: 'var(--muted)' }}>{shop}, sent by {x.created_by_name} on {dt(x.created_at)}</span><span className="sp" />
-        {onReceive && x.status === 'pending' ? <button className="btn primary sm" onClick={onReceive}><Icon n="check" /> Receive</button> : null}
+        {onReceive && x.status === 'pending' ? <button className="btn primary sm" onClick={onReceive}><Icon n={decide ? 'exchange' : 'check'} /> {decide ? 'Decide' : 'Receive'}</button> : null}
         {onCancel && x.status === 'pending' ? <button className="btn sm" onClick={onCancel}><Icon n="x" /> Cancel</button> : null}
       </div>
-      <Note i="doc" style={{ margin: '12px 16px 0' }}>Reason: {x.reason}{x.received_note ? `. ${x.status === 'cancelled' ? 'Cancelled' : 'Store note'}: ${x.received_note}` : ''}{x.received_by_name ? `. Received by ${x.received_by_name} on ${dt(x.received_at!)}` : ''}</Note>
-      <div className="tw"><table className="t"><thead><tr><th>Item</th><th className="r">Sent back</th>{x.status === 'received' ? <th className="r">Arrived</th> : null}</tr></thead><tbody>
+      <Note i="doc" style={{ margin: '12px 16px 0' }}>Reason: {x.reason}{x.received_note ? `. ${x.status === 'cancelled' ? 'Cancelled' : decided ? 'Admin note' : 'Store note'}: ${x.received_note}` : ''}{by}{decided && x.outcome === 'supplier' && decide ? '. Settle what the supplier credits under Accounts.' : ''}</Note>
+      <div className="tw"><table className="t"><thead><tr><th>Item</th><th className="r">Sent back</th>{x.status === 'received' ? <th className="r">{came}</th> : null}</tr></thead><tbody>
         {x.return_items.map((i) => { const p = byId.get(i.product_id); return <tr key={i.product_id}><td><b>{p?.name}</b><div className="code">{p?.sku}</div></td><td className="r"><b>{i.qty}</b> {p?.stock_unit}</td>{x.status === 'received' ? <td className="r"><span className={`chip ${(i.received_qty ?? i.qty) < i.qty ? 'warn' : 'ok'}`}>{i.received_qty ?? i.qty}</span></td> : null}</tr>; })}
       </tbody></table></div>
     </div>
   );
 }
-
-/** Warehouse and Admin: returns coming back from the shops. Shop admin: send goods back. */
+/** Warehouse and Admin: returns coming back from the shops. Shop admin: send goods back. Without a central store the
+ *  Admin decides where returned goods go. */
 export function Returns() {
-  const { profile } = useAuth(), shopSide = profile!.role === 'shopadmin';
-  const rets = useReturns(), products = useProducts(), shops = useShops();
+  const { profile } = useAuth(), shopSide = profile!.role === 'shopadmin', noStore = useNoStore(), decides = noStore && profile!.role === 'admin';
+  const rets = useReturns(), products = useProducts(), shops = useShops(), srs = useSupplierReturns(decides);
   const [recv, setRecv] = useState<ShopReturn | null>(null), [cancel, setCancel] = useState<ShopReturn | null>(null), [make, setMake] = useState(false);
   const byId = useMemo(() => new Map((products.data ?? []).map((p) => [p.id, p])), [products.data]);
+  const shopName = (id?: string | null) => shops.data?.find((s) => s.id === id)?.name ?? '';
+  const rtsOf = (id?: string | null) => { const r = id ? srs.data?.find((y) => y.id === id) : null; return r ? (r.status === 'cancelled' ? `${r.no} cancelled, goods back in the shop` : r.no) : undefined; };
   const list = [...(rets.data ?? [])].sort((x, y) => Number(y.status === 'pending') - Number(x.status === 'pending'));
   const waiting = list.filter((x) => x.status === 'pending').length;
+  const head = noStore
+    ? shopSide ? ['Returns', 'Send damaged, expired or unsold goods back. They leave the shop stock when you send them; the Admin then decides where they go: back to the supplier, to another shop, or thrown away.']
+      : ['Returns from shops', 'Goods the shops sent back. Count what came back, then decide where it goes: back to the supplier, to another shop, or thrown away.']
+    : shopSide ? ['Returns to the central store', 'Send damaged, expired or unsold goods back. They leave the shop stock when you send them; the central store confirms what arrived.']
+      : ['Returns from shops', 'Goods the shops sent back. Count what arrived and receive it into the store.'];
   return (
     <>
-      <Head t={shopSide ? 'Returns to the central store' : 'Returns from shops'} s={shopSide ? 'Send damaged, expired or unsold goods back. They leave the shop stock when you send them; the central store confirms what arrived.' : 'Goods the shops sent back. Count what arrived and receive it into the store.'}
-        a={shopSide ? <button className="btn primary" onClick={() => setMake(true)}><Icon n="truck" /> New return</button> : null} />
-      {waiting ? <Note i="truck" warn>{waiting} return{waiting > 1 ? 's are' : ' is'} on the way to the central store.</Note> : null}
-      {list.length ? list.map((x) => <ReturnCard key={x.id} x={x} shop={shops.data?.find((s) => s.id === x.shop_id)?.name ?? ''} byId={byId} onReceive={shopSide ? undefined : () => setRecv(x)} onCancel={() => setCancel(x)} />) : <div className="card"><Empty i="truck" t={rets.isLoading ? 'Loading' : 'No returns yet'} /></div>}
-      {make ? <NewReturn onClose={() => setMake(false)} /> : null}
-      {recv ? <ReceiveReturn x={recv} byId={byId} onClose={() => setRecv(null)} /> : null}
+      <Head t={head[0]} s={head[1]} a={shopSide ? <button className="btn primary" onClick={() => setMake(true)}><Icon n="truck" /> New return</button> : null} />
+      {waiting ? <Note i={noStore ? 'clock' : 'truck'} warn>{waiting} return{waiting > 1 ? 's are' : ' is'} {!noStore ? 'on the way to the central store' : decides ? 'waiting for your decision' : 'waiting for the Admin'}.</Note> : null}
+      {list.length ? list.map((x) => <ReturnCard key={x.id} x={x} shop={shopName(x.shop_id)} toShop={shopName(x.to_shop_id)} noStore={noStore} byId={byId}
+        rts={rtsOf(x.supplier_return_id)} decide={decides}
+        onReceive={shopSide ? undefined : () => setRecv(x)} onCancel={() => setCancel(x)} />) : <div className="card"><Empty i="truck" t={rets.isLoading ? 'Loading' : 'No returns yet'} /></div>}
+      {make ? <NewReturn noStore={noStore} onClose={() => setMake(false)} /> : null}
+      {recv ? decides ? <DecideReturn x={recv} shop={shopName(recv.shop_id)} byId={byId} onClose={() => setRecv(null)} /> : <ReceiveReturn x={recv} byId={byId} onClose={() => setRecv(null)} /> : null}
       {cancel ? <CancelReturn x={cancel} onClose={() => setCancel(null)} /> : null}
     </>
   );
 }
 
-function NewReturn({ onClose }: { onClose: () => void }) {
+function NewReturn({ noStore, onClose }: { noStore: boolean; onClose: () => void }) {
   const { profile } = useAuth(), products = useProducts(), stock = useStock(profile!.shop_id), refresh = useRefresh(), toast = useToast(), a = useAction();
   const [reason, setReason] = useState(''), [q, setQ] = useState('');
   const { pcsOf, cell } = useQtyLines();
@@ -235,10 +250,10 @@ function NewReturn({ onClose }: { onClose: () => void }) {
     if (!chosen.length) throw new Error('Enter a quantity for at least one item');
     if (over.length) throw new Error('The shop does not have that many: ' + over.map((p) => p.name).join(', '));
     const r = await rpc<{ no: string }>('create_return', { p: { reason, lines: chosen.map((p) => ({ product_id: p.id, qty: pcsOf(p) })) } });
-    await refresh('returns', 'stock', 'audit'); toast(`${r.no} sent to the central store`); onClose();
+    await refresh('returns', 'stock', 'audit'); toast(`${r.no} sent ${noStore ? 'back: the Admin decides where it goes' : 'to the central store'}`); onClose();
   });
   return (
-    <Modal title="Send goods back to the central store" icon="truck" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Send back</button></>}>
+    <Modal title={noStore ? 'Send goods back' : 'Send goods back to the central store'} icon="truck" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Send back</button></>}>
       <div className="field"><label>Reason</label><input id="retr" className="input" maxLength={120} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Damaged packaging, expired, not selling" autoFocus /></div>
       <div className="search" style={{ maxWidth: 'none', marginBottom: 10 }}><Icon n="search" /><input placeholder="Find an item in the shop" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       <div className="tw" style={{ maxHeight: '44vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}>
@@ -246,7 +261,7 @@ function NewReturn({ onClose }: { onClose: () => void }) {
           {list.map((p) => <tr key={p.id}><td><b>{p.name}</b><div className="code">{p.sku}</div></td><td className="r"><QtyCell p={p} q={at.get(p.id) ?? 0} cls={over.includes(p) ? 'bad' : ''} /></td><td>{cell(p)}</td></tr>)}
         </tbody></table> : <Empty i="box" t="No stock in the shop to send back" />}
       </div>
-      <Note i="truck" warn={!!over.length} style={{ marginTop: 12 }}>{chosen.length} item{chosen.length === 1 ? '' : 's'}, {sum(chosen, pcsOf)} units leave the shop stock now.</Note>
+      <Note i="truck" warn={!!over.length} style={{ marginTop: 12 }}>{chosen.length} item{chosen.length === 1 ? '' : 's'}, {sum(chosen, pcsOf)} units leave the shop stock now{noStore ? '; the Admin decides where they go' : ''}.</Note>
       <div className="lerr">{a.err}</div>
     </Modal>
   );
@@ -272,6 +287,74 @@ function ReceiveReturn({ x, byId, onClose }: { x: ShopReturn; byId: Map<string, 
     </Modal>
   );
 }
+type Dest = 'supplier' | 'shop' | 'writeoff';
+const DESTS: [Dest, string, string, string][] = [
+  ['supplier', 'exchange', 'Back to the supplier', 'What you owe them drops at item cost'],
+  ['shop', 'store', 'To another shop', 'Goes into that shop\'s stock'],
+  ['writeoff', 'trash', 'Throw away', 'Damaged or expired: booked as a loss'],
+];
+/** Without a central store, the Admin counts what came back and decides where it goes. */
+function DecideReturn({ x, shop, byId, onClose }: { x: ShopReturn; shop: string; byId: Map<string, Product>; onClose: () => void }) {
+  const refresh = useRefresh(), toast = useToast(), a = useAction(), settings = useSettings();
+  const suppliers = useSuppliers(), shops = useShops(), costs = useCosts(true);
+  const [got, setGot] = useState<Record<string, string>>(Object.fromEntries(x.return_items.map((i) => [i.product_id, String(i.qty)])));
+  const [dest, setDest] = useState<Dest | ''>(''), [sup, setSup] = useState(''), [to, setTo] = useState(''), [note, setNote] = useState(''), [print, setPrint] = useState(true);
+  const cost = useMemo(() => new Map((costs.data ?? []).map((c) => [c.product_id, Number(c.cost_usd) || 0])), [costs.data]);
+  const n = (pid: string) => Math.min(Math.max(0, parseInt(got[pid]) || 0), 9999999);
+  const over = x.return_items.filter((i) => n(i.product_id) > i.qty), shortItems = x.return_items.filter((i) => n(i.product_id) < i.qty);
+  const back = sum(x.return_items, (i) => Math.min(n(i.product_id), i.qty)), missing = sum(shortItems, (i) => i.qty - n(i.product_id));
+  const vBack = sum(x.return_items, (i) => Math.min(n(i.product_id), i.qty) * (cost.get(i.product_id) ?? 0)), vMissing = sum(shortItems, (i) => (i.qty - n(i.product_id)) * (cost.get(i.product_id) ?? 0));
+  // suppliers of these items first
+  const mine = new Set(x.return_items.map((i) => i.product_id));
+  const sups = (suppliers.data ?? []).filter((s) => s.active).map((s) => ({ s, fits: (s.supplier_items ?? []).some((i) => mine.has(i.product_id)) }))
+    .sort((p, q) => Number(q.fits) - Number(p.fits) || p.s.name.localeCompare(q.s.name));
+  const supplier = sups.find((p) => p.s.id === sup)?.s, target = (shops.data ?? []).find((s) => s.id === to);
+  const others = (shops.data ?? []).filter((s) => s.active && s.id !== x.shop_id);
+  const effect = !dest ? 'Choose where the goods go.'
+    : dest === 'supplier' ? (supplier ? `${back} units go back to ${supplier.name}. What you owe them drops by ${fUSD(vBack)} at item cost; settle the amount they credit under Accounts.` : 'Choose the supplier.')
+    : dest === 'shop' ? (target ? `${back} units go into the stock of ${target.name}.` : 'Choose the shop.')
+    : `${back} units are thrown away, booked as a stock loss of ${fUSD(vBack)}.`;
+  const save = () => a.run(async () => {
+    if (!dest) throw new Error('Choose where the goods go');
+    if (over.length) throw new Error('You cannot count more than was sent: ' + over.map((i) => byId.get(i.product_id)?.name).join(', '));
+    const lines = x.return_items.map((i) => ({ product_id: i.product_id, qty: n(i.product_id) }));
+    const r = await rpc<{ sent: number; received: number; supplier_return: string | null }>('decide_return', { p: { id: x.id, outcome: dest, lines, note, supplier_id: dest === 'supplier' ? sup || null : null, shop_id: dest === 'shop' ? to || null : null } });
+    if (dest === 'supplier' && print && r.supplier_return) {
+      printHTML(supplierReturnNoteHTML({ no: r.supplier_return, kind: 'return', reason: x.reason, note: `From ${x.no}, ${shop}`, created_at: new Date().toISOString(), created_by_name: '',
+        supplier_return_items: lines.filter((l) => l.qty > 0) }, supplier?.name ?? '', settings.data?.company ?? {}, byId));
+    }
+    await refresh('returns', 'stock', 'sreturns', 'audit');
+    toast(dest === 'supplier' ? `${x.no}: ${r.received} units back to ${supplier?.name} as ${r.supplier_return}` : dest === 'shop' ? `${x.no}: ${r.received} units moved to ${target?.name}` : `${x.no}: ${r.received} units thrown away`);
+    onClose();
+  });
+  return (
+    <Modal title={`Decide return ${x.no} from ${shop}`} icon="exchange" wide onClose={onClose}
+      foot={<><button className="btn" onClick={onClose}>Not now</button><button className="btn primary" disabled={a.busy || !dest} onClick={() => void save()}><Icon n="check" /> Confirm</button></>}>
+      <Note i="doc">Reason from the shop: {x.reason}</Note>
+      <h4 className="step">1. Count what came back</h4>
+      <div className="tw"><table className="t"><thead><tr><th>Item</th><th className="r">Sent</th><th style={{ width: 150 }}>Came back</th></tr></thead><tbody>
+        {x.return_items.map((i) => { const p = byId.get(i.product_id); return <tr key={i.product_id}><td><b>{p?.name}</b><div className="code">{p?.sku}</div></td><td className="r">{i.qty} {p?.stock_unit}</td>
+          <td><input className={`input${n(i.product_id) > i.qty ? ' bad' : ''}`} type="number" min="0" max={i.qty} inputMode="numeric" value={got[i.product_id]} style={{ minHeight: 42 }} onChange={(e) => setGot({ ...got, [i.product_id]: e.target.value })} aria-label={`Came back ${p?.name}`} /></td></tr>; })}
+      </tbody></table></div>
+      {missing > 0 ? <Note i="alert" warn style={{ marginTop: 10 }}>{missing} unit{missing === 1 ? ' is' : 's are'} missing: booked as a loss of {fUSD(vMissing)}. Write what happened in the note.</Note> : null}
+      <h4 className="step">2. Where do the goods go?</h4>
+      <div className="choices" role="radiogroup" aria-label="Where the goods go">
+        {DESTS.map(([k, i, t, sub]) => <button key={k} type="button" role="radio" aria-checked={dest === k} className={`choice${dest === k ? ' on' : ''}`} onClick={() => setDest(k)}><Icon n={i} /><b>{t}</b><span>{sub}</span></button>)}
+      </div>
+      <Note warn={!dest} i={dest ? DESTS.find((d) => d[0] === dest)![1] : 'exchange'}>{effect}</Note>
+      {dest === 'supplier' ? <div className="frow" style={{ marginTop: 12 }}>
+        <div className="field"><label htmlFor="dsup">Supplier</label><select id="dsup" className="input" value={sup} onChange={(e) => setSup(e.target.value)}><option value="">Choose the supplier</option>
+          {sups.map(({ s, fits }) => <option key={s.id} value={s.id}>{s.name}{fits ? ' (supplies these items)' : ''}</option>)}</select></div>
+        <label className="switch" style={{ alignSelf: 'center' }}><input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} /><span>Print a return note for the supplier</span></label>
+      </div> : null}
+      {dest === 'shop' ? <div className="field" style={{ marginTop: 12 }}><label htmlFor="dshop">Shop</label><select id="dshop" className="input" value={to} onChange={(e) => setTo(e.target.value)}><option value="">Choose the shop</option>
+        {others.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>{others.length ? null : <span className="hint">There is no other shop.</span>}</div> : null}
+      <div className="field" style={{ marginTop: 4 }}><label htmlFor="dnote">Note {missing > 0 ? '(required: what happened to the missing goods?)' : '(optional)'}</label><input id="dnote" className="input" maxLength={120} value={note} onChange={(e) => setNote(e.target.value)} /></div>
+      <div className="lerr">{a.err}</div>
+    </Modal>
+  );
+}
+
 function CancelReturn({ x, onClose }: { x: ShopReturn; onClose: () => void }) {
   const refresh = useRefresh(), toast = useToast(), a = useAction();
   const [r, setR] = useState('');

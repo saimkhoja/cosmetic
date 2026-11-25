@@ -23,7 +23,9 @@ export const NAV: Record<Role, [string, string, string][]> = {
 /** Tabs that only move stock between the central store and the shops. */
 const STORE_ROUTES = new Set(['/requests', '/deliveries', '/returns', '/received']);
 /** The tabs of a role: without a central store the store-to-shop tabs are left out; Vendeurs only when it is turned on. */
-export const navFor = (role: Role, f?: Features) => NAV[role].filter((n) => (!f?.no_warehouse || !STORE_ROUTES.has(n[0])) && (n[0] !== '/vendeurs' || !!f?.vendeurs));
+// without a central store, Returns stays for the Shop Admin (sending goods back) and the Admin (deciding where they go)
+const keepNoStore = (role: Role, to: string) => to === '/returns' && (role === 'shopadmin' || role === 'admin');
+export const navFor = (role: Role, f?: Features) => NAV[role].filter((n) => (!f?.no_warehouse || !STORE_ROUTES.has(n[0]) || keepNoStore(role, n[0])) && (n[0] !== '/vendeurs' || !!f?.vendeurs));
 
 export function useWaiting() {
   const [n, setN] = useState(0);
