@@ -64,7 +64,7 @@ export const useGrns = (enabled = true) => useQuery({ queryKey: ['grns'], enable
 export const useReturns = (enabled = true) => useQuery({ queryKey: ['returns'], enabled, refetchInterval: 30000, queryFn: async () => rows<ShopReturn>(await supabase.from('shop_returns').select('*, return_items(product_id,qty,received_qty)').order('created_at', { ascending: false }).limit(300)) });
 /** Returns to suppliers and claims for goods billed but not received (no values: the warehouse sees no costs). */
 export const useSupplierReturns = (enabled = true) => useQuery({ queryKey: ['sreturns'], enabled, staleTime: 0, refetchInterval: 30000, queryFn: async () => rows<SupplierReturn>(await supabase.from('supplier_returns')
-  .select('id,no,supplier_id,kind,grn_id,reason,note,status,voucher_id,bill_id,created_by_name,created_at,settled_by_name,settled_at,cancel_reason,supplier_return_items(product_id,qty)')
+  .select('id,no,supplier_id,kind,grn_id,reason,note,status,voucher_id,bill_id,created_by_name,created_at,settled_by_name,settled_at,cancel_reason,from_return_id,supplier_return_items(product_id,qty)')
   .order('created_at', { ascending: false }).limit(300)) });
 /** Admin only: what each return or claim is worth and what the supplier credits. */
 export const useSupplierReturnValues = (enabled = true) => useQuery({ queryKey: ['sreturns', 'values'], enabled, staleTime: 0, refetchInterval: 30000, queryFn: () => rpc<SupplierReturnValue[]>('supplier_return_values') });

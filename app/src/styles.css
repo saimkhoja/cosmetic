@@ -120,6 +120,16 @@ main.posmain{padding:14px;max-width:none}
 .input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-l)}
 .input.xl{font-size:30px;font-weight:900;min-height:66px;text-align:center}
 .frow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.step{margin:16px 0 8px;font-size:15px}
+.input.bad{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-l)}
+.choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.choice{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:12px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);min-height:88px;cursor:pointer;font:inherit}
+.choice svg{font-size:22px;color:var(--blue);margin-bottom:2px}
+.choice b{font-size:15px}
+.choice span{font-size:12.5px;color:var(--muted)}
+.choice:hover{border-color:var(--blue)}
+.choice.on{border-color:var(--blue);background:var(--blue-l);box-shadow:0 0 0 1.5px var(--blue)}
+@media(max-width:560px){.choices{grid-template-columns:1fr}.choice{min-height:0}}
 .frow.three{grid-template-columns:1fr 1fr 1fr}
 @media(max-width:560px){.frow,.frow.three{grid-template-columns:1fr}}
 .search{display:flex;align-items:center;gap:8px;background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:0 13px;min-height:48px;flex:1;max-width:440px;color:var(--muted)}
