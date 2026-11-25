@@ -1,6 +1,7 @@
 // Book keeping, like Tally: suppliers and their bills, vouchers (payment, receipt, contra, journal,
 // debit and credit notes), ledgers in groups, statements, day book, trial balance, profit and loss,
 // balance sheet and money owed to suppliers. Every entry is in USD or CDF; reports are in USD.
+import { apiLines, lineBase, lineTargets, mergeCurrencies, type VLine } from '../lib/vouchers';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -176,19 +177,20 @@ function Bills() {
 }
 
 // ---------- vouchers ----------
-type VLine = { account: string; side: 'Dr' | 'Cr'; amount: string; currency: Cur; rate: string; memo: string };
 function VoucherModal({ type: t0, party, onClose }: { type: string; party?: Payable; onClose: () => void }) {
   const ledgers = useLedgers(), settings = useSettings(), pay = usePayables(), refresh = useRefresh(), toast = useToast(), a = useAction();
   const L = (ledgers.data ?? []).filter((l) => l.active), rate0 = String(bookRate(settings.data));
   const cash = L.find((l) => l.code === 'CASH_HO');
   const supAcc = party ? (ledgers.data ?? []).find((l) => l.supplier_id === party.id) : undefined;
-  const blank = (side: 'Dr' | 'Cr', account = ''): VLine => ({ account, side, amount: '', currency: (L.find((l) => l.id === account)?.currency ?? 'USD'), rate: rate0, memo: '' });
+  const blank = (side: 'Dr' | 'Cr', account = ''): VLine => ({ account, side, cdf: '', usd: '', rate: rate0, memo: '' });
   const [t, setT] = useState(t0), [date, setDate] = useState(today()), [narr, setNarr] = useState(party ? `Payment to ${party.name}` : ''), [ref, setRef] = useState('');
   const [lines, setLines] = useState<VLine[]>(() => t0 === 'payment' ? [blank('Dr', supAcc?.id), blank('Cr', cash?.id)] : t0 === 'receipt' ? [blank('Dr', cash?.id), blank('Cr')] : [blank('Dr'), blank('Cr')]);
   const [alloc, setAlloc] = useState<Record<string, string>>({});
-  const base = (l: VLine) => { const n = Number(l.amount) || 0; return l.currency === 'FC' ? n / (Number(l.rate) || Number(rate0) || 1) : n; };
+  const base = (l: VLine) => lineBase(l, Number(rate0));
   const dr = sum(lines.filter((l) => l.side === 'Dr'), base), cr = sum(lines.filter((l) => l.side === 'Cr'), base), diff = usd2(dr - cr);
-  const upd = (i: number, patch: Partial<VLine>) => setLines(lines.map((l, k) => { if (k !== i) return l; const n = { ...l, ...patch }; if (patch.account) n.currency = L.find((x) => x.id === patch.account)?.currency ?? n.currency; return n; }));
+  const upd = (i: number, patch: Partial<VLine>) => setLines(lines.map((l, k) => (k === i ? { ...l, ...patch } : l)));
+  // a shop's cash is two ledgers: say where each currency of the line goes
+  const split = (l: VLine) => { const t = lineTargets(l.account, L); return t.cdf !== t.usd && Number(l.cdf) > 0 && Number(l.usd) > 0 ? `CDF to ${L.find((x) => x.id === t.cdf)?.name}, USD to ${L.find((x) => x.id === t.usd)?.name}` : ''; };
   // bills of the supplier being paid (or debited), to settle bill by bill
   const supLines = lines.filter((l) => l.side === 'Dr' && L.find((x) => x.id === l.account)?.supplier_id);
   const sid = supLines.length ? L.find((x) => x.id === supLines[0].account)?.supplier_id : null;
@@ -199,7 +201,7 @@ function VoucherModal({ type: t0, party, onClose }: { type: string; party?: Paya
     if (Math.abs(diff) > 0.01) throw new Error(`Debit and credit are not equal: difference ${fUSD(diff)}`);
     if (allocated > supPaid + 0.01) throw new Error('More is matched to bills than is paid');
     const r = await rpc<{ no: string }>('post_voucher', { p: { type: t, date, narration: narr, ref,
-      lines: lines.filter((l) => l.account && Number(l.amount) > 0).map((l) => ({ account: l.account, side: l.side, amount: Number(l.amount), currency: l.currency, rate: Number(l.rate) || Number(rate0), memo: l.memo })),
+      lines: apiLines(lines, L, Number(rate0)),
       allocations: Object.entries(alloc).filter(([, v]) => Number(v) > 0).map(([bill_id, v]) => ({ bill_id, amount: Number(v) })) } });
     await refresh('books', 'ledgers', 'audit'); toast(`${VTYPES[t]} ${r.no} saved`); onClose();
   });
@@ -210,12 +212,12 @@ function VoucherModal({ type: t0, party, onClose }: { type: string; party?: Paya
         <div className="field"><label>Date</label><input type="date" className="input" value={date} max={today()} onChange={(e) => setDate(e.target.value)} /></div>
         <div className="field"><label>Reference (optional)</label><input className="input" maxLength={60} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="cheque, receipt no." /></div></div>
       <Note i="doc">{hint[t]}</Note>
-      <div className="tw"><table className="t vlines"><thead><tr><th style={{ width: 70 }}>Dr/Cr</th><th>Ledger</th><th style={{ width: 130 }}>Amount</th><th style={{ width: 90 }}>In</th><th style={{ width: 100 }}>Rate</th><th className="r">USD</th><th /></tr></thead><tbody>
+      <div className="tw"><table className="t vlines"><thead><tr><th style={{ width: 70 }}>Dr/Cr</th><th>Ledger</th><th style={{ width: 130 }}>CDF</th><th style={{ width: 95 }}>Rate</th><th style={{ width: 110 }}>USD</th><th className="r">Worth USD</th><th /></tr></thead><tbody>
         {lines.map((l, i) => <tr key={i}><td><select className="input" value={l.side} onChange={(e) => upd(i, { side: e.target.value as 'Dr' | 'Cr' })} aria-label="Side"><option>Dr</option><option>Cr</option></select></td>
-          <td><select className="input vacc" value={l.account} onChange={(e) => upd(i, { account: e.target.value })} aria-label="Ledger"><option value="">Choose a ledger</option>{groupOptions(L)}</select></td>
-          <td><input className="input vamt" type="number" min="0" step="0.01" value={l.amount} onChange={(e) => upd(i, { amount: e.target.value })} aria-label="Amount" /></td>
-          <td><select className="input" value={l.currency} onChange={(e) => upd(i, { currency: e.target.value as Cur })} aria-label="Currency"><option>USD</option><option value="FC">CDF</option></select></td>
-          <td>{l.currency === 'FC' ? <input className="input" type="number" min="1" value={l.rate} onChange={(e) => upd(i, { rate: e.target.value })} aria-label="Rate" /> : <span className="code">-</span>}</td>
+          <td><select className="input vacc" value={l.account} onChange={(e) => upd(i, { account: e.target.value })} aria-label="Ledger"><option value="">Choose a ledger</option>{groupOptions(L)}</select>{split(l) ? <div className="code">{split(l)}</div> : null}</td>
+          <td><input className="input vcdf" type="number" min="0" step="1" value={l.cdf} onChange={(e) => upd(i, { cdf: e.target.value })} aria-label="Amount in CDF" placeholder="0" /></td>
+          <td>{Number(l.cdf) > 0 ? <input className="input" type="number" min="1" value={l.rate} onChange={(e) => upd(i, { rate: e.target.value })} aria-label="Rate" /> : <span className="code">-</span>}</td>
+          <td><input className="input vamt" type="number" min="0" step="0.01" value={l.usd} onChange={(e) => upd(i, { usd: e.target.value })} aria-label="Amount in USD" placeholder="0" /></td>
           <td className={`r ${l.side === 'Dr' ? 'dr' : 'cr'}`}>{fUSD(base(l))}</td>
           <td>{lines.length > 2 ? <button className="rbtn bad" title="Remove line" onClick={() => setLines(lines.filter((_, k) => k !== i))}><Icon n="x" /></button> : null}</td></tr>)}
         <tr><td colSpan={2}><button className="btn sm" onClick={() => setLines([...lines, blank(diff > 0 ? 'Cr' : 'Dr')])}><Icon n="plus" /> Add line</button></td><td colSpan={3} className="r"><b>Dr {fUSD(dr)} · Cr {fUSD(cr)}</b></td><td className="r">{Math.abs(diff) > 0.01 ? <span className="chip bad">off by {fUSD(Math.abs(diff))}</span> : <span className="chip ok">balanced</span>}</td><td /></tr>
@@ -239,7 +241,7 @@ function Vouchers() {
   const [from, setFrom] = useState(today()), [to, setTo] = useState(today()), [type, setType] = useState(''), [make, setMake] = useState<string | null>(null), [cancel, setCancel] = useState<DayBookEntry | null>(null);
   const book = useQuery({ queryKey: ['books', 'daybook', from, to, type], queryFn: () => rpc<DayBookEntry[]>('day_book', { p_from: from <= to ? from : to, p_to: from <= to ? to : from, p_type: type || null }) });
   const doc = useDoc(), list = book.data ?? [];
-  const print = () => doc('Day book', `${from} to ${to}${type ? ', ' + VTYPES[type] : ''}`, `<table class="t"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th class="r">Debit USD</th><th class="r">Credit USD</th></tr></thead><tbody>${list.map((v) => `<tr><td>${v.date}</td><td>${esc(v.no)}<br><small>${VTYPES[v.type]}${v.status === 'cancelled' ? ', CANCELLED' : ''}</small></td><td>${esc(v.narration)}${v.lines.map((l) => `<br><small>${l.side} ${esc(l.account)}${l.currency === 'FC' ? ' ' + fCDF(l.amount) : ''}</small>`).join('')}</td><td class="r">${fUSD(sum(v.lines.filter((l) => l.side === 'Dr'), (l) => l.base))}</td><td class="r">${fUSD(sum(v.lines.filter((l) => l.side === 'Cr'), (l) => l.base))}</td></tr>`).join('') || '<tr><td colspan="5">No vouchers</td></tr>'}</tbody></table>`);
+  const print = () => doc('Day book', `${from} to ${to}${type ? ', ' + VTYPES[type] : ''}`, `<table class="t"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th class="r">Debit USD</th><th class="r">Credit USD</th></tr></thead><tbody>${list.map((v) => `<tr><td>${v.date}</td><td>${esc(v.no)}<br><small>${VTYPES[v.type]}${v.status === 'cancelled' ? ', CANCELLED' : ''}</small></td><td>${esc(v.narration)}${mergeCurrencies(v.lines, (l) => l.account).map((l) => `<br><small>${l.side} ${esc(l.account)}${l.cdf ? ' ' + fCDF(l.cdf) : ''}${l.cdf && l.usd ? ' + ' + fUSD(l.usd) : ''}</small>`).join('')}</td><td class="r">${fUSD(sum(v.lines.filter((l) => l.side === 'Dr'), (l) => l.base))}</td><td class="r">${fUSD(sum(v.lines.filter((l) => l.side === 'Cr'), (l) => l.base))}</td></tr>`).join('') || '<tr><td colspan="5">No vouchers</td></tr>'}</tbody></table>`);
   return (
     <>
       <div className="toolbar">{['payment', 'receipt', 'contra', 'journal'].map((k) => <button key={k} className="btn primary sm" onClick={() => setMake(k)}><Icon n="plus" /> {VTYPES[k]}</button>)}<button className="btn ghost sm" onClick={() => setMake('debit_note')}>Debit note</button><button className="btn ghost sm" onClick={() => setMake('credit_note')}>Credit note</button></div>
@@ -250,7 +252,7 @@ function Vouchers() {
         <button className="btn ghost" onClick={print}><Icon n="printer" /> Print day book</button></div></div>
       <div className="card p0"><div className="tw">{list.length ? <table className="t"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th className="r">Amount</th><th /></tr></thead><tbody>
         {list.map((v) => <tr key={v.id} style={v.status === 'cancelled' ? { opacity: 0.55 } : undefined}><td className="nw">{v.date}</td><td className="nw"><b>{v.no}</b><div className="code">{VTYPES[v.type]}</div>{v.status === 'cancelled' ? <span className="chip bad" title={v.cancel_reason ?? ''}>Cancelled</span> : null}</td>
-          <td>{v.narration}{v.lines.map((l, k) => <div key={k} className="code"><span className={l.side === 'Dr' ? 'dr' : 'cr'}>{l.side}</span> {l.account}{l.currency === 'FC' ? ` · ${fCDF(l.amount)} @ ${l.rate}` : ''} · {fUSD(l.base)}{l.memo ? ` · ${l.memo}` : ''}</div>)}<div className="code">by {v.created_by_name}</div></td>
+          <td>{v.narration}{mergeCurrencies(v.lines, (l) => l.account).map((l, k) => <div key={k} className="code"><span className={l.side === 'Dr' ? 'dr' : 'cr'}>{l.side}</span> {l.account}{l.cdf ? ` · ${fCDF(l.cdf)} @ ${l.cdf_rate}` : ''}{l.cdf && l.usd ? ` + ${fUSD(l.usd)}` : ''} · {fUSD(l.base)}{l.memo ? ` · ${l.memo}` : ''}</div>)}<div className="code">by {v.created_by_name}</div></td>
           <td className="r nw"><b>{fUSD(sum(v.lines.filter((l) => l.side === 'Dr'), (l) => l.base))}</b></td>
           <td>{v.status === 'posted' && ['payment', 'receipt', 'contra', 'journal', 'debit_note', 'credit_note', 'purchase'].includes(v.type) ? <div className="act"><button title="Cancel this voucher" onClick={() => setCancel(v)}><Icon n="x" /></button></div> : null}</td></tr>)}
       </tbody></table> : <Empty i="receipt" t={book.isLoading ? 'Loading' : 'No vouchers in these dates'} />}</div></div>
@@ -288,14 +290,14 @@ export function StatementView({ ledgers, loading }: { ledgers: Ledger[]; loading
         <label className="switch" style={{ alignSelf: 'center' }}><input id="stopen" type="checkbox" checked={withOpening} onChange={(e) => setWithOpening(e.target.checked)} /><span>Include opening balance</span></label>
         <button className="btn ghost" disabled={!s} onClick={() => s && printHTML(statementHTML(s, settings.data?.company ?? {}, profile!.name))}><Icon n="printer" /> Print or PDF</button></div></div>
       {!ledgers.length ? <div className="card"><Empty i="wallet" t={loading ? 'Loading' : 'No ledgers to show'} /></div> : !s ? <div className="card"><Empty i={st.error ? 'alert' : 'refresh'} t={st.error ? (st.error as Error).message : 'Loading the statement'} /></div> : <>
-        <div className="kpis"><Kpi i="clock" l={withOpening ? 'Opening balance' : 'Opening balance (not included)'}><Dual2 b={balTxt(s.brought_forward)} s={`on ${s.from}`} /></Kpi><Kpi i="plus" l="Debits in the period"><Dual2 b={fUSD(s.total_dr)} s={`${s.lines.filter((l) => l.side === 'Dr').length} entries`} /></Kpi>
-          <Kpi i="minus" l="Credits in the period"><Dual2 b={fUSD(s.total_cr)} s={`${s.lines.filter((l) => l.side === 'Cr').length} entries`} /></Kpi><Kpi i="wallet" l="Closing balance" tone="ok"><Dual2 b={balTxt(s.closing)} s={`on ${s.to}`} /></Kpi></div>
-        <div className="card p0"><div className="tw"><table className="t" id="sttable"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th className="r">CDF</th><th className="r">Debit</th><th className="r">Credit</th><th className="r">Balance</th></tr></thead><tbody>
-          {withOpening ? <tr style={{ background: 'var(--bg)' }}><td>{s.from}</td><td /><td><b>Opening balance</b></td><td /><td className="r">{s.brought_forward > 0 ? fUSD(s.brought_forward) : ''}</td><td className="r">{s.brought_forward < 0 ? fUSD(-s.brought_forward) : ''}</td><td className="r"><b>{balTxt(s.brought_forward)}</b></td></tr> : null}
-          {s.lines.map((l) => { run += l.side === 'Dr' ? l.base : -l.base; return <tr key={l.id}><td className="nw">{l.date}</td><td className="nw">{l.no}<div className="code">{VTYPES[l.type]}</div></td><td>{l.narration}{l.memo ? <div className="code">{l.memo}</div> : null}{l.bill_ref ? <div className="code">Bill {l.bill_ref}{l.due_date ? `, due ${l.due_date}` : ''}</div> : null}</td>
-            <td className="r nw">{l.currency === 'FC' ? <>{fCDF(l.amount)}<div className="code">@ {l.rate}</div></> : null}</td><td className="r">{l.side === 'Dr' ? fUSD(l.base) : ''}</td><td className="r">{l.side === 'Cr' ? fUSD(l.base) : ''}</td><td className="r nw">{balTxt(run)}</td></tr>; })}
-          {!s.lines.length ? <tr><td colSpan={7}><Empty i="doc" t="No entries in these dates" /></td></tr> : null}
-          <tr style={{ background: 'var(--bg)' }}><td colSpan={4}><b>Totals and closing balance</b></td><td className="r"><b>{fUSD(s.total_dr)}</b></td><td className="r"><b>{fUSD(s.total_cr)}</b></td><td className="r"><b id="stclose">{balTxt(s.closing)}</b></td></tr>
+        <div className="kpis"><Kpi i="clock" l={withOpening ? 'Opening balance' : 'Opening balance (not included)'}><Dual2 b={balTxt(s.brought_forward)} s={`on ${s.from}`} /></Kpi><Kpi i="plus" l="Debits in the period"><Dual2 b={fUSD(s.total_dr)} s={`${mergeCurrencies(s.lines, (l) => l.no).filter((l) => l.side === 'Dr').length} entries`} /></Kpi>
+          <Kpi i="minus" l="Credits in the period"><Dual2 b={fUSD(s.total_cr)} s={`${mergeCurrencies(s.lines, (l) => l.no).filter((l) => l.side === 'Cr').length} entries`} /></Kpi><Kpi i="wallet" l="Closing balance" tone="ok"><Dual2 b={balTxt(s.closing)} s={`on ${s.to}`} /></Kpi></div>
+        <div className="card p0"><div className="tw"><table className="t" id="sttable"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th className="r">CDF</th><th className="r">USD</th><th className="r">Debit USD</th><th className="r">Credit USD</th><th className="r">Balance</th></tr></thead><tbody>
+          {withOpening ? <tr style={{ background: 'var(--bg)' }}><td>{s.from}</td><td /><td><b>Opening balance</b></td><td /><td /><td className="r">{s.brought_forward > 0 ? fUSD(s.brought_forward) : ''}</td><td className="r">{s.brought_forward < 0 ? fUSD(-s.brought_forward) : ''}</td><td className="r"><b>{balTxt(s.brought_forward)}</b></td></tr> : null}
+          {mergeCurrencies(s.lines, (l) => l.no).map((l) => { run += l.side === 'Dr' ? l.base : -l.base; return <tr key={l.id}><td className="nw">{l.date}</td><td className="nw">{l.no}<div className="code">{VTYPES[l.type]}</div></td><td>{l.narration}{l.memo ? <div className="code">{l.memo}</div> : null}{l.bill_ref ? <div className="code">Bill {l.bill_ref}{l.due_date ? `, due ${l.due_date}` : ''}</div> : null}</td>
+            <td className="r nw">{l.cdf ? <>{fCDF(l.cdf)}<div className="code">@ {l.cdf_rate}</div></> : null}</td><td className="r nw">{l.usd ? fUSD(l.usd) : ''}</td><td className="r">{l.side === 'Dr' ? fUSD(l.base) : ''}</td><td className="r">{l.side === 'Cr' ? fUSD(l.base) : ''}</td><td className="r nw">{balTxt(run)}</td></tr>; })}
+          {!s.lines.length ? <tr><td colSpan={8}><Empty i="doc" t="No entries in these dates" /></td></tr> : null}
+          <tr style={{ background: 'var(--bg)' }}><td colSpan={5}><b>Totals and closing balance</b></td><td className="r"><b>{fUSD(s.total_dr)}</b></td><td className="r"><b>{fUSD(s.total_cr)}</b></td><td className="r"><b id="stclose">{balTxt(s.closing)}</b></td></tr>
         </tbody></table></div></div></>}
     </>
   );

@@ -2,6 +2,7 @@
 // Layouts are those approved on the demo. Printing uses the browser; for one-tap printing at
 // the till, start Chrome with --kiosk-printing and set the receipt printer as default.
 import type { Company, Delivery, Invoice, Product, PromoData, Shop, Statement, VendeurStatement } from './types';
+import { mergeCurrencies } from './vouchers';
 import { ctnTxt, pcValue, stockValue, unitsOf } from './units';
 import { dt, esc, fCDF, fNum, fUSD, sum, toCDF, today } from './format';
 
@@ -248,12 +249,13 @@ const drcr = (n: number) => (Math.abs(n) < 0.005 ? '0.00' : `${fUSD(Math.abs(n))
 export const balTxt = drcr;
 export function statementHTML(st: Statement, c: Company, by: string) {
   let run = st.brought_forward;
-  const rows = st.lines.map((l) => { run += l.side === 'Dr' ? l.base : -l.base; return `<tr><td>${l.date}</td><td>${esc(l.no)}</td><td>${esc(l.narration)}${l.memo ? `<br><small>${esc(l.memo)}</small>` : ''}${l.bill_ref ? `<br><small>Bill ${esc(l.bill_ref)}${l.due_date ? ', due ' + l.due_date : ''}</small>` : ''}</td><td class="r">${l.currency === 'FC' ? fCDF(l.amount) + `<br><small>@ ${l.rate}</small>` : ''}</td><td class="r">${l.side === 'Dr' ? fUSD(l.base) : ''}</td><td class="r">${l.side === 'Cr' ? fUSD(l.base) : ''}</td><td class="r">${drcr(run)}</td></tr>`; }).join('');
+  // a line typed in CDF and USD together is one row again, the two amounts side by side
+  const rows = mergeCurrencies(st.lines, (l) => l.no).map((l) => { run += l.side === 'Dr' ? l.base : -l.base; return `<tr><td>${l.date}</td><td>${esc(l.no)}</td><td>${esc(l.narration)}${l.memo ? `<br><small>${esc(l.memo)}</small>` : ''}${l.bill_ref ? `<br><small>Bill ${esc(l.bill_ref)}${l.due_date ? ', due ' + l.due_date : ''}</small>` : ''}</td><td class="r">${l.cdf ? fCDF(l.cdf) + `<br><small>@ ${l.cdf_rate}</small>` : ''}</td><td class="r">${l.usd ? fUSD(l.usd) : ''}</td><td class="r">${l.side === 'Dr' ? fUSD(l.base) : ''}</td><td class="r">${l.side === 'Cr' ? fUSD(l.base) : ''}</td><td class="r">${drcr(run)}</td></tr>`; }).join('');
   const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(st.account.name)}</b>, ${esc(st.account.group)}</p>
-  <table class="t"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th class="r">CDF</th><th class="r">Debit USD</th><th class="r">Credit USD</th><th class="r">Balance</th></tr></thead><tbody>
-  ${st.with_opening ? `<tr><td>${st.from}</td><td></td><td><b>Opening balance</b></td><td></td><td class="r">${st.brought_forward > 0 ? fUSD(st.brought_forward) : ''}</td><td class="r">${st.brought_forward < 0 ? fUSD(-st.brought_forward) : ''}</td><td class="r">${drcr(st.brought_forward)}</td></tr>` : ''}
-  ${rows || '<tr><td colspan="7">No entries in this period</td></tr>'}
-  <tr><td colspan="4"><b>Totals for the period</b></td><td class="r"><b>${fUSD(st.total_dr)}</b></td><td class="r"><b>${fUSD(st.total_cr)}</b></td><td class="r"><b>${drcr(st.closing)}</b></td></tr></tbody></table>
+  <table class="t"><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th class="r">CDF</th><th class="r">USD</th><th class="r">Debit USD</th><th class="r">Credit USD</th><th class="r">Balance</th></tr></thead><tbody>
+  ${st.with_opening ? `<tr><td>${st.from}</td><td></td><td><b>Opening balance</b></td><td></td><td></td><td class="r">${st.brought_forward > 0 ? fUSD(st.brought_forward) : ''}</td><td class="r">${st.brought_forward < 0 ? fUSD(-st.brought_forward) : ''}</td><td class="r">${drcr(st.brought_forward)}</td></tr>` : ''}
+  ${rows || '<tr><td colspan="8">No entries in this period</td></tr>'}
+  <tr><td colspan="5"><b>Totals for the period</b></td><td class="r"><b>${fUSD(st.total_dr)}</b></td><td class="r"><b>${fUSD(st.total_cr)}</b></td><td class="r"><b>${drcr(st.closing)}</b></td></tr></tbody></table>
   <p style="margin-top:12px">Amounts in USD; lines entered in Francs show the CDF amount and its rate.${st.with_opening ? '' : ' Opening balance not included.'}</p>`;
   return bookHTML(c, 'Statement of account', `${st.from} to ${st.to}`, body, by);
 }
