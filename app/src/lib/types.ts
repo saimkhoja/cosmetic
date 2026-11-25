@@ -61,11 +61,15 @@ export interface PromoReport extends PromoData {
   shop_id: string; shop_name: string; oldest_open: string | null;
   reports: { id: string; month: string; status: 'kept' | 'settled'; n: number; total: number; by_name: string; at: string; data: PromoData }[];
 }
+/** What vendeur_pay answers: amount is what came off the debt, in CDF; the rest says how it was paid. */
+export interface VendeurPaid { id: string; no: string; amount: number; at: string; by_name: string; vendeur: string; before: number; state: VendeurState;
+  paid_usd: number; paid_cdf: number; usd_rate: number | null; change_cdf: number }
 export interface VendeurStatement {
   vendeur: Omit<Vendeur, keyof VendeurState>; from: string; to: string; brought_forward: number; total_dr: number; total_cr: number; closing: number;
   lines: { date: string; no: string; what: string; dr: number; cr: number; due: string | null; invoice_id: string | null }[];
   promos: { id: string; no: string; date: string; value: number; status: 'open' | 'settled'; note: string; invoice: string | null; items: { name: string; unit: string; qty: number; line: number }[] }[];
-  payments: { id: string; no: string; at: string; amount: number; note: string; status: 'ok' | 'cancelled'; by_name: string; cancel_reason: string | null }[];
+  payments: { id: string; no: string; at: string; amount: number; note: string; status: 'ok' | 'cancelled'; by_name: string; cancel_reason: string | null;
+    paid_usd?: number; paid_cdf?: number; usd_rate?: number | null; change_cdf?: number }[];
   state: VendeurState;
 }
 export interface DeliveryItem { product_id: string; qty: number; price_usd: number; received_qty?: number | null }
