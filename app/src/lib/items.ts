@@ -41,7 +41,9 @@ const CATICON: Record<string, string> = { all: 'grid', skin: 'lotion', hair: 'co
 /** Icon for a category the Admin named: matched on the first word. */
 export const catIcon = (c: string) => { const k = c.toLowerCase(); const hit = Object.keys(CATICON).find((x) => k.startsWith(x) || k.includes(' ' + x)); return hit ? CATICON[hit] : 'box'; };
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-export const UPCATS = ['Rent', 'Electricity & fuel', 'Security', 'Salaries', 'Transport', 'Maintenance', 'Taxes & licences', 'Other'];
+/** Expense types in Store upkeep. Each has its own ledger (app.upkeep_acc on the server); Other goes to Other expenses. */
+export const UPCATS = ['Rent', 'Electricity & fuel', 'Security', 'Salaries', 'Local staff salary', 'Overtime', 'Journalier (labour)', 'Transport', 'Local transport',
+  'Moto expense', 'Maintenance', 'Stationery', 'Food expense', 'Taxes & licences', 'Miscellaneous expense', 'Other'];
 /** The most barcodes one item can have (the database allows the same, in app.barcode_list). */
 export const MAX_BARCODES = 60;
 /** An item's barcodes: all of them, or the single one an older database keeps. */

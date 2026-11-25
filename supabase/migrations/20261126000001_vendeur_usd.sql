@@ -343,3 +343,8 @@ begin
   ) into res;
   return res;
 end $$;
+
+revoke execute on all functions in schema public from public, anon;
+revoke execute on all functions in schema app from public, anon;
+grant execute on function public.setup_needed() to anon, authenticated;
+revoke execute on function public.app_setup(uuid, text, text, jsonb) from authenticated;

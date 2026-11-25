@@ -47,7 +47,11 @@ export const useTills = (shopId: string | null | undefined, enabled = true) => u
 /** Shift end reports already printed (the shop's, newest first), without their amounts. */
 export const useShifts = (enabled = true) => useQuery({ queryKey: ['shifts'], enabled, queryFn: async () => rows<{ id: string; device_id: string | null; day: string; shift_no: number; from_at: string; to_at: string; closed_by_name: string }>(await supabase.from('shift_closes').select('id,device_id,day,shift_no,from_at,to_at,closed_by_name').order('to_at', { ascending: false }).limit(60)) });
 export const useAudit = (enabled = true) => useQuery({ queryKey: ['audit'], enabled, queryFn: async () => rows<{ id: number; at: string; username: string; action: string }>(await supabase.from('audit_log').select('*').order('id', { ascending: false }).limit(300)) });
-export const useUpkeep = (enabled = true) => useQuery({ queryKey: ['upkeep'], enabled, queryFn: async () => rows<{ id: string; date: string; category: string; description: string; amount_usd: number; by_name: string; at: string }>(await supabase.from('upkeep').select('*').order('date', { ascending: false }).order('at', { ascending: false }).limit(500)) });
+/** An expense. amount, currency, rate, from_id and voucher_id are kept from the update that made expenses correctable;
+ *  an older expense whose voucher was not found has them empty and cannot be corrected. */
+export interface Upkeep { id: string; date: string; category: string; description: string; amount_usd: number; by_name: string; at: string;
+  amount: number | null; currency: 'USD' | 'FC' | null; rate: number | null; from_id: string | null; voucher_id: string | null; edited_by_name: string | null; edited_at: string | null }
+export const useUpkeep = (enabled = true) => useQuery({ queryKey: ['upkeep'], enabled, queryFn: async () => rows<Upkeep>(await supabase.from('upkeep').select('*').order('date', { ascending: false }).order('at', { ascending: false }).limit(500)) });
 export const useReport = (from: string, to: string, shop: string | null, enabled = true) => useQuery({
   queryKey: ['report', from, to, shop], enabled, queryFn: () => rpc<Report>('sales_report', { p_from: from, p_to: to, p_shop: shop }),
 });
