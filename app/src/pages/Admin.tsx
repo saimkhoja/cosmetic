@@ -11,8 +11,8 @@ import { R } from '../components/Layout';
 import { QtyCell } from './Inventory';
 import { stockValue } from '../lib/units';
 import { DeliveryModal } from './Deliveries';
-import type { Product, Profile, Role, Shop } from '../lib/types';
-import type { PasscodeKind } from '../data/queries';
+import type { Ledger, Product, Profile, Role, Shop } from '../lib/types';
+import type { PasscodeKind, Upkeep } from '../data/queries';
 
 export function AdminHome() {
   const nav = useNavigate();
@@ -52,27 +52,63 @@ export function AdminHome() {
   );
 }
 
+type ExpenseForm = { d: string; c: string; desc: string; amt: string; cur: 'USD' | 'FC'; from: string };
+/** The fields of an expense, the same when recording one and when correcting it. */
+function ExpenseFields({ f, setF, rate, payFrom, cats }: { f: ExpenseForm; setF: (f: ExpenseForm) => void; rate: number; payFrom: Ledger[]; cats: string[] }) {
+  return (<>
+    <div className="frow"><div className="field"><label>Date</label><input type="date" className="input" value={f.d} max={today()} onChange={(e) => setF({ ...f, d: e.target.value })} /></div>
+      <div className="field"><label>Type</label><select className="input" value={f.c} onChange={(e) => setF({ ...f, c: e.target.value })}>{cats.map((c) => <option key={c}>{c}</option>)}</select></div></div>
+    <div className="field"><label>Description</label><input className="input" maxLength={80} value={f.desc} placeholder="e.g. Generator diesel, 200 L" onChange={(e) => setF({ ...f, desc: e.target.value })} /></div>
+    <div className="frow"><div className="field"><label>Amount</label><div style={{ display: 'flex', gap: 6 }}><input type="number" min="0" step="0.01" className="input" value={f.amt} onChange={(e) => setF({ ...f, amt: e.target.value })} /><select className="input" style={{ width: 90 }} value={f.cur} onChange={(e) => setF({ ...f, cur: e.target.value as ExpenseForm['cur'] })}><option>USD</option><option value="FC">CDF</option></select></div>
+      <span className="hint">{Number(f.amt) > 0 ? '= ' + (f.cur === 'USD' ? fCDF(Number(f.amt) * rate) : fUSD(Number(f.amt) / rate)) : ''}</span></div>
+      <div className="field"><label>Paid from</label><select className="input" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })}><option value="">Cash – Head office</option>{payFrom.filter((l) => l.code !== 'CASH_HO').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div></div>
+  </>);
+}
+
 export function Upkeep() {
   const upkeep = useUpkeep(), settings = useSettings(), ledgers = useLedgers(), refresh = useRefresh(), toast = useToast(), a = useAction();
-  const [f, setF] = useState({ d: today(), c: UPCATS[0], desc: '', amt: '', cur: 'USD', from: '' });
+  const [f, setF] = useState<ExpenseForm>({ d: today(), c: UPCATS[0], desc: '', amt: '', cur: 'USD', from: '' }), [edit, setEdit] = useState<Upkeep | null>(null);
   const payFrom = (ledgers.data ?? []).filter((l) => l.active && (l.group_code === 'cash' || l.group_code === 'bank'));
   const rate = bookRate(settings.data), m = today().slice(0, 7), list = upkeep.data ?? [], month = list.filter((u) => u.date.startsWith(m));
-  const byCat = UPCATS.map((c) => ({ name: c, val: sum(month.filter((u) => u.category === c), (u) => u.amount_usd) })).filter((x) => x.val > 0).map((x) => ({ ...x, txt: fUSD(x.val) }));
+  const cats = [...UPCATS, ...new Set(month.map((u) => u.category).filter((c) => !UPCATS.includes(c)))];
+  const byCat = cats.map((c) => ({ name: c, val: sum(month.filter((u) => u.category === c), (u) => u.amount_usd) })).filter((x) => x.val > 0).map((x) => ({ ...x, txt: fUSD(x.val) }));
   const save = () => a.run(async () => { await rpc('add_upkeep', { p_date: f.d, p_category: f.c, p_desc: f.desc, p_amount: Number(f.amt), p_currency: f.cur, p_from: f.from || null }); await refresh('upkeep', 'audit'); setF({ ...f, desc: '', amt: '' }); toast('Expense saved and booked as a payment'); });
   return (
     <>
-      <Head t="Store upkeep" s="Running costs: rent, fuel, wages, transport, paid in USD or Francs. Each one is booked in the accounts as a payment from the cash or bank you choose." />
+      <Head t="Store upkeep" s="Running costs: rent, fuel, wages, transport, paid in USD or Francs. Each one is booked in the accounts as a payment from the cash or bank you choose, and can be corrected afterwards." />
       <div className="kpis"><Kpi i="wallet" l="Total this month" tone="warn"><Dual usd={sum(month, (u) => u.amount_usd)} rate={rate} /></Kpi><Kpi i="receipt" l="Expenses recorded this month"><Dual2 b={month.length} s="entries" /></Kpi></div>
       <div className="cols"><div className="card"><h3><Icon n="plus" /> Record an expense</h3>
-        <div className="frow"><div className="field"><label>Date</label><input type="date" className="input" value={f.d} max={today()} onChange={(e) => setF({ ...f, d: e.target.value })} /></div><div className="field"><label>Type</label><select className="input" value={f.c} onChange={(e) => setF({ ...f, c: e.target.value })}>{UPCATS.map((c) => <option key={c}>{c}</option>)}</select></div></div>
-        <div className="field"><label>Description</label><input className="input" maxLength={80} value={f.desc} placeholder="e.g. Generator diesel, 200 L" onChange={(e) => setF({ ...f, desc: e.target.value })} /></div>
-        <div className="frow"><div className="field"><label>Amount</label><div style={{ display: 'flex', gap: 6 }}><input type="number" min="0" step="0.01" className="input" value={f.amt} onChange={(e) => setF({ ...f, amt: e.target.value })} /><select className="input" style={{ width: 90 }} value={f.cur} onChange={(e) => setF({ ...f, cur: e.target.value })}><option>USD</option><option value="FC">CDF</option></select></div>
-          <span className="hint">{Number(f.amt) > 0 ? '= ' + (f.cur === 'USD' ? fCDF(Number(f.amt) * rate) : fUSD(Number(f.amt) / rate)) : ''}</span></div>
-          <div className="field"><label>Paid from</label><select className="input" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })}><option value="">Cash – Head office</option>{payFrom.filter((l) => l.code !== 'CASH_HO').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div></div>
+        <ExpenseFields f={f} setF={setF} rate={rate} payFrom={payFrom} cats={UPCATS} />
         <div className="lerr">{a.err}</div><button className="btn primary full" disabled={a.busy} onClick={() => void save()}><Icon n="check" /> Save expense</button></div>
         <div className="card"><h3><Icon n="chart" /> This month by type</h3><HList arr={byCat} /></div></div>
-      <div className="card p0"><div className="tw">{list.length ? <table className="t"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Recorded by</th></tr></thead><tbody>{list.map((u) => <tr key={u.id}><td>{u.date}</td><td><span className="chip">{u.category}</span></td><td>{u.description}</td><td><Dual usd={u.amount_usd} rate={rate} /></td><td>{u.by_name}</td></tr>)}</tbody></table> : <Empty i="wallet" t="No expenses recorded yet" />}</div></div>
+      <div className="card p0"><div className="tw">{list.length ? <table className="t" id="upkeeplist"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Recorded by</th><th /></tr></thead><tbody>{list.map((u) => <tr key={u.id}>
+        <td className="nw">{u.date}</td><td><span className="chip">{u.category}</span></td><td>{u.description}</td>
+        <td><Dual usd={u.amount_usd} rate={u.rate || rate} />{u.currency === 'FC' && u.amount ? <div className="code">paid {fCDF(u.amount)}</div> : null}</td>
+        <td>{u.by_name}{u.edited_at ? <div className="code">corrected by {u.edited_by_name}, {dt(u.edited_at)}</div> : null}</td>
+        <td><div className="act"><button title="Correct this expense" aria-label={`Correct the expense ${u.description}`} onClick={() => setEdit(u)}><Icon n="edit" /></button></div></td></tr>)}</tbody></table> : <Empty i="wallet" t="No expenses recorded yet" />}</div></div>
+      {edit ? <UpkeepEditModal u={edit} payFrom={payFrom} rate={rate} onClose={() => setEdit(null)} /> : null}
     </>
+  );
+}
+
+/** Correcting an expense: the same record and the same payment voucher, with the new figures. */
+function UpkeepEditModal({ u, payFrom, rate, onClose }: { u: Upkeep; payFrom: Ledger[]; rate: number; onClose: () => void }) {
+  const refresh = useRefresh(), toast = useToast(), a = useAction(), ledgers = useLedgers();
+  const ho = (ledgers.data ?? []).find((l) => l.code === 'CASH_HO')?.id;
+  const [f, setF] = useState<ExpenseForm>({ d: u.date, c: u.category, desc: u.description, amt: String(u.amount ?? u.amount_usd), cur: u.currency ?? 'USD', from: u.from_id && u.from_id !== ho ? u.from_id : '' });
+  const cats = UPCATS.includes(u.category) ? UPCATS : [...UPCATS, u.category], locked = !u.voucher_id;
+  const save = () => a.run(async () => {
+    if (!(Number(f.amt) > 0)) throw new Error('Enter an amount above zero');
+    await rpc('edit_upkeep', { p: { id: u.id, date: f.d, category: f.c, description: f.desc, amount: Number(f.amt), currency: f.cur, from_id: f.from || null } });
+    await refresh('upkeep', 'audit'); toast('Expense corrected; its payment voucher follows'); onClose();
+  });
+  return (
+    <Modal title="Correct an expense" icon="edit" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="upksave" disabled={a.busy || locked} onClick={() => void save()}><Icon n="check" /> Save changes</button></>}>
+      {locked ? <Note warn i="alert">This expense was saved before expenses could be corrected, and its payment voucher was not found. Record it again, and cancel the old payment under Accounts if it was booked.</Note>
+        : <Note i="receipt">Recorded by {u.by_name} on {dt(u.at)}. Saving corrects this record and its payment voucher in the accounts (same voucher number){u.rate ? `, at the rate it was booked at (1 USD = ${fCDF(u.rate)})` : ''}. The activity log keeps what it was before.</Note>}
+      <ExpenseFields f={f} setF={setF} rate={u.rate || rate} payFrom={payFrom} cats={cats} />
+      <div className="lerr">{a.err}</div>
+    </Modal>
   );
 }
 

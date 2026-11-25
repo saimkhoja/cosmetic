@@ -7,11 +7,11 @@ import { useAuth } from '../auth/AuthProvider';
 import { usePromoReport, useProducts, useRefresh, useSettings, useShops, useStock, useVendeurs } from '../data/queries';
 import { rpc } from '../lib/supabase';
 import { pcValue } from '../lib/units';
-import { dt, fCDF, ld, sum, toCDF, today } from '../lib/format';
+import { bookRate, dt, fCDF, fUSD, ld, sum, toCDF, today } from '../lib/format';
 import { printHTML, promoReportHTML, vendeurPaymentHTML, vendeurStatementHTML } from '../lib/print';
 import { Dual2, Empty, Head, Kpi, Modal, Note, num, useAction, useToast } from '../components/ui';
-import { creditWarnings, ddmm } from '../lib/vendeurs';
-import type { Product, PromoData, PromoReport, Vendeur, VendeurState, VendeurStatement } from '../lib/types';
+import { creditWarnings, ddmm, vendeurPayment } from '../lib/vendeurs';
+import type { Product, PromoData, PromoReport, Vendeur, VendeurPaid, VendeurState, VendeurStatement } from '../lib/types';
 
 const monthOf = (d: string) => d.slice(0, 7) + '-01';
 const monthName = (m: string) => new Date(m + 'T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
@@ -152,30 +152,52 @@ function VendeurForm({ v, onClose }: { v: Vendeur | null; onClose: () => void })
   );
 }
 
+/** A vendeur's payment: Francs, dollars or both. The dollars count at the internal rate, which the Shop Admin can
+ *  change to the taux agreed with the vendeur; dollars worth more than is owed get the rest back in Francs. */
 function PayModal({ v, onClose }: { v: Vendeur; onClose: () => void }) {
   const refresh = useRefresh(), toast = useToast(), a = useAction(), settings = useSettings(), shops = useShops();
-  const [amt, setAmt] = useState(''), [note, setNote] = useState(''), [print, setPrint] = useState(true);
-  const n = num(amt);
+  const book = bookRate(settings.data);
+  const [cdf, setCdf] = useState(''), [usd, setUsd] = useState(''), [typedRate, setRate] = useState<string | null>(null), [note, setNote] = useState(''), [print, setPrint] = useState(true);
+  // the internal rate until the Shop Admin types another taux (it follows the settings if they load after the window opens)
+  const rate = typedRate ?? String(book);
+  const P = vendeurPayment(v.balance, usd, cdf, rate, book), any = P.value > 0;
   const go = () => a.run(async () => {
-    if (!(n > 0) || n % 1) throw new Error('Enter the amount paid in CDF');
-    if (n > v.balance) throw new Error(`${v.name} owes only ${fCDF(v.balance)}`);
-    const r = await rpc<{ no: string; amount: number; at: string; by_name: string; vendeur: string; before: number; state: VendeurState }>('vendeur_pay', { p: { vendeur_id: v.id, amount: n, note } });
+    if (!any) throw new Error('Enter the amount paid, in USD or CDF');
+    if (P.err) throw new Error(P.err);
+    const r = await rpc<VendeurPaid>('vendeur_pay', { p: { vendeur_id: v.id, paid_cdf: P.cdf, paid_usd: P.usd, usd_rate: P.usd > 0 ? P.rate : null, note } });
     const shop = shops.data?.find((s) => s.id === v.shop_id);
     if (print && shop) printHTML(vendeurPaymentHTML(r, settings.data?.company ?? {}, shop));
     await refresh('vendeurs', 'audit', 'report');
-    toast(`Payment ${r.no} from ${v.name}: ${fCDF(r.amount)}. ${r.state.balance > 0 ? `Still owes ${fCDF(r.state.balance)}.` : 'Nothing left to pay.'}`); onClose();
+    toast(`Payment ${r.no} from ${v.name}: ${fCDF(r.amount)}${r.change_cdf ? `, give back ${fCDF(r.change_cdf)}` : ''}. ${r.state.balance > 0 ? `Still owes ${fCDF(r.state.balance)}.` : 'Nothing left to pay.'}`); onClose();
   });
+  const enter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); void go(); } };
   return (
-    <Modal title={`Payment from ${v.name}`} icon="cash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="vpay" disabled={a.busy} onClick={() => void go()}><Icon n="check" /> Take payment</button></>}>
-      <div className="kpis"><Kpi i="wallet" l="Owes" tone="warn"><Dual2 b={fCDF(v.balance)} s={`limit ${fCDF(v.credit_limit)}`} /></Kpi>{v.overdue ? <Kpi i="alert" l="Overdue" tone="bad"><Dual2 b={fCDF(v.overdue_amount)} s={`${v.days_overdue} days`} /></Kpi> : null}</div>
+    <Modal title={`Payment from ${v.name}`} icon="cash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="vpay" disabled={a.busy || !any || !!P.err} onClick={() => void go()}><Icon n="check" /> Take payment</button></>}>
+      <div className="kpis"><Kpi i="wallet" l="Owes" tone="warn"><Dual2 b={fCDF(v.balance)} s={`≈ ${fUSD(P.rate > 0 ? v.balance / P.rate : 0)} · limit ${fCDF(v.credit_limit)}`} /></Kpi>{v.overdue ? <Kpi i="alert" l="Overdue" tone="bad"><Dual2 b={fCDF(v.overdue_amount)} s={`${v.days_overdue} days`} /></Kpi> : null}</div>
       {v.open.length ? <div className="tw" style={{ marginBottom: 12 }}><table className="t" style={{ fontSize: 13.5 }}><thead><tr><th>Goods</th><th>Due</th><th className="r">Still owed</th></tr></thead><tbody>
         {v.open.map((o) => <tr key={o.no}><td>{o.no}<div className="code">{ddmm(o.date)}, {fCDF(o.amount)}</div></td><td>{o.days_overdue ? <span className="chip bad">{ddmm(o.due)}, {o.days_overdue} days late</span> : ddmm(o.due)}</td><td className="r">{fCDF(o.owed)}</td></tr>)}</tbody></table></div> : null}
-      <div className="frow"><div className="field"><label htmlFor="vamt">Amount paid (CDF)</label><input id="vamt" className="input" type="number" min="1" step="1" value={amt} onChange={(e) => setAmt(e.target.value)} autoFocus />
-        <span className="hint"><button type="button" className="linkbtn" onClick={() => setAmt(String(v.balance))}>Pays it all: {fCDF(v.balance)}</button></span></div>
-        <div className="field"><label htmlFor="vnote">Note</label><input id="vnote" className="input" maxLength={120} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" /></div></div>
-      {n > 0 && n <= v.balance ? <Note i="check">After this payment {v.name} owes {fCDF(v.balance - n)}; credit left {fCDF(v.available + n)}. The oldest goods are paid first.</Note> : null}
+      <div className="frow">
+        <div className="field"><label htmlFor="vamt">CDF received</label><input id="vamt" className="input" type="number" min="0" step="50" inputMode="numeric" value={cdf} onChange={(e) => setCdf(e.target.value)} onKeyDown={enter} placeholder="0" autoFocus /></div>
+        <div className="field"><label htmlFor="vusd">USD received</label><input id="vusd" className="input" type="number" min="0" step="1" inputMode="decimal" value={usd} onChange={(e) => setUsd(e.target.value)} onKeyDown={enter} placeholder="0" /></div>
+      </div>
+      <div className="cnotes">
+        <button type="button" className={!usd && P.cdf === v.balance ? 'on' : ''} onClick={() => { setCdf(String(v.balance)); setUsd(''); }}>All in CDF: {fCDF(v.balance)}</button>
+        {P.allUsd > 0 ? <button type="button" className={!cdf && P.usd === P.allUsd ? 'on' : ''} onClick={() => { setUsd(String(P.allUsd)); setCdf(''); }}>All in USD: ${P.allUsd}</button> : null}
+      </div>
+      <div className="field"><label htmlFor="vrate">Taux: 1 USD in CDF{P.typed ? <span className="chip warn" style={{ marginLeft: 6 }}>typed by hand</span> : null}</label>
+        <input id="vrate" className="input" type="number" min="1" step="1" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} onKeyDown={enter} />
+        <span className="hint">{Number(rate) !== book
+          ? <>The internal rate is {fCDF(book)}. <button type="button" className="linkbtn" onClick={() => setRate(null)}>Use the internal rate</button></>
+          : 'The internal rate. Type the taux agreed with the vendeur if it is different.'}</span></div>
+      <div id="vpaysum" className={`paychange ${!any ? '' : P.err ? 'bad' : 'ok'}`}>
+        <span>{!any ? 'Paid' : P.err ? 'Check the payment' : P.change ? 'Change to give' : 'Paid'}</span>
+        <b>{!any ? '-' : P.err ? '' : P.change ? fCDF(P.change) : fCDF(P.amount)}</b></div>
+      {any && P.err ? <Note warn i="alert">{P.err}</Note> : null}
+      {any && !P.err ? <Note i="check">{P.usd > 0 ? <>{fUSD(P.usd)} at {fCDF(P.rate)} = <b>{fCDF(P.usdFc)}</b>{P.cdf > 0 ? <> + {fCDF(P.cdf)} in Francs</> : null}{P.change ? <>, {fCDF(P.amount)} off the debt</> : null}. </> : null}
+        {P.after > 0 ? <>After this payment {v.name} owes {fCDF(P.after)}; credit left {fCDF(v.available + P.amount)}.</> : <>{v.name} has nothing left to pay.</>} The oldest goods are paid first.</Note> : null}
+      <div className="field"><label htmlFor="vnote">Note</label><input id="vnote" className="input" maxLength={120} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" /></div>
       <label className="switch"><input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} /><span>Print a receipt for the vendeur</span></label>
-      <Note>The money goes into the shop's cash (Francs) and shows on the shift end report.</Note>
+      <Note>Francs go into the shop's cash, dollars into its USD cash; both show on the shift end report.</Note>
       <div className="lerr">{a.err}</div>
     </Modal>
   );
@@ -218,7 +240,7 @@ function StatementModal({ v, onClose }: { v: Vendeur; onClose: () => void }) {
           <tr><td>{ddmm(st.from)}</td><td /><td><b>Brought forward</b></td><td /><td /><td className="r">{fCDF(st.brought_forward)}</td></tr>
           {st.lines.map((l, i) => { run += l.dr - l.cr; return <tr key={i}><td className="nw">{ddmm(l.date)}</td><td className="nw">{l.no}</td><td>{l.what}{l.due ? <div className="code">due {ddmm(l.due)}</div> : null}</td><td className="r nw">{l.dr ? fCDF(l.dr) : ''}</td><td className="r nw">{l.cr ? fCDF(l.cr) : ''}</td><td className="r nw">{fCDF(run)}</td></tr>; })}
           <tr><td colSpan={3}><b>Totals</b></td><td className="r nw"><b>{fCDF(st.total_dr)}</b></td><td className="r nw"><b>{fCDF(st.total_cr)}</b></td><td className="r nw"><b>{fCDF(st.closing)}</b></td></tr></tbody></table></div>
-        {st.payments.length ? <><h3 style={{ marginTop: 16 }}><Icon n="cash" /> Payments</h3><div className="tw"><table className="t" style={{ fontSize: 13.5 }}><tbody>{st.payments.map((x) => <tr key={x.id}><td className="nw">{x.no}<div className="code">{dt(x.at)}, {x.by_name}</div></td><td>{x.note}{x.status === 'cancelled' ? <div className="code bad">Cancelled: {x.cancel_reason}</div> : null}</td>
+        {st.payments.length ? <><h3 style={{ marginTop: 16 }}><Icon n="cash" /> Payments</h3><div className="tw"><table className="t" style={{ fontSize: 13.5 }}><tbody>{st.payments.map((x) => <tr key={x.id}><td className="nw">{x.no}<div className="code">{dt(x.at)}, {x.by_name}</div></td><td>{x.paid_usd ? <div><b>{fUSD(x.paid_usd)}</b> at {fCDF(x.usd_rate ?? 0)}{x.paid_cdf ? ` + ${fCDF(x.paid_cdf)}` : ''}{x.change_cdf ? `, ${fCDF(x.change_cdf)} given back` : ''}</div> : null}{x.note}{x.status === 'cancelled' ? <div className="code bad">Cancelled: {x.cancel_reason}</div> : null}</td>
           <td className="r nw">{x.status === 'cancelled' ? <s>{fCDF(x.amount)}</s> : fCDF(x.amount)}</td><td style={{ width: 1 }}>{x.status === 'ok' ? <button className="btn sm" disabled={a.busy} onClick={() => cancelPay(x.id, x.no)}><Icon n="x" /> Cancel</button> : null}</td></tr>)}</tbody></table></div></> : null}
         {st.promos.length ? <><h3 style={{ marginTop: 16 }}><Icon n="gift" /> Promo items given (not owed)</h3><div className="tw"><table className="t" style={{ fontSize: 13.5 }}><tbody>{st.promos.map((p) => <tr key={p.id}><td className="nw">{p.no}<div className="code">{ddmm(p.date)}{p.invoice ? `, with ${p.invoice}` : ''}</div></td>
           <td>{(p.items ?? []).map((i) => `${i.qty} ${i.unit} ${i.name}`).join(', ')}{p.note ? <div className="code">{p.note}</div> : null}</td><td className="r nw">{fCDF(p.value)}</td>

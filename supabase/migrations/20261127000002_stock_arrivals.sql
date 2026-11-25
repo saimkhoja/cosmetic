@@ -3,12 +3,12 @@
 -- shop gets a "stock arrived" record with its items and quantities. The Shop Admin's app shows it as a notice in the
 -- top right; opening it lists the items, quantities and selling prices, and "Got it" marks it seen. The Shop Admin can
 -- look back at what arrived from the Stock page.
--- Already running QuickSales? Run this file once, after 20261125000002_shop_returns_decided.sql. It keeps your data.
+-- Already running QuickSales? Run this file once, after 20261127000001_upkeep_edit.sql. It keeps your data.
 
 -- stop at once if the update before this one was not run
 do $$ begin
-  if not exists (select 1 from pg_proc where proname = 'decide_return') then
-    raise exception 'Run supabase/migrations/20261125000002_shop_returns_decided.sql (and every earlier file) first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
+  if not exists (select 1 from pg_proc where proname = 'edit_upkeep') then
+    raise exception 'Run supabase/migrations/20261127000001_upkeep_edit.sql (and every earlier file) first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
   end if;
 end $$;
 

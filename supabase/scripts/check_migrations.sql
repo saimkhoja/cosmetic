@@ -1,4 +1,4 @@
--- QuickSales: which database updates (migrations 10 to 42) this installation has.
+-- QuickSales: which database updates (migrations 10 to 44) this installation has.
 -- Paste it into the Supabase SQL Editor and click Run. It only reads; it changes nothing.
 -- Each "MISSING" file must be run, in order. A migration re-creates functions from the newest version it knows, so
 -- after running a missing older file, run every later file again too (they are safe to run twice). For example,
@@ -36,5 +36,7 @@ select step, case when ok then 'done' else 'MISSING: run this file' end as statu
   (39, '20261123000001_stock_in_fix.sql',       exists (select 1 from pg_proc where proname = 'stock_in_shops' and pg_get_functiondef(oid) like '%delete from stock_in_lines where true%')),
   (40, '20261125000001_round_50.sql',           exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'app' and p.proname = 'to_cdf' and pg_get_functiondef(p.oid) like '%/ 50%')),
   (41, '20261125000002_shop_returns_decided.sql', exists (select 1 from pg_proc where proname = 'decide_return')),
-  (42, '20261126000001_stock_arrivals.sql',     exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'stock_arrivals'))
+  (42, '20261126000001_vendeur_usd.sql',         exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'vendeur_payments' and column_name = 'paid_usd')),
+  (43, '20261127000001_upkeep_edit.sql',         exists (select 1 from pg_proc where proname = 'edit_upkeep')),
+  (44, '20261127000002_stock_arrivals.sql',     exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'stock_arrivals'))
 ) as m(n, step, ok) order by n;
