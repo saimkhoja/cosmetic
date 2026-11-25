@@ -9,6 +9,7 @@ import type { Features, Role } from '../lib/types';
 import { getTheme, nextTheme, setTheme, THEME_ICON, THEME_LABEL, type ThemePref } from '../lib/theme';
 import { CartMark } from './Brand';
 import { canSearch, GlobalSearch } from './GlobalSearch';
+import { ArrivalNotice } from './StockArrivals';
 import { clearFind, showFind } from '../lib/search';
 
 export const R: Record<Role, string> = { admin: 'Admin', whop: 'Warehouse Operator', shopadmin: 'Shop Admin', till: 'Till Operator' };
@@ -90,6 +91,8 @@ export default function Layout({ children }: { children: ReactNode }) {
         {/* a new search result opens the tab afresh, so it reads the record's filters from the link */}
         <main ref={main} key={findKey} className={pos ? 'posmain' : ''}>{children}</main>
       </div>
+      {/* the Shop Admin is told when stock is put straight into the shop (no central store); not over the till while selling */}
+      {profile.role === 'shopadmin' && !pos ? <ArrivalNotice /> : null}
     </>
   );
 }

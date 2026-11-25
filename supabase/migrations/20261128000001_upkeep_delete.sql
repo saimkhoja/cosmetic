@@ -2,12 +2,12 @@
 -- Deleting asks for a reason. The expense leaves the list and its payment voucher is cancelled with that reason, so
 -- the money goes back into the cash or bank it was paid from. The voucher stays in Accounts as cancelled, and the
 -- activity log keeps what the expense was. An old expense with no voucher found is only removed from the list.
--- Already running QuickSales? Run this file once, after 20261127000001_upkeep_edit.sql. It changes no data.
+-- Already running QuickSales? Run this file once, after 20261127000002_stock_arrivals.sql. It changes no data.
 
 -- stop at once if the update before this one was not run
 do $$ begin
-  if not exists (select 1 from pg_proc where proname = 'edit_upkeep') then
-    raise exception 'Run supabase/migrations/20261127000001_upkeep_edit.sql (and every earlier file) first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
+  if not exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'stock_arrivals') then
+    raise exception 'Run supabase/migrations/20261127000002_stock_arrivals.sql (and every earlier file) first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
   end if;
 end $$;
 
