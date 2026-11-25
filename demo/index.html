@@ -284,6 +284,8 @@ button.uchip svg{font-size:11px}
 .ubtn b{font-size:16px}
 .ubtn span{color:var(--muted);font-size:12.5px;font-weight:600}
 .ubtn em{font-style:normal;font-weight:900;color:var(--blue);font-size:17px;margin-top:auto}
+.rnd{display:inline-block;margin-left:6px;padding:0 7px;border-radius:999px;background:var(--warn-l);color:var(--warn);font-size:11px;font-weight:800;line-height:1.7;white-space:nowrap;vertical-align:middle}
+.ubtn .rnd{margin:0;align-self:flex-start}
 .rangebar{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
 .rangebar .field{margin:0;min-width:150px}
 .switch{display:flex;gap:10px;align-items:center;margin:4px 0 12px;font-weight:700;font-size:14px}
@@ -320,7 +322,11 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const uid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
 const rate=()=>Number(db.settings.rate)||1;
-const toCDF=usd=>Math.round(usd*rate()/10)*10;
+// Francs rounded UP to the next 50 (4 220 -> 4 250, 4 260 -> 4 300); cents first so float noise does not push a round amount up
+const up50=n=>Math.ceil(Math.round((Number(n)||0)*100)/100/50)*50;
+const toCDF=usd=>up50(usd*rate());
+// the Francs the rounding added, as a small tag beside the price (nothing when it was already round)
+const rnd=usd=>{const by=Math.max(0,Math.round(toCDF(usd)-usd*rate()));return by>0?`<span class="rnd" title="Rounded up by ${by} FC to end in 50 or 00">+${by} rounded</span>`:''};
 const fCDF=n=>Math.round(n).toLocaleString('en-US').replace(/,/g,' ')+' FC';
 const fUSD=n=>(n<0?'-':'')+'$'+Math.abs(Number(n)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const dual=usd=>`<span class="dual"><b>${fUSD(usd)}</b><small>${fCDF(usd*rate())}</small></span>`;
@@ -703,7 +709,7 @@ function invTable(){
   <td><b>${esc(p.name)}</b><div class="code">${p.sku}${p.isBundle?` · mixed set of ${p.piecesPerSet}`:(p.perCarton>1?` · ${p.perCarton} pcs per carton`:'')}</div></td><td>${esc(p.category)}</td>
   <td class="r">${qtyCell(p,p.whQty,p.whQty<=p.reorder?'bad':'ok')}</td>
   ${isAdmin?`<td>${p.isBundle?`${dual(p.costUSD)}<div class="code">per set</div>`:`${dual(p.cartonCostUSD||p.costUSD)}<div class="code">per carton, ${fUSD(p.costUSD)} per pc</div>`}</td>`:''}
-  <td>${u.map(x=>`<div style="white-space:nowrap"><span class="uchip">${esc(unitLabel(x))}</span> <b>${fCDF(toCDF(x.priceUSD))}</b>${isAdmin?` <span class="code">${fUSD(x.priceUSD)}</span>`:''}</div>`).join('')}</td>
+  <td>${u.map(x=>`<div style="white-space:nowrap"><span class="uchip">${esc(unitLabel(x))}</span> <b>${fCDF(toCDF(x.priceUSD))}</b>${isAdmin?` <span class="code">${fUSD(x.priceUSD)}</span>`:''}${rnd(x.priceUSD)}</div>`).join('')}</td>
   ${isAdmin?`<td class="r"><b>${p.priceUSD>0?Math.round((p.priceUSD-p.costUSD)/p.priceUSD*100):0}%</b><div class="code">per ${p.isBundle?'set':'pc'}</div></td>`:''}
   <td><div class="act">${isAdmin?`<button title="Edit item and prices" onclick="openItem('${p.id}')">${ic('edit')}</button>`:`<button title="Receive stock" onclick="openReceive('${p.id}')">${ic('plus')}</button>`}</div></td></tr>`}).join('')}</tbody></table>`;
 }
@@ -797,7 +803,7 @@ function itemForm(){
 }
 function itemPreview(){
   const el=$('#iprev');if(!el)return;const o=itemForm();
-  const row=(u,price,cost)=>price>0?`<tr><td><b>${u}</b></td><td class="r"><b>${fCDF(toCDF(price))}</b></td><td class="r">${fUSD(price)}</td><td class="r">${cost>=0?fUSD(cost):'-'}</td><td class="r">${cost>=0?`<span class="chip ${price<cost?'bad':'ok'}">${Math.round((price-cost)/price*100)}%</span>`:''}</td></tr>`:'';
+  const row=(u,price,cost)=>price>0?`<tr><td><b>${u}</b></td><td class="r nw"><b>${fCDF(toCDF(price))}</b>${rnd(price)}</td><td class="r">${fUSD(price)}</td><td class="r">${cost>=0?fUSD(cost):'-'}</td><td class="r">${cost>=0?`<span class="chip ${price<cost?'bad':'ok'}">${Math.round((price-cost)/price*100)}%</span>`:''}</td></tr>`:'';
   let rows='';
   if(o.isBundle){rows=row('1 set',o.setPrice,o.setCost)+row('1 piece',o.piece,o.setCost>=0&&o.pcs>1?o.setCost/o.pcs:-1)}
   else{const cpc=o.cartonCost>=0&&o.perCarton>1?o.cartonCost/o.perCarton:-1;
@@ -935,7 +941,7 @@ function saveDelivery(){
 }
 function deliveryNote(id){
   const o=db.orders.find(x=>x.id===id),shop=shopOf(o.shopId),c=db.settings.company,r=o.rate||rate(),showUSD=seesCost(),edited=o.edits&&o.edits.length;
-  const cdfOf=u=>Math.round(u*r/10)*10;
+  const cdfOf=u=>up50(u*r);
   const total=sum(o.items,it=>(it.priceUSD??prod(it.pid).priceUSD)*it.qty),totalCDF=sum(o.items,it=>cdfOf(it.priceUSD??prod(it.pid).priceUSD)*it.qty);
   const html=`<div class="doc" id="dn"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2>${esc(c.name)}</h2><div>Central store, ${esc(c.address)}</div><div>RCCM ${esc(c.rccm)}, NIF ${esc(c.nif)}</div></div><div style="text-align:right"><h2>Delivery note${edited?' (REVISED)':''}</h2><div><b>DN-${o.id.slice(4)}</b></div><div>${dt(o.doneAt||o.t)}</div></div></div>
   <hr style="border:0;border-top:1px solid #ccc;margin:14px 0"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><div><b>Deliver to:</b> ${esc(shop.name)}, ${esc(shop.address)}</div><div><b>Rate:</b> 1 USD = ${fCDF(r)}</div></div>
@@ -1289,7 +1295,7 @@ function settingsView(){
   return head('Settings','Company details appear on every customer invoice. The exchange rate sets every shop price in Francs.')
   +`<div class="cols"><div class="card"><h3>${ic('exchange')} Currency and tax</h3>
    <div class="frow"><div class="field"><label>1 USD in Congolese Francs</label><input id="srate" type="number" min="1" class="input" value="${db.settings.rate}"></div><div class="field"><label>VAT (TVA) %</label><input id="svat" type="number" min="0" max="30" class="input" value="${db.settings.vat}"></div></div>
-   <div class="note">${ic('lock')}<div>Shop price = selling price in USD × rate, rounded to the nearest 10 FC. Customer invoices show Francs only; this screen and the reports show both.</div></div></div>
+   <div class="note">${ic('lock')}<div>Shop price = selling price in USD × rate, rounded up to the next 50 FC (4 220 → 4 250, 4 260 → 4 300). Customer invoices show Francs only; this screen and the reports show both.</div></div></div>
   <div class="card"><h3>${ic('store')} Shops</h3><table class="t">${db.shops.map(s=>`<tr><td><b>${esc(s.name)}</b><div class="code">${s.code}, ${esc(s.address)}</div></td></tr>`).join('')}</table>
    <div class="frow" style="margin-top:12px"><div class="field"><label>New shop name</label><input id="shn" class="input" maxlength="40"></div><div class="field"><label>Short code (3 letters)</label><input id="shc" class="input" maxlength="3" style="text-transform:uppercase"></div></div>
    <div class="field"><label>Address</label><input id="sha" class="input" maxlength="80"></div><button class="btn ghost full" onclick="addShop()">${ic('plus')} Add shop</button></div></div>
@@ -1380,7 +1386,7 @@ function pickUnitModal(pid,idx){
   const p=prod(pid),us=unitsOf(p),st=db.shopStock[me.shopId]||{};
   modal(idx>=0?'Change the unit':'How is it sold?',p.isBundle?'gift':'layers',
   `<p><b>${esc(p.name)}</b><br><span class="code">${st[p.id]>=0?st[p.id]:Math.abs(st[p.id])+' on order'} ${esc(p.stockUnit)} in the shop${p.isBundle?`, ${openPcs(me.shopId,p.id)} pieces sold from an open set`:''}</span></p>
-  <div class="ugrid">${us.map((u,i)=>`<button class="ubtn" onclick="${idx>=0?`setUnit(${idx},${i})`:`pickUnit('${pid}',${i})`}"><b>${esc(unitLabel(u))}</b><span>${unitNote(p,u)}</span><em>${fCDF(toCDF(u.priceUSD))}</em></button>`).join('')}</div>
+  <div class="ugrid">${us.map((u,i)=>`<button class="ubtn" onclick="${idx>=0?`setUnit(${idx},${i})`:`pickUnit('${pid}',${i})`}"><b>${esc(unitLabel(u))}</b><span>${unitNote(p,u)}</span><em>${fCDF(toCDF(u.priceUSD))}</em>${rnd(u.priceUSD)}</button>`).join('')}</div>
   ${p.isBundle?`<div class="note">${ic('tag')}<div>The piece price is the last price set by the Admin. It cannot be changed at the shop.</div></div>`:''}`,
   `<button class="btn" onclick="closeModal()">Cancel</button>`);
 }
@@ -1398,7 +1404,7 @@ function pcRows(q){
   const sid=me.shopId,st=db.shopStock[sid]||{},s=(q||'').trim().toLowerCase();
   const list=db.products.filter(p=>st[p.id]!==undefined&&(!s||p.name.toLowerCase().includes(s))).slice(0,40);
   if(!list.length)return empty('search','No item matches');
-  return `<div class="tw"><table class="t"><thead><tr><th>Item</th><th>Unit</th><th class="r">Price</th><th class="r">In shop</th></tr></thead><tbody>${list.map(p=>unitsOf(p).map((u,i)=>`<tr><td>${i===0?`<b>${esc(p.name)}</b>${p.isBundle?'<div class="code">mixed set</div>':''}`:''}</td><td><span class="uchip">${esc(unitLabel(u))}</span>${u.piece?' <span class="code">last price</span>':''}</td><td class="r"><b>${fCDF(toCDF(u.priceUSD))}</b></td><td class="r">${i===0?(st[p.id]<0?Math.abs(st[p.id])+' on order':st[p.id]):''}</td></tr>`).join('')).join('')}</tbody></table></div>`;
+  return `<div class="tw"><table class="t"><thead><tr><th>Item</th><th>Unit</th><th class="r">Price</th><th class="r">In shop</th></tr></thead><tbody>${list.map(p=>unitsOf(p).map((u,i)=>`<tr><td>${i===0?`<b>${esc(p.name)}</b>${p.isBundle?'<div class="code">mixed set</div>':''}`:''}</td><td><span class="uchip">${esc(unitLabel(u))}</span>${u.piece?' <span class="code">last price</span>':''}</td><td class="r nw"><b>${fCDF(toCDF(u.priceUSD))}</b>${rnd(u.priceUSD)}</td><td class="r">${i===0?(st[p.id]<0?Math.abs(st[p.id])+' on order':st[p.id]):''}</td></tr>`).join('')).join('')}</tbody></table></div>`;
 }
 function chg(i,d){
   const l=cart[i];if(!l)return;

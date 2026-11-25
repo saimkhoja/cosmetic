@@ -178,7 +178,7 @@ select t.ok((public.submit_order(jsonb_build_object('id', t.get('ord1'), 'custom
 select t.ok((public.submit_order(jsonb_build_object('id', t.get('ord1'), 'customer', 'Mama Nzuzi', 'items', '[]'::jsonb))->>'status') = 'duplicate', 'an order sent twice is saved once');
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 50, 'an order does not take stock');
 select t.ok((select count(*) from sale_orders) = 1, 'till sees its own order');
-select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000001","device_id":"%s","customer":"X","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion')),
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000001","device_id":"%s","customer":"X","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4600}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion')),
   'permission', 'till cannot complete a sale');
 select t.fails(format($$select public.submit_order('{"id":"%s","customer":"Y","items":[{"product_id":"%s","mult":7,"qty":1}]}')$$, gen_random_uuid(), t.get('lotion')), 'Unit not valid', 'unknown unit refused');
 select t.ok((select count(*) from invoices) = 0, 'till cannot read invoices');
@@ -193,16 +193,16 @@ select t.put('dev2', (public.register_device()->>'id'));
 select t.ok((select code from devices where id = t.get('dev2')::uuid) = 'T2', 'second till is T2');
 select t.ok((select count(*) from sale_orders where status = 'pending') = 2, 'shop admin sees the orders waiting for review');
 select t.put('inv1', gen_random_uuid()::text);
-select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000001","device_id":"%s","customer":"","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion')),
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000001","device_id":"%s","customer":"","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4600}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion')),
   'customer name', 'an invoice needs the customer name');
 -- approve the till's order, as reviewed (same lines)
 select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv1'), 'no', 'GOM-T2-000001', 'device_id', t.get('dev2'), 't', now(), 'rate', 2850, 'vat_rate', 16,
   'customer', 'Mama Nzuzi', 'order_id', t.get('ord1'),
-  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 3, 'price', 4560),
-                             jsonb_build_object('product_id', t.get('brush'), 'piece', true, 'qty', 13, 'price', 5130))))->>'status') = 'ok', 'shop admin approves the order into an invoice');
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 3, 'price', 4600),
+                             jsonb_build_object('product_id', t.get('brush'), 'piece', true, 'qty', 13, 'price', 5150))))->>'status') = 'ok', 'shop admin approves the order into an invoice');
 select t.ok((select status || '/' || (invoice_id = t.get('inv1')::uuid)::text from sale_orders where id = t.get('ord1')::uuid) = 'approved/true', 'order marked approved and linked to the invoice');
 select t.ok((select customer || '/' || prepared_by_name from invoices where id = t.get('inv1')::uuid) = 'Mama Nzuzi/Grace Mbuyi', 'invoice keeps the customer and who prepared it');
-select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000009","device_id":"%s","customer":"Again","order_id":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('ord1'), t.get('lotion')),
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000009","device_id":"%s","customer":"Again","order_id":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4600}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('ord1'), t.get('lotion')),
   'already approved', 'an order is approved once');
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 47, 'stock lowered by 3 pcs on approval');
 select t.ok((select qty || '/' || open_pieces from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('brush')::uuid) = '1/1', '13 pieces open 2 sets: 1 set left, 1 piece sold from the open one');
@@ -222,12 +222,12 @@ select t.ok((select count(*) from invoices) = 2, 'shop admin sees the shop''s in
 select t.ok((select last_seq from devices where id = t.get('dev2')::uuid) = 2, 'till sequence remembered on the server');
 -- edit the approved sale: lotion 3 -> 2, brush pieces 13 -> 1
 select public.edit_invoice(t.get('inv1')::uuid, '[{"line_no":1,"qty":2},{"line_no":2,"qty":1}]', 0, 'Customer returned items');
-select t.ok((select total from invoices where id = t.get('inv1')::uuid) = 2 * 4560 + 5130, 'edited total');
+select t.ok((select total from invoices where id = t.get('inv1')::uuid) = 2 * 4600 + 5150, 'edited total');
 select t.ok((select qty || '/' || open_pieces from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('brush')::uuid) = '2/1', 'brush stock put back: 2 sets, 1 piece sold from the open one');
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = 50 - 3 - 25 + 1, 'lotion stock: 50 received, 3 + 25 sold, 1 returned');
 select t.put('rep', public.sales_report(current_date, current_date)::text);
 select t.ok((t.get('rep')::jsonb->>'n')::int = 2, 'report counts the shop''s 2 invoices');
-select t.ok((t.get('rep')::jsonb->'slips'->0->>'returned')::bigint = (3 * 4560 + 13 * 5130) - (2 * 4560 + 5130), 'day end Return FC = money given back by the edit');
+select t.ok((t.get('rep')::jsonb->'slips'->0->>'returned')::bigint = (3 * 4600 + 13 * 5150) - (2 * 4600 + 5150), 'day end Return FC = money given back by the edit');
 select t.ok((t.get('rep')::jsonb->'slips'->0->>'collected')::bigint - (t.get('rep')::jsonb->'slips'->0->>'returned')::bigint = (t.get('rep')::jsonb->>'total')::bigint, 'Balance FC = invoice value');
 select t.ok(jsonb_array_length(t.get('rep')::jsonb->'slips') = 1, 'shop admin report covers only their shop');
 select t.ok((t.get('rep')::jsonb->'by_day'->0->>'day') = current_date::text and (t.get('rep')::jsonb->'by_day'->0->>'n')::int = 2, 'sales by day: one row per day with its count');
@@ -252,7 +252,7 @@ select t.as('00000000-0000-0000-0000-00000000000c');
 select t.put('lot_before', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid));
 select t.put('inv3', gen_random_uuid()::text);
 select public.submit_invoice(jsonb_build_object('id', t.get('inv3'), 'no', 'GOM-T2-000003', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Maman Rose',
-  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 6, 'qty', 1, 'price', 24230))));
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 6, 'qty', 1, 'price', 24250))));
 select t.ok((select unit || '/' || price_flag::text from invoice_items ii join invoices i on i.id = ii.invoice_id where i.id = t.get('inv3')::uuid) = 'half dzn/false', 'sold by half dozen at the half dozen price');
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('lot_before')::int - 6, 'a half dozen takes 6 pcs');
 select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000004","device_id":"%s","customer":"X","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":48,"qty":1,"price":1000}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('soap')),
@@ -406,13 +406,13 @@ select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-00
 -- change the half dozen line of inv3 to 6 pcs
 select t.put('lot_b', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid));
 select public.edit_invoice(t.get('inv3')::uuid, '[{"line_no":1,"qty":6,"mult":1}]', 0, 'Customer took loose pcs');
-select t.ok((select unit || '/' || price || '/' || qty from invoice_items where invoice_id = t.get('inv3')::uuid) = 'pcs/4560/6', 'edited line changed from half dozen to 6 pcs at the pc price');
-select t.ok((select total from invoices where id = t.get('inv3')::uuid) = 6 * 4560, 'invoice total follows the new unit');
+select t.ok((select unit || '/' || price || '/' || qty from invoice_items where invoice_id = t.get('inv3')::uuid) = 'pcs/4600/6', 'edited line changed from half dozen to 6 pcs at the pc price');
+select t.ok((select total from invoices where id = t.get('inv3')::uuid) = 6 * 4600, 'invoice total follows the new unit');
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('lot_b')::int, 'same 6 pcs leave the stock');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
-select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id where v.source_id = t.get('inv3')::uuid and l.account_id = t.shop_acc('CASH_SHOP', t.get('gom')::uuid)) = 6 * 4560, 'the books follow the edited invoice');
+select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id where v.source_id = t.get('inv3')::uuid and l.account_id = t.shop_acc('CASH_SHOP', t.get('gom')::uuid)) = 6 * 4600, 'the books follow the edited invoice');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
@@ -541,7 +541,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
 select t.fails($$select public.save_settings('{"rate":2850,"vat":16,"features":{"customer_optional":true}}')$$, 'permission', 'only the Admin turns the switches on');
-select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000050","device_id":"%s","customer":"","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion')),
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000050","device_id":"%s","customer":"","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4600}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion')),
   'customer name', 'with the switch off the customer name is still needed');
 reset role;
 set role authenticated;
@@ -558,9 +558,9 @@ set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
 select t.put('inv9', gen_random_uuid()::text);
 select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv9'), 'no', 'GOM-T2-000050', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', '  ',
-  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', (select app_price from (select (round(price_usd * 2850 / 10) * 10)::bigint app_price from products where id = t.get('lotion')::uuid) x)))))->>'status') = 'ok', 'a sale without a customer name is accepted');
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', (select app_price from (select (ceil(price_usd * 2850 / 50) * 50)::bigint app_price from products where id = t.get('lotion')::uuid) x)))))->>'status') = 'ok', 'a sale without a customer name is accepted');
 select t.ok((select customer from invoices where id = t.get('inv9')::uuid) = '', 'the invoice keeps an empty customer');
-select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000051","device_id":"%s","customer":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev2'), repeat('x', 61), t.get('lotion')),
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000051","device_id":"%s","customer":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4600}]}')$$, gen_random_uuid(), t.get('dev2'), repeat('x', 61), t.get('lotion')),
   'too long', 'a customer name is still at most 60 characters');
 reset role;
 set role authenticated;
@@ -577,7 +577,7 @@ reset role;
 -- ===== till operators sell directly when the Admin turns it on =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
-select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000060","device_id":"%s","customer":"A","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4560}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion')),
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T1-000060","device_id":"%s","customer":"A","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4600}]}')$$, gen_random_uuid(), t.get('dev1'), t.get('lotion')),
   'permission', 'with the switch off the till operator cannot sell');
 reset role;
 set role authenticated;
@@ -586,7 +586,7 @@ select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
-select t.put('lot_price', (select (round(price_usd * 2850 / 10) * 10)::bigint::text from products where id = t.get('lotion')::uuid));
+select t.put('lot_price', (select (ceil(price_usd * 2850 / 50) * 50)::bigint::text from products where id = t.get('lotion')::uuid));
 select t.put('inv10', gen_random_uuid()::text);
 select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv10'), 'no', 'GOM-T1-000060', 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Maman Rose',
   'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', t.get('lot_price')::bigint))))->>'status') = 'ok', 'the till operator sells directly when the switch is on');
@@ -675,7 +675,7 @@ reset role;
 -- ===== payment in USD (switch, off by default) =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
-select t.put('lp', (select (round(price_usd * 2850 / 10) * 10)::bigint::text from products where id = t.get('lotion')::uuid));
+select t.put('lp', (select (ceil(price_usd * 2850 / 50) * 50)::bigint::text from products where id = t.get('lotion')::uuid));
 select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000070","device_id":"%s","customer":"A","paid_usd":20,"rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":%s}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion'), t.get('lp')),
   'not turned on', 'with the switch off a payment in USD is refused');
 reset role;
@@ -742,7 +742,7 @@ select t.put('stk0', (select qty::text from shop_stock where shop_id = t.get('go
 select t.put('ord5', gen_random_uuid()::text), t.put('ord6', gen_random_uuid()::text), t.put('ord7', gen_random_uuid()::text);
 create function t.tord(id text, no text, qty int) returns jsonb language sql as $$
   select jsonb_build_object('id', id, 'customer', 'Maman Ngalula', 'no', no, 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16, 't', now(),
-    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', qty, 'price', 4560))) $$;
+    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', qty, 'price', 4600))) $$;
 grant execute on function t.tord(text, text, int) to authenticated;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
@@ -755,7 +755,7 @@ select t.fails(format($$select public.submit_order(t.tord('%s', '%s', 1) || json
 select public.submit_order(t.tord(t.get('ord6'), t.get('tno2'), 2));
 select public.submit_order(t.tord(t.get('ord7'), t.get('tno3'), 1));
 reset role;
-select t.ok((select invoice_no || '/' || total || '/' || rate from sale_orders where id = t.get('ord5')::uuid) = t.get('tno1') || '/9120/2850.00', 'the order keeps the invoice number, the printed total and the rate');
+select t.ok((select invoice_no || '/' || total || '/' || rate from sale_orders where id = t.get('ord5')::uuid) = t.get('tno1') || '/9200/2850.00', 'the order keeps the invoice number, the printed total and the rate');
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('stk0')::int, 'printing the invoice at the till takes no stock');
 select t.ok(not exists (select 1 from invoices where no in (t.get('tno1'), t.get('tno2'), t.get('tno3'))), 'no invoice until the shop admin approves');
 select t.ok((select last_seq from devices where id = t.get('dev1')::uuid) = right(t.get('tno3'), 6)::int, 'the till''s invoice counter is remembered on the server');
@@ -772,13 +772,13 @@ select t.ok((select count(*) || '/' || bool_and(revised_from is null) || '/' || 
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('stk0')::int - 2, 'the stock goes down on approval');
 -- changed at approval (2 pcs to 3): the same number, one invoice, marked changed with the total the till printed
 select t.ok((public.submit_invoice(t.tord(t.get('ord6'), t.get('tno2'), 3) || jsonb_build_object('order_id', t.get('ord6')))->>'revised') = 'true', 'shop admin changes the order and approves it');
-select t.ok((select count(*) || '/' || min(revised_from) || '/' || min(total) from invoices where no = t.get('tno2')) = '1/9120/13680', 'changed at approval: one invoice, same number, the printed total kept');
+select t.ok((select count(*) || '/' || min(revised_from) || '/' || min(total) from invoices where no = t.get('tno2')) = '1/9200/13800', 'changed at approval: one invoice, same number, the printed total kept');
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('lotion')::uuid) = t.get('stk0')::int - 5, 'the stock follows the changed invoice');
 -- rejected: the number printed at the till is void and never becomes an invoice
 select public.reject_order(t.get('ord7')::uuid, 'Customer left');
 select t.ok(not exists (select 1 from invoices where no = t.get('tno3')), 'a rejected order makes no invoice');
 reset role;
-select t.ok(exists (select 1 from audit_log where action like 'Invoice ' || t.get('tno2') || '%changed from 9 120 CDF%'), 'the activity log shows the change at approval');
+select t.ok(exists (select 1 from audit_log where action like 'Invoice ' || t.get('tno2') || '%changed from 9 200 CDF%'), 'the activity log shows the change at approval');
 select t.ok(exists (select 1 from audit_log where action like '%invoice ' || t.get('tno3') || ' printed at the till voided%'), 'rejecting voids the invoice printed at the till');
 
 -- ===== a discount as an amount (its percentage follows from the total) or as a percentage with decimals =====
@@ -787,21 +787,21 @@ select t.put('sno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text,
 select t.put('sno3', (select 'GOM-' || code || '-' || lpad((last_seq + 3)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
 create function t.dsale(no text, extra jsonb) returns jsonb language sql as $$
   select jsonb_build_object('id', gen_random_uuid(), 'no', no, 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Tantine Mado',
-    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 10, 'price', 4560))) || extra $$;
+    'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 10, 'price', 4600))) || extra $$;
 grant execute on function t.dsale(text, jsonb) to authenticated;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
 select public.submit_invoice(t.dsale(t.get('sno1'), '{"disc": 5000}'));
-select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '5000/40600/10.96', 'a discount of 5 000 CDF on 45 600: total 40 600, 10.96%');
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '5000/41000/10.87', 'a discount of 5 000 CDF on 46 000: total 41 000, 10.87%');
 select t.fails(format($$select public.submit_invoice(t.dsale('%s', '{"disc": 14000}'))$$, t.get('sno2')), 'between 0% and 30%', 'a discount amount above 30% is refused');
 select public.submit_invoice(t.dsale(t.get('sno2'), '{"disc_pct": 2.5}'));
-select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno2')) = '1140/44460/2.50', 'a 2.5% discount: 1 140 CDF, rounded to 10 CDF');
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno2')) = '1150/44850/2.50', 'a 2.5% discount: 1 150 CDF, rounded to 10 CDF');
 select public.edit_invoice((select id from invoices where no = t.get('sno1')), '[{"line_no":1,"qty":10}]', 0, 'Discount agreed with the customer', 3000);
-select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '3000/42600/6.58', 'editing the invoice to a 3 000 CDF discount');
+select t.ok((select disc || '/' || total || '/' || disc_pct from invoices where no = t.get('sno1')) = '3000/43000/6.52', 'editing the invoice to a 3 000 CDF discount');
 select t.fails(format($$select public.edit_invoice('%s', '[{"line_no":1,"qty":1}]', 0, 'Fewer items now', 3000)$$, (select id from invoices where no = t.get('sno1'))),
   'between 0% and 30%', 'a discount amount above 30% of the new total is refused on an edit');
 select public.edit_invoice((select id from invoices where no = t.get('sno1')), '[{"line_no":1,"qty":10}]', 5, 'Back to a percentage');
-select t.ok((select disc || '/' || disc_pct from invoices where no = t.get('sno1')) = '2280/5.00', 'editing back to a percentage still works');
+select t.ok((select disc || '/' || disc_pct from invoices where no = t.get('sno1')) = '2300/5.00', 'editing back to a percentage still works');
 reset role;
 -- an amount given while approving the till's invoice counts as a change
 select t.put('tno4', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev1')::uuid));
@@ -811,7 +811,7 @@ select t.as('00000000-0000-0000-0000-00000000000d');
 select public.submit_order(t.tord(t.get('ord8'), t.get('tno4'), 2));
 select t.as('00000000-0000-0000-0000-00000000000c');
 select t.ok((public.submit_invoice(t.tord(t.get('ord8'), t.get('tno4'), 2) || jsonb_build_object('order_id', t.get('ord8'), 'disc', 1000))->>'revised') = 'true', 'a discount given at approval prints the corrected invoice');
-select t.ok((select disc || '/' || total || '/' || revised_from from invoices where no = t.get('tno4')) = '1000/8120/9120', 'the approved invoice keeps the discount and the total the till printed');
+select t.ok((select disc || '/' || total || '/' || revised_from from invoices where no = t.get('tno4')) = '1000/8200/9200', 'the approved invoice keeps the discount and the total the till printed');
 reset role;
 
 -- ===== half and quarter cartons: half and a quarter of the carton price, only when a different number of pcs =====
@@ -821,7 +821,7 @@ select t.put('cream', public.save_product('{"name":"Test cream","category":"Skin
 reset role;
 select t.put('hp', (select app.unit_price(p, 'half ctn', 2850)::text from products p where id = t.get('cream')::uuid));
 select t.put('qp', (select app.unit_price(p, 'quarter ctn', 2850)::text from products p where id = t.get('cream')::uuid));
-select t.ok(t.get('hp')::bigint = 71250 and t.get('qp')::bigint = 35630, 'half carton 71 250 and quarter carton 35 630 CDF: half and a quarter of 142 500, rounded to 10 CDF');
+select t.ok(t.get('hp')::bigint = 71250 and t.get('qp')::bigint = 35650, 'half carton 71 250 and quarter carton 35 650 CDF: half and a quarter of 142 500, rounded up to 50 CDF');
 select t.put('cno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
 select t.put('cno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
 select t.put('stk1', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cream')::uuid));
@@ -1261,7 +1261,7 @@ select public.submit_invoice(t.csale(t.get('dlno1'), jsonb_build_array(jsonb_bui
 select public.submit_invoice(t.csale(t.get('dlno2'), jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 23500))) || '{"rate": 2350}');
 select public.submit_invoice(t.csale(t.get('dlno3'), jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', 23500))) || '{"rate": 2350}');
 reset role;
-update settings set shop_sales_limit_usd = t.get('dlA')::numeric + 20 where id = 1;
+update settings set shop_sales_limit_usd = ceil(t.get('dlA')::numeric * 100) / 100 + 20 where id = 1;  -- the limit is kept to the cent
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
 select t.put('dl1', public.sales_report(current_date, current_date)::text);
