@@ -257,13 +257,15 @@ export function vendeurStatementHTML(st: VendeurStatement, c: Company, by: strin
 }
 
 /** The receipt a vendeur takes away for a payment: the amount, what was owed before and what is still owed. */
-export function vendeurPaymentHTML(x: { no: string; at: string; amount: number; by_name: string; vendeur: string; before: number; state: { balance: number; overdue: boolean; overdue_amount: number } }, c: Company, shop: Shop) {
+export function vendeurPaymentHTML(x: { no: string; at: string; amount: number; by_name: string; vendeur: string; before: number; state: { balance: number; overdue: boolean; overdue_amount: number };
+  paid_usd?: number; paid_cdf?: number; usd_rate?: number | null; change_cdf?: number }, c: Company, shop: Shop) {
   const row = (a: string, b: string) => `<tr><td>${a}</td><td class="r">${b}</td></tr>`;
   return `<div class="receipt inv"><div class="c"><div class="big">${esc((c.name || shop.name).toUpperCase())}</div><div>${esc((shop.address || c.address || '').toUpperCase())}</div>${c.phone ? `<div>Tél: ${esc(c.phone)}</div>` : ''}</div>
   <div class="c"><span class="rbox">REÇU # : ${esc(x.no)}</span></div>
   <div class="rl"><b>Vendeur:</b> ${esc(x.vendeur.toUpperCase())}</div><div class="rl"><b>Date:</b> ${rDate(x.at)}&nbsp;&nbsp; <b>Time:</b> ${rTime(x.at)}</div>
   <table class="rsum">${row('Dû avant', n2(x.before))}</table>
   <div class="rttc"><b>Payé - CDF</b><span class="rbox">${n2(x.amount)}</span></div>
+  ${x.paid_usd ? `<table class="rsum rcash">${row('Payé USD', '$' + n2(x.paid_usd))}${row('<span class="small">Taux</span>', `<span class="small">1 USD = ${n0(x.usd_rate ?? 0)} CDF</span>`)}${row('<span class="small">= CDF</span>', `<span class="small">${n2(Math.round(x.paid_usd * (x.usd_rate ?? 0)))}</span>`)}${x.paid_cdf ? row('Payé CDF', n2(x.paid_cdf)) : ''}${x.change_cdf ? row('<b>Monnaie rendue</b>', `<b>${n2(x.change_cdf)} CDF</b>`) : ''}</table>` : ''}
   <table class="rsum">${row('<b>Reste à payer</b>', `<b>${n2(x.state.balance)}</b>`)}${x.state.overdue ? row('Dont en retard', n2(x.state.overdue_amount)) : ''}</table>
   <div class="rl">Reçu par&nbsp;&nbsp; ${esc(x.by_name)}</div></div>`;
 }

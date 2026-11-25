@@ -720,6 +720,33 @@ select t.fails($$select public.save_rate('other', 3000)$$, 'Unknown rate', 'only
 select t.fails($$select public.save_rate('sales', 0)$$, 'valid exchange rate', 'a rate must be above zero');
 select public.add_upkeep(current_date, 'Transport', 'Fuel paid in Francs', 29500, 'FC', null);
 select t.ok((select amount_usd from upkeep where description = 'Fuel paid in Francs') = 10.00, 'an expense in Francs converts at the internal rate (29 500 / 2 950)');
+-- the new expense types have their own ledgers; an expense is corrected with its voucher
+select public.add_upkeep(current_date, 'Moto expense', 'Moto repair', 5900, 'FC', null);
+select t.put('upk', (select id::text from upkeep where description = 'Moto repair'));
+select t.put('upv', (select v.no from upkeep u join vouchers v on v.id = u.voucher_id where u.id = t.get('upk')::uuid));
+select t.ok((select a.code from upkeep u join voucher_lines l on l.voucher_id = u.voucher_id and l.side = 'Dr' join accounts a on a.id = l.account_id where u.id = t.get('upk')::uuid) = 'EXP_MOTO'
+  and (select source_type from vouchers v join upkeep u on u.voucher_id = v.id where u.id = t.get('upk')::uuid) = 'upkeep', 'a Moto expense is booked to its own ledger, and the voucher follows the expense');
+select t.ok((select count(*) from accounts where code in ('EXP_MISC','EXP_LABOUR','EXP_MOTO','EXP_LOCAL_SALARY','EXP_STATIONERY','EXP_FOOD','EXP_LOCAL_TRANSPORT','EXP_OVERTIME') and group_code = 'indexp') = 8,
+  'eight new expense ledgers under Indirect expenses');
+select t.fails(format($$select public.edit_upkeep('{"id":"%s","date":"%s","category":"Moto expense","description":"Moto repair","amount":5900,"currency":"FC"}')$$, t.get('upk'), current_date), 'Nothing was changed', 'an edit must change something');
+select public.edit_upkeep(jsonb_build_object('id', t.get('upk'), 'date', current_date - 1, 'category', 'Food expense', 'description', 'Lunch for the staff', 'amount', 11800, 'currency', 'FC'));
+select t.ok((select u.category = 'Food expense' and u.description = 'Lunch for the staff' and u.amount_usd = 4.00 and u.date = current_date - 1 and u.edited_by_name is not null
+    and v.no = t.get('upv') and v.date = current_date - 1 and v.narration = 'Food expense: Lunch for the staff'
+  from upkeep u join vouchers v on v.id = u.voucher_id where u.id = t.get('upk')::uuid), 'a corrected expense keeps its record and its voucher number, with the new date, type and text');
+select t.ok((select string_agg(a.code || ':' || l.side || ':' || l.amount || ':' || l.rate, ',' order by l.side desc)
+  from upkeep u join voucher_lines l on l.voucher_id = u.voucher_id join accounts a on a.id = l.account_id where u.id = t.get('upk')::uuid) = 'EXP_FOOD:Dr:11800.00:2950.00,CASH_HO:Cr:11800.00:2950.00',
+  'the voucher is booked to the new type''s ledger at the new amount, at the rate the expense was first booked');
+select t.ok(t.unbalanced() = 0, 'a corrected expense keeps the books balanced');
+select t.ok(exists (select 1 from audit_log where action like 'Expense corrected (voucher ' || t.get('upv') || '): was %Moto expense%; now %Food expense%'), 'the log shows the expense before and after');
+select public.cancel_voucher((select voucher_id from upkeep where id = t.get('upk')::uuid), 'paid twice');
+select t.fails(format($$select public.edit_upkeep('{"id":"%s","date":"%s","category":"Food expense","description":"Lunch","amount":100,"currency":"USD"}')$$, t.get('upk'), current_date), 'was cancelled', 'an expense whose voucher was cancelled is not corrected');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails(format($$select public.edit_upkeep('{"id":"%s","date":"%s","category":"Food expense","description":"Lunch","amount":1,"currency":"USD"}')$$, t.get('upk'), current_date), 'permission', 'only the Admin corrects expenses');
+reset role;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
 select public.enter_bill(jsonb_build_object('supplier_id', t.get('sup'), 'account_id', t.acc('EXP_TRANSPORT'), 'bill_no', 'TR-RATE', 'amount', 5900, 'currency', 'FC'));
 select t.ok((select l.rate from voucher_lines l join vouchers v on v.id = l.voucher_id where l.bill_ref = 'TR-RATE' limit 1) = 2950, 'a supplier bill in Francs uses the internal rate');
 select public.save_rate('sales', 2860);
@@ -1502,6 +1529,38 @@ select t.ok((public.submit_invoice(jsonb_build_object('id', gen_random_uuid(), '
 select t.ok((public.vendeur_pay(jsonb_build_object('vendeur_id', t.get('v_paid'), 'amount', 5700))->'state'->>'balance')::bigint = 0, 'the second vendeur pays it all');
 select t.ok(public.delete_vendeur(t.get('v_paid')::uuid) = 'inactive', 'a vendeur with history that owes nothing is kept, made inactive');
 reset role;
+-- a vendeur pays in dollars and Francs: at the internal rate, or at the taux the Shop Admin types
+select t.put('br', (select coalesce(nullif(book_rate, 0), rate)::text from settings where id = 1));
+select t.put('vslip0', t.slip_today(t.get('gom')::uuid)::text);
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('v_usd', public.save_vendeur('{"name":"Dollar payer","credit_days":7,"credit_limit":100000}')::text);
+select t.ok((public.submit_invoice(jsonb_build_object('id', gen_random_uuid(), 'no', 'GOM-T2-000911', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16,
+  'vendeur_id', t.get('v_usd'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 5, 'price', 5700))))->>'status') = 'ok', 'goods on credit, 28 500 CDF');
+select t.fails(format($$select public.vendeur_pay('{"vendeur_id":"%s","paid_usd":5,"usd_rate":280}')$$, t.get('v_usd')), 'Check the exchange rate', 'a taux with a zero missing is caught');
+select t.fails(format($$select public.vendeur_pay('{"vendeur_id":"%s","paid_usd":1,"paid_cdf":28500}')$$, t.get('v_usd')), 'Francs alone pay', 'no dollars are taken when the Francs already pay it all');
+select t.fails(format($$select public.vendeur_pay('{"vendeur_id":"%s","paid_usd":0,"paid_cdf":0}')$$, t.get('v_usd')), 'Enter the amount paid', 'a payment needs an amount');
+select t.put('vu1', public.vendeur_pay(jsonb_build_object('vendeur_id', t.get('v_usd'), 'paid_usd', 5, 'paid_cdf', 1000))::text);
+select t.ok((t.get('vu1')::jsonb->>'amount')::bigint = 1000 + round(5 * t.get('br')::numeric) and (t.get('vu1')::jsonb->>'usd_rate')::numeric = t.get('br')::numeric
+  and (t.vstate('Dollar payer')->>'balance')::bigint = 28500 - 1000 - round(5 * t.get('br')::numeric),
+  'dollars and Francs together: the dollars count at the internal rate unless another is typed');
+select t.put('vbal', t.vstate('Dollar payer')->>'balance');
+select t.put('vu2', public.vendeur_pay(jsonb_build_object('vendeur_id', t.get('v_usd'), 'paid_usd', 20, 'usd_rate', 2700, 'note', 'agreed taux'))::text);
+select t.ok((t.get('vu2')::jsonb->>'amount')::bigint = t.get('vbal')::bigint and (t.get('vu2')::jsonb->>'change_cdf')::bigint = 54000 - t.get('vbal')::bigint
+  and (t.get('vu2')::jsonb->>'usd_rate')::numeric = 2700 and (t.vstate('Dollar payer')->>'balance')::bigint = 0,
+  'at a taux typed by the Shop Admin; dollars worth more than is owed get the rest back in Francs');
+select t.ok(t.logged('Payment ' || (t.get('vu2')::jsonb->>'no') || ' from vendeur Dollar payer: % ($20.00 at 2700 FC, taux typed by the Shop Admin, % given back)%'), 'the log says the taux was typed and what was given back');
+select t.ok(exists (select 1 from jsonb_array_elements(public.vendeur_statement(t.get('v_usd')::uuid, current_date, current_date)->'lines') l where l->>'what' like 'Payment, $20.00 at 2700 FC, % given back, agreed taux'),
+  'the statement says how the payment was made');
+reset role;
+select t.ok((select sum(l.amount) from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+    where v.source_type = 'vendeur_payment' and v.source_id in ((t.get('vu1')::jsonb->>'id')::uuid, (t.get('vu2')::jsonb->>'id')::uuid)
+      and a.code = 'CASH_SHOP_USD:' || t.get('gom') and l.side = 'Dr' and l.currency = 'USD') = 25
+  and t.unbalanced() = 0, 'the dollars go into the shop''s USD cash and the books stay balanced');
+select t.ok((t.slip_today(t.get('gom')::uuid)->>'collected_usd')::numeric - (t.get('vslip0')::jsonb->>'collected_usd')::numeric = 25
+  and (t.slip_today(t.get('gom')::uuid)->>'collected')::bigint - (t.get('vslip0')::jsonb->>'collected')::bigint = 28500
+  and (t.slip_today(t.get('gom')::uuid)->>'collected_cdf')::bigint - (t.get('vslip0')::jsonb->>'collected_cdf')::bigint = 1000 - (t.get('vu2')::jsonb->>'change_cdf')::bigint,
+  'the shift end slip counts the vendeurs'' dollars in Collected USD and only the Francs kept in Collected CDF');
 -- another shop never sees them
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000e');
@@ -1518,7 +1577,7 @@ reset role;
 update settings set features = features - 'vendeurs' where id = 1;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
-select t.ok(jsonb_array_length(public.vendeur_list()) = 2, 'the Admin sees the vendeurs of every shop');
+select t.ok(jsonb_array_length(public.vendeur_list()) = 3, 'the Admin sees the vendeurs of every shop');
 reset role;
 
 -- ===== no central store: stock added straight into the shops, typed or from the item Excel template =====
