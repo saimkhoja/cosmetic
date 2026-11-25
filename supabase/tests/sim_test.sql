@@ -1636,6 +1636,46 @@ select t.ok(t.transit_of(string_to_array(t.get('dr_refs'), ',')) = 0, 'and nothi
 select t.ok(t.unbalanced() = 0, 'cancelling keeps the books balanced');
 update settings set features = features - 'no_warehouse' where id = 1;
 
+-- ===== no central store: the Shop Admin is told what stock came into the shop =====
+select t.put('arr0', (select count(*)::text from stock_arrivals));
+select t.ok((select count(*) from stock_arrivals where kind = 'stock_in') > 0, 'stock added earlier in these tests left notices too');
+update stock_arrivals set seen_at = now() where seen_at is null;
+update settings set features = features || '{"no_warehouse": true}' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.stock_in_shops(array[t.get('gom'), t.get('lim')]::uuid[],
+  jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 4), jsonb_build_object('product_id', t.get('lotion'), 'qty', 2)), '[]', '', 'Weekly top-up');
+select public.receive_goods(jsonb_build_object('supplier_id', t.get('sup'), 'shop_id', t.get('gom'), 'note', 'Box 2 of 3',
+  'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 5))));
+select t.ok((select count(*) from stock_arrivals) = t.get('arr0')::int + 3, 'each shop gets a notice for stock added to it, and for goods received into it');
+select t.ok((select count(*) from stock_arrivals where seen_at is null) >= 3, 'the Admin sees every notice');
+select t.fails(format($$select public.stock_arrivals_seen(array['%s']::uuid[])$$, (select id from stock_arrivals limit 1)), 'permission', 'only a Shop Admin marks a notice seen');
+-- what the Gombe shop admin sees
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((select count(*) from stock_arrivals where seen_at is null) = 2 and not exists (select 1 from stock_arrivals where shop_id <> t.get('gom')::uuid),
+  'the Shop Admin sees only the notices of their own shop');
+select t.ok((select string_agg(a.kind || ':' || i.qty, ',' order by a.kind) from stock_arrivals a join stock_arrival_items i on i.arrival_id = a.id
+  where i.product_id = t.get('lotion')::uuid and a.seen_at is null) = 'goods_in:5,stock_in:2', 'with each item and the quantity that came in');
+select t.ok((select note || '|' || what from stock_arrivals where kind = 'stock_in' and seen_at is null) = 'Weekly top-up|by hand', 'and the Admin''s note');
+select t.ok((select what from stock_arrivals where kind = 'goods_in' and seen_at is null) like 'GRN-% from Beauty Import SARL', 'goods from a supplier name the receipt');
+select t.put('arr_gom', (select id::text from stock_arrivals where seen_at is null limit 1));
+select t.as('00000000-0000-0000-0000-00000000000e');
+select t.ok((select count(*) from stock_arrivals where seen_at is null) = 1, 'the other shop gets only its own notice');
+select t.ok(public.stock_arrivals_seen(array[t.get('arr_gom')::uuid]) = 0, 'a Shop Admin cannot mark another shop''s notice seen');
+select t.ok(public.stock_arrivals_seen(array(select id from stock_arrivals where seen_at is null)) = 1, 'but marks their own');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok(public.stock_arrivals_seen(array(select id from stock_arrivals where seen_at is null)) = 2, 'the Shop Admin marks what arrived as seen');
+select t.ok(not exists (select 1 from stock_arrivals where seen_at is null) and (select count(*) from stock_arrivals) >= 2, 'the notice goes away, and stays in the history');
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.ok(not exists (select 1 from stock_arrivals), 'a till operator does not see the notices');
+reset role;
+update settings set features = features - 'no_warehouse' where id = 1;
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select public.receive_goods(jsonb_build_object('supplier_id', t.get('sup'), 'lines', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'qty', 1))));
+select t.ok((select count(*) from stock_arrivals) = t.get('arr0')::int + 3, 'goods into the central store tell no shop');
+reset role;
+
 -- ===== admin sees everything; disabled users are shut out =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');

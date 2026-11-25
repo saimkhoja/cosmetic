@@ -3,10 +3,11 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useDeliveries, useInvoices, useOrders, useProducts, useRanks, useRefresh, useReport, useSettings, useShops, useStock, useStockRequests } from '../data/queries';
+import { useArrivals, useDeliveries, useInvoices, useOrders, useProducts, useRanks, useRefresh, useReport, useSettings, useShops, useStock, useStockRequests } from '../data/queries';
 import { rpc } from '../lib/supabase';
 import { ctnTxt, hotSet, hotSort, pcValue, stockValue, totals, unitLabel, unitsOf, type Disc } from '../lib/units';
 import { TicketsModal } from '../components/Tickets';
+import { ArrivalsModal } from '../components/StockArrivals';
 import { dt, fCDF, ld, sum, tm, toCDF, today } from '../lib/format';
 import { printHTML, receiptHTML, stockCountHTML } from '../lib/print';
 import { Dual2, Empty, Head, Kpi, Modal, Note, Tile, useAction, useToast } from '../components/ui';
@@ -50,6 +51,7 @@ export function ShopStock() {
   const sid = profile!.shop_id!;
   const products = useProducts(), stock = useStock(sid), settings = useSettings(), ranks = useRanks(sid), shops = useShops();
   const [tickets, setTickets] = useState(false), [q0, setQ] = useState('');
+  const arrivals = useArrivals(), [received, setReceived] = useState(false);
   const rate = settings.data?.rate ?? 0, at = new Map((stock.data ?? []).map((r) => [r.product_id, r])), hot = hotSet(ranks.data);
   const live = hotSort((products.data ?? []).filter((p) => p.active), ranks.data), ql = q0.trim().toLowerCase();
   const list = live.filter((p) => !ql || (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(ql));
@@ -58,6 +60,7 @@ export function ShopStock() {
     <>
       <Head t="Shop stock" s="Prices come from the Admin and are locked. Items can still be sold when stock reaches zero; the shortage shows here in red. Best sellers of the last 30 days come first."
         a={<><button className="btn ghost" onClick={() => printHTML(stockCountHTML(settings.data?.company ?? {}, shops.data?.find((x) => x.id === sid)?.name ?? 'Shop', profile!.name, [...live].sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name)).map((p) => ({ p, qty: at.get(p.id)?.qty ?? 0 }))))}><Icon n="printer" /> Print stock count sheet</button>
+          {arrivals.data?.length ? <button className="btn" id="stockrecv" onClick={() => setReceived(true)}><Icon n="download" /> Stock received</button> : null}
           <button className="btn primary" onClick={() => setTickets(true)}><Icon n="tag" /> Price tickets</button></>} />
       <div className="kpis" id="stockvalue"><Kpi i="tag" l="Stock at selling price" tone="ok"><Dual2 b={fCDF(v.cdf)} s={`${v.lines} items, ${v.units} units in the shop`} /></Kpi>
         <Kpi i="alert" l="Items running low" tone={low ? 'bad' : ''}><Dual2 b={low} s="5 or fewer left" /></Kpi></div>
@@ -69,6 +72,7 @@ export function ShopStock() {
           <td className="r nw"><b>{q > 0 ? fCDF(toCDF(pcValue(p), rate) * q) : '-'}</b></td>
           <td>{unitsOf(p).map((u, k) => <div key={k} style={{ whiteSpace: 'nowrap' }}><Icon n="lock" /> <b>{fCDF(toCDF(u.usd, rate))}</b> <span className="code">per {unitLabel(u)}</span></div>)}</td></tr>; })}
       </tbody></table> : <Empty i="box" t={products.isLoading ? 'Loading' : 'No items found'} />}</div></div>
+      {received ? <ArrivalsModal list={arrivals.data ?? []} onClose={() => setReceived(false)} /> : null}
       {tickets ? <TicketsModal products={live} rate={rate} shopName={shops.data?.find((x) => x.id === sid)?.name ?? ''} onClose={() => setTickets(false)} /> : null}
     </>
   );

@@ -106,6 +106,11 @@ export interface ShopReturn {
   /** what became of it: received into the central store, or (no central store) the Admin's decision */
   outcome?: 'store' | 'supplier' | 'shop' | 'writeoff' | null; to_shop_id?: string | null; supplier_return_id?: string | null;
 }
+/** Stock added straight into a shop (no central store): the Shop Admin is told what came in. */
+export interface StockArrival {
+  id: string; shop_id: string; kind: 'stock_in' | 'goods_in'; what: string; note: string; by_name: string; at: string; seen_at: string | null; seen_by_name: string | null;
+  stock_arrival_items: { product_id: string; qty: number }[];
+}
 export type Cur = 'USD' | 'FC';
 export interface Ledger {
   id: string; code: string | null; name: string; group_code: string; group_name: string; nature: 'asset' | 'liability' | 'equity' | 'income' | 'expense'; sort: number;

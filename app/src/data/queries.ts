@@ -1,7 +1,7 @@
 // Server reads, cached with TanStack Query. Rows are already filtered by role on the server (RLS).
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase, rows, rpc } from '../lib/supabase';
-import type { Category, Cost, Delivery, Grn, Invoice, Ledger, Product, Profile, Rank, SaleOrder, Settings, Shop, ShopReturn, PromoReport, StockRequest, StockRow, Supplier, SupplierReturn, SupplierReturnValue, Vendeur } from '../lib/types';
+import type { Category, Cost, Delivery, Grn, Invoice, Ledger, Product, Profile, Rank, SaleOrder, Settings, Shop, ShopReturn, PromoReport, StockArrival, StockRequest, StockRow, Supplier, SupplierReturn, SupplierReturnValue, Vendeur } from '../lib/types';
 import type { Report } from '../lib/print';
 
 /** Reads every row of a query, 1000 at a time (Supabase returns at most 1000 per request). */
@@ -61,6 +61,9 @@ export const useCategories = () => useQuery({ queryKey: ['categories'], queryFn:
 export const useRanks = (shopId?: string | null) => useQuery({ queryKey: ['ranks', shopId ?? 'all'], staleTime: 300000, queryFn: () => rpc<Rank[]>('item_ranks', { p_shop: shopId ?? null }) });
 export const useSuppliers = (enabled = true) => useQuery({ queryKey: ['suppliers'], enabled, queryFn: async () => rows<Supplier>(await supabase.from('suppliers').select('*, supplier_items(product_id)').order('name')) });
 export const useGrns = (enabled = true) => useQuery({ queryKey: ['grns'], enabled, queryFn: async () => rows<Grn>(await supabase.from('grns').select('*, grn_items(product_id,qty,std_cost_usd)').order('received_at', { ascending: false }).limit(300)) });
+/** Stock that came into the Shop Admin's shop (no central store), newest first; unseen ones show as a notice. */
+export const useArrivals = (enabled = true) => useQuery({ queryKey: ['arrivals'], enabled, refetchInterval: 30000, queryFn: async () => rows<StockArrival>(await supabase.from('stock_arrivals')
+  .select('*, stock_arrival_items(product_id,qty)').order('at', { ascending: false }).limit(40)) });
 export const useReturns = (enabled = true) => useQuery({ queryKey: ['returns'], enabled, refetchInterval: 30000, queryFn: async () => rows<ShopReturn>(await supabase.from('shop_returns').select('*, return_items(product_id,qty,received_qty)').order('created_at', { ascending: false }).limit(300)) });
 /** Returns to suppliers and claims for goods billed but not received (no values: the warehouse sees no costs). */
 export const useSupplierReturns = (enabled = true) => useQuery({ queryKey: ['sreturns'], enabled, staleTime: 0, refetchInterval: 30000, queryFn: async () => rows<SupplierReturn>(await supabase.from('supplier_returns')
