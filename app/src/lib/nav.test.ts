@@ -19,3 +19,13 @@ describe('menus without a central store', () => {
     expect(paths('admin', {})).toEqual(expect.arrayContaining(['/requests', '/deliveries', '/returns']));
   });
 });
+
+describe('money exchange', () => {
+  it('the Exchange tab shows only when it is turned on in Settings', () => {
+    expect(paths('shopadmin', {})).not.toContain('/exchange');
+    expect(paths('admin', {})).not.toContain('/exchange');
+    expect(paths('shopadmin', { money_exchange: true })).toContain('/exchange');
+    expect(paths('admin', { money_exchange: true })).toContain('/exchange');
+    expect(paths('till', { money_exchange: true })).not.toContain('/exchange');
+  });
+});

@@ -547,7 +547,7 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":true,"barcode":true,"other":true}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false,"vendeurs":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false,"vendeurs":false,"money_exchange":false}'::jsonb, 'the Admin turns both switches on (unknown keys are dropped)');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
@@ -566,11 +566,11 @@ reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings)));
-select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false,"vendeurs":false}'::jsonb,
+select t.ok((select features from settings) = '{"customer_optional":true,"barcode":true,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false,"vendeurs":false,"money_exchange":false}'::jsonb,
   'saving settings without the switches leaves them as they were, so an older app cannot turn one off');
 -- sending a switch as off does turn it off
 select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company', (select company from settings), 'features', '{"customer_optional":false,"barcode":false}'::jsonb));
-select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false,"vendeurs":false}'::jsonb,
+select t.ok((select features from settings) = '{"customer_optional":false,"barcode":false,"till_sells":false,"cash_change":false,"usd_pay":false,"one_copy":false,"no_warehouse":false,"vendeurs":false,"money_exchange":false}'::jsonb,
   'and sending it as off does turn it off');
 reset role;
 
@@ -1577,6 +1577,95 @@ select t.ok((t.slip_today(t.get('gom')::uuid)->>'collected_usd')::numeric - (t.g
   and (t.slip_today(t.get('gom')::uuid)->>'collected')::bigint - (t.get('vslip0')::jsonb->>'collected')::bigint = 28500
   and (t.slip_today(t.get('gom')::uuid)->>'collected_cdf')::bigint - (t.get('vslip0')::jsonb->>'collected_cdf')::bigint = 1000 - (t.get('vu2')::jsonb->>'change_cdf')::bigint,
   'the shift end slip counts the vendeurs'' dollars in Collected USD and only the Francs kept in Collected CDF');
+select t.ok((t.slip_today(t.get('gom')::uuid)->>'vendeur_usd')::numeric - coalesce((t.get('vslip0')::jsonb->>'vendeur_usd')::numeric, 0) = 25
+  and (t.slip_today(t.get('gom')::uuid)->>'vendeur_cdf')::bigint - coalesce((t.get('vslip0')::jsonb->>'vendeur_cdf')::bigint, 0) = 1000 - (t.get('vu2')::jsonb->>'change_cdf')::bigint,
+  'the shift end slip shows the vendeurs'' payments in USD and in CDF');
+select t.ok(exists (select 1 from jsonb_array_elements(t.slip_today(t.get('gom')::uuid)->'vendeurs') v where v->>'name' = 'Dollar payer' and (v->>'usd')::numeric = 25),
+  'the shift end slip lists each vendeur who paid, by name');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('vrep', public.sales_report(current_date, current_date, t.get('gom')::uuid)::text);
+reset role;
+select t.ok(exists (select 1 from jsonb_array_elements(t.get('vrep')::jsonb->'slips'->0->'vendeurs') v where v->>'name' = 'Dollar payer'), 'the day end slip lists them too');
+
+-- ===== money exchange at the counter, and expenses paid from the shop's cash =====
+select t.put('xslip0', t.slip_today(t.get('gom')::uuid)::text);
+select t.put('xbr', (select coalesce(nullif(book_rate, 0), rate)::text from settings where id = 1));
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails($$select public.exchange_money('{"dir":"buy","usd":10}')$$, 'not turned on', 'money exchange is off until the Admin turns it on');
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.fails($$select public.save_settings(jsonb_build_object('rate', (select rate from settings), 'vat', 16, 'company', (select company from settings), 'fx_buy_rate', 3000, 'fx_sell_rate', 2900))$$,
+  'cannot be above the selling rate', 'the buying rate for dollars is not above the selling rate');
+select public.save_settings(jsonb_build_object('rate', (select rate from settings), 'vat', 16, 'company', (select company from settings), 'fx_buy_rate', 2800, 'fx_sell_rate', 2850,
+  'features', jsonb_build_object('money_exchange', true)));
+select t.ok((select fx_buy_rate || '/' || fx_sell_rate || '/' || (features->>'money_exchange') || '/' || (features->>'vendeurs') from settings) = '2800.00/2850.00/true/true',
+  'Settings keep the buying and selling rates and the switch, and the other switches as they were');
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails($$select public.exchange_money('{"dir":"buy","usd":10,"rate":280}')$$, 'Check the exchange rate', 'a rate with a zero missing is caught');
+select t.put('fx1', public.exchange_money('{"dir":"buy","usd":100,"customer":"Passer-by"}')::text);
+select t.ok((t.get('fx1')::jsonb->>'cdf')::bigint = 280000 and (t.get('fx1')::jsonb->>'rate')::numeric = 2800 and (t.get('fx1')::jsonb->>'no') = 'GOM-FX-00001'
+  and (t.get('fx1')::jsonb->>'gain_usd')::numeric = round(100 - 280000 / t.get('xbr')::numeric, 2), 'the shop buys $100 at the buying rate and gives 280 000 CDF; the margin is worked out');
+select t.put('fx2', public.exchange_money('{"dir":"sell","usd":50}')::text);
+select t.ok((t.get('fx2')::jsonb->>'cdf')::bigint = 142500 and (t.get('fx2')::jsonb->>'gain_usd')::numeric = round(142500 / t.get('xbr')::numeric - 50, 2) and (t.get('fx2')::jsonb->>'gain_usd')::numeric < 0,
+  'the shop sells $50 at the selling rate for 142 500 CDF (a loss when that is below the internal rate)');
+select t.ok((public.exchange_money('{"dir":"buy","usd":33.33}')->>'cdf')::bigint = 93300 and (public.exchange_money('{"dir":"sell","usd":33.33}')->>'cdf')::bigint = 95000,
+  'Francs given out are rounded down to 50, Francs taken in rounded up to 50');
+select t.put('fx5', public.exchange_money('{"dir":"buy","usd":20,"rate":2750,"note":"regular customer"}')::text);
+select t.ok((t.get('fx5')::jsonb->>'cdf')::bigint = 55000, 'the Shop Admin can give another rate on one exchange');
+select public.cancel_exchange((t.get('fx5')::jsonb->>'id')::uuid, 'typed twice');
+reset role;
+select t.ok((select status from vouchers where source_type = 'money_exchange' and source_id = (t.get('fx5')::jsonb->>'id')::uuid) = 'cancelled', 'a cancelled exchange cancels its voucher');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((select (x->>'n')::int = 4 and (x->>'bought_usd')::numeric = 133.33 and (x->>'sold_usd')::numeric = 83.33 and (x->>'cdf_out')::bigint = 373300 and (x->>'cdf_in')::bigint = 237500
+  and jsonb_array_length(x->'list') = 5 from public.exchange_list(current_date, current_date) x), 'the list of exchanges and its totals leave out the cancelled one');
+reset role;
+select t.ok(t.unbalanced() = 0 and exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+    where v.source_id = (t.get('fx1')::jsonb->>'id')::uuid and a.code = 'FX_GAIN' and l.side = 'Cr')
+  and exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+    where v.source_id = (t.get('fx2')::jsonb->>'id')::uuid and a.code = 'FX_GAIN' and l.side = 'Dr'),
+  'exchanges move money between the shop''s two cash ledgers; the margin is a gain or a loss, and the books balance');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000d');
+select t.fails($$select public.exchange_money('{"dir":"buy","usd":10}')$$, 'permission', 'a till operator does not change money');
+-- expenses the Admin pays from the shop's cash come off the shop's balance
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.fails(format($$select public.add_upkeep(current_date, 'Food expense', 'Lunch', 10, 'USD', '%s')$$, t.acc('CASH_SHOP:' || t.get('gom'))), 'holds Francs', 'an expense from the shop''s Franc cash is in CDF');
+select public.add_upkeep(current_date, 'Food expense', 'Staff lunch at the shop', 20000, 'FC', t.acc('CASH_SHOP:' || t.get('gom')));
+select public.add_upkeep(current_date, 'Moto expense', 'Moto fuel', 5, 'USD', t.acc('CASH_SHOP_USD:' || t.get('gom')));
+select public.add_upkeep(current_date, 'Rent', 'Head office rent', 50, 'USD', null);
+select t.put('xrep', public.sales_report(current_date, current_date, t.get('gom')::uuid)::text);
+reset role;
+select t.ok((t.slip_today(t.get('gom')::uuid)->>'fx_usd')::numeric - coalesce((t.get('xslip0')::jsonb->>'fx_usd')::numeric, 0) = 133.33 - 83.33
+  and (t.slip_today(t.get('gom')::uuid)->>'fx_cdf')::bigint - coalesce((t.get('xslip0')::jsonb->>'fx_cdf')::bigint, 0) = 237500 - 373300
+  and (t.slip_today(t.get('gom')::uuid)->>'fx_n')::int = 4, 'the shift end slip shows the dollars and Francs exchanged, in and out of the drawer');
+select t.ok((t.slip_today(t.get('gom')::uuid)->>'exp_cdf')::bigint - coalesce((t.get('xslip0')::jsonb->>'exp_cdf')::bigint, 0) = 20000
+  and (t.slip_today(t.get('gom')::uuid)->>'exp_usd')::numeric - coalesce((t.get('xslip0')::jsonb->>'exp_usd')::numeric, 0) = 5,
+  'expenses paid from the shop''s cash are on its shift end slip; one from head office is not');
+select t.ok((t.get('xrep')::jsonb->'slips'->0->>'exp_cdf')::bigint >= 20000 and (t.get('xrep')::jsonb->'slips'->0->>'exp_usd')::numeric >= 5
+  and (t.get('xrep')::jsonb->'slips'->0->>'fx_n')::int = 4, 'the day end slip has the expenses and the exchanges too');
+-- the Admin's cash book of the shop: every move of its two cash drawers, with the balance
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+select t.put('cb', public.cash_book(current_date, current_date, t.get('gom')::uuid)::text);
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.fails(format($$select public.cash_book(current_date, current_date, '%s')$$, t.get('gom')), 'permission', 'the cash book is the Admin''s');
+reset role;
+select t.ok(exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'kind' = 'Shop' and r->>'what' like 'Cash sales (%')
+  and exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'what' = 'Vendeur payment: Dollar payer' and r->>'kind' = 'Credit collection' and (r->>'in_usd')::numeric = 25)
+  and (select count(*) from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'kind' = 'Exchange') = 4
+  and exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'what' = 'Staff lunch at the shop' and r->>'kind' = 'Food expense' and (r->>'out_cdf')::numeric = 20000)
+  and exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'what' = 'Moto fuel' and (r->>'out_usd')::numeric = 5)
+  and not exists (select 1 from jsonb_array_elements(t.get('cb')::jsonb->'rows') r where r->>'what' = 'Head office rent'),
+  'the cash book lists the cash sales, each vendeur''s payment, each exchange and the expenses paid from the shop''s cash; not head office''s');
+select t.ok((t.get('cb')::jsonb->'opening'->>'cdf')::numeric + (select sum((r->>'in_cdf')::numeric - (r->>'out_cdf')::numeric) from jsonb_array_elements(t.get('cb')::jsonb->'rows') r)
+    = (select sum(case when l.side = 'Dr' then l.amount else -l.amount end) from voucher_lines l join vouchers v on v.id = l.voucher_id and v.status = 'posted'
+       where l.account_id = t.acc('CASH_SHOP:' || t.get('gom')) and l.currency = 'FC' and v.date <= current_date)
+  and (t.get('cb')::jsonb->'opening'->>'usd')::numeric + (select sum((r->>'in_usd')::numeric - (r->>'out_usd')::numeric) from jsonb_array_elements(t.get('cb')::jsonb->'rows') r)
+    = (select sum(case when l.side = 'Dr' then l.amount else -l.amount end) from voucher_lines l join vouchers v on v.id = l.voucher_id and v.status = 'posted'
+       where l.account_id = t.acc('CASH_SHOP_USD:' || t.get('gom')) and l.currency = 'USD' and v.date <= current_date),
+  'the cash book ends on what the shop''s two cash ledgers hold');
 -- another shop never sees them
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000e');

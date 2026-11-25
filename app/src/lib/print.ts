@@ -121,6 +121,14 @@ export interface Slip {
   shop_name: string; n: number; value_fc: number; value_usd: number; collected: number; returned: number; collected_usd?: number; collected_cdf?: number;
   /** goods on credit to vendeurs (in the invoice value, not in the cash collected), and the vendeurs' payments (in the cash) */
   on_credit?: number; vendeur_paid?: number;
+  /** the vendeurs' payments split by how they were paid (part of Collected USD and Collected CDF) */
+  vendeur_usd?: number; vendeur_cdf?: number;
+  /** each vendeur who paid: the dollars and the Francs kept */
+  vendeurs?: { name: string; usd: number; cdf: number }[];
+  /** money changed at the counter: net dollars and Francs into the drawer (negative: out), and how many exchanges */
+  fx_usd?: number; fx_cdf?: number; fx_n?: number;
+  /** expenses the Admin paid from this shop's cash, taken off the balance */
+  exp_usd?: number; exp_cdf?: number; exp_n?: number;
   /** from the second shift of the day: today's shift slips added up line by line, and where the first one started */
   day?: Omit<Slip, 'shop_name' | 'day'> & { from: string; shifts: number };
 }
@@ -133,16 +141,27 @@ export function shiftSlipHTML(s: Slip, user: string, day: string, rate: number, 
   const u3 = (n: number) => (Math.round(n * 1000) / 1000).toFixed(3), fc = (n: number) => String(Math.round(n));
   const row = (a: string, b: string | number) => `<tr><td style="white-space:nowrap">${a}</td><td style="white-space:nowrap">: ${b}</td></tr>`;
   const cu = Number(s.collected_usd ?? 0), cc = Number(s.collected_cdf ?? s.collected);
+  const xu = Number(s.fx_usd ?? 0), xc = Number(s.fx_cdf ?? 0), eu = Number(s.exp_usd ?? 0), ec = Number(s.exp_cdf ?? 0);
+  const vu = Number(s.vendeur_usd ?? 0), vc = Number(s.vendeur_cdf ?? (s.vendeur_usd == null ? s.vendeur_paid ?? 0 : 0));
+  const sg = (n: number, f: (n: number) => string) => (n > 0 ? '+' : n < 0 ? '-' : '') + f(Math.abs(n));
   const hr = '<tr><td colspan="2"><hr></td></tr>', bold = (a: string, b: string) => row(a, b).replace('<tr>', '<tr style="font-weight:700;font-size:13.5px">');
   return `<div class="receipt slip"><div class="c" style="font-size:19px;font-weight:700;letter-spacing:.04em;margin:4px 0 6px">Shift End Report</div><table>${hr}
   ${row('Date', when)}${row('User', esc(user))}${row('Shop', esc(s.shop_name))}${extra ? row('Till', esc(extra.till ? 'Till ' + extra.till : 'All tills')) : ''}${extra?.shift ? row('Shift', esc(extra.shift)) : ''}${row('TAUX', fc(rate))}${hr}
   ${row('Total Invoice', s.n)}${row('Invoice Value USD', u3(s.value_usd))}${row('Invoice Value CDF', fc(s.value_fc))}${Number(s.on_credit) ? row('On credit CDF', fc(Number(s.on_credit))) : ''}${hr}
-  ${row('Collected USD', u3(cu))}${row('Collected CDF', fc(cc))}${Number(s.vendeur_paid) ? row('incl. vendeurs CDF', fc(Number(s.vendeur_paid))) : ''}${row('Return USD', u3(0))}${row('Return CDF', fc(s.returned))}${hr}
-  ${bold('Balance USD', u3(cu))}${bold('Balance CDF', fc(cc - s.returned))}${s.day ? daySoFar(s.day, bold, hr, fc) : ''}</table></div>`;
+  ${vu || vc ? vendeurRows(s, cu - vu, cc - vc, row, u3, fc, hr) : ''}${row('Collected USD', u3(cu))}${row('Collected CDF', fc(cc))}${row('Return USD', u3(0))}${row('Return CDF', fc(s.returned))}${hr}
+  ${Number(s.fx_n) || xu || xc ? row('Exchange USD', sg(xu, u3)) + row('Exchange CDF', sg(xc, fc)) : ''}${eu || ec ? row('Expenses USD', sg(-eu, u3)) + row('Expenses CDF', sg(-ec, fc)) : ''}${Number(s.fx_n) || xu || xc || eu || ec ? hr : ''}
+  ${bold('Balance USD', u3(cu + xu - eu))}${bold('Balance CDF', fc(cc - s.returned + xc - ec))}${s.day ? daySoFar(s.day, bold, hr, fc) : ''}</table></div>`;
+}
+/** With vendeurs' payments: the cash sales apart, then each vendeur by name in USD and CDF (only the currencies they paid in). */
+function vendeurRows(s: Slip, saleUsd: number, saleCdf: number, row: (a: string, b: string | number) => string, u3: (n: number) => string, fc: (n: number) => string, hr: string) {
+  const list = (s.vendeurs ?? []).map((v) => (Number(v.usd) ? row(esc(v.name) + ' USD', u3(Number(v.usd))) : '') + (Number(v.cdf) ? row(esc(v.name) + ' CDF', fc(Number(v.cdf))) : '')).join('');
+  return `${row('Cash sales USD', u3(saleUsd))}${row('Cash sales CDF', fc(saleCdf))}<tr><td colspan="2" style="font-weight:700;padding-top:4px">Vendeurs</td></tr>${list || row('Vendeurs USD', u3(Number(s.vendeur_usd ?? 0))) + row('Vendeurs CDF', fc(Number(s.vendeur_cdf ?? 0)))}${hr}`;
 }
 /** From the second shift of the day: one line with the total of the day, which is today's shift slips added up. */
 function daySoFar(d: NonNullable<Slip['day']>, bold: (a: string, b: string) => string, hr: string, fc: (n: number) => string) {
-  return `${hr}${bold('Total of the day', fc(d.value_fc))}`;
+  // the vendeurs' payments of the whole day so far, so the cash they brought shows on every shift's slip
+  const vu = Number(d.vendeur_usd ?? 0), vc = Number(d.vendeur_cdf ?? 0), row = (a: string, b: string) => `<tr><td style="white-space:nowrap">${a}</td><td style="white-space:nowrap">: ${b}</td></tr>`;
+  return `${hr}${bold('Total of the day', fc(d.value_fc))}${vu || vc ? row('Vendeurs today USD', (Math.round(vu * 1000) / 1000).toFixed(3)) + row('Vendeurs today CDF', fc(vc)) : ''}`;
 }
 
 export interface Report {
@@ -279,4 +298,58 @@ export function promoReportHTML(d: PromoData, c: Company, shopName: string, by: 
   <tr><td><b>Total</b></td><td class="r"><b>${d.pcs ?? 0}</b></td></tr></tbody></table>
   <p style="margin-top:10px">Promo items are not invoiced and not owed by the vendeurs.</p>`;
   return bookHTML(c, 'Promo report', m, body, by);
+}
+
+/** A receipt for money changed at the counter. */
+export function exchangeReceiptHTML(x: { no: string; at: string; dir: 'buy' | 'sell'; usd: number; cdf: number; rate: number; customer: string; by_name: string }, c: Company, shop: Shop) {
+  const row = (a: string, b: string) => `<tr><td>${a}</td><td class="r">${b}</td></tr>`, buy = x.dir === 'buy';
+  return `<div class="receipt inv"><div class="c"><div class="big">${esc((c.name || shop.name).toUpperCase())}</div><div>${esc((shop.address || c.address || '').toUpperCase())}</div>${c.phone ? `<div>Tél: ${esc(c.phone)}</div>` : ''}</div>
+  <div class="c"><span class="rbox">CHANGE # : ${esc(x.no)}</span></div>
+  ${x.customer ? `<div class="rl"><b>Client:</b> ${esc(x.customer.toUpperCase())}</div>` : ''}<div class="rl"><b>Date:</b> ${rDate(x.at)}&nbsp;&nbsp; <b>Time:</b> ${rTime(x.at)}</div>
+  <table class="rsum">${row(buy ? 'Reçu USD' : 'Reçu CDF', buy ? '$' + n2(x.usd) : n2(x.cdf))}${row('<span class="small">Taux</span>', `<span class="small">1 USD = ${n0(x.rate)} CDF</span>`)}</table>
+  <div class="rttc"><b>${buy ? 'Rendu - CDF' : 'Rendu - USD'}</b><span class="rbox">${buy ? n2(x.cdf) : '$' + n2(x.usd)}</span></div>
+  <div class="rl">Servi par&nbsp;&nbsp; ${esc(x.by_name)}</div></div>`;
+}
+
+/** The shop's cash book: every move of its two cash drawers (CDF and USD side by side), from cash_book. */
+export interface CashBook {
+  shop_id: string; shop_name: string; from: string; to: string; opening: { cdf: number; usd: number };
+  rows: { date: string; ord: number; what: string; kind: string; in_cdf: number; in_usd: number; out_cdf: number; out_usd: number }[];
+}
+/** The Admin's daily cash report of a shop: cash sales, credit collections, exchanges, expenses and other moves, with the
+ *  running balance in CDF and USD, a total for each day when there are several, and the summary at the end. */
+export function cashBookHTML(cb: CashBook, c: Company, by: string) {
+  const d2 = (d: string) => new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const C = (n: number) => (Math.abs(n) < 0.5 ? '' : fNum(n)), U = (n: number) => (Math.abs(n) < 0.005 ? '' : fUSD(n));
+  const bC = (n: number) => fNum(n), bU = (n: number) => fUSD(n);
+  let bc = Number(cb.opening.cdf), bu = Number(cb.opening.usd);
+  const sum = { sales: [0, 0], credit: [0, 0], fx: [0, 0], exp: [0, 0], other: [0, 0] } as Record<string, [number, number]>;
+  const grp = (o: number) => (o === 1 ? 'sales' : o === 2 ? 'credit' : o === 3 ? 'fx' : o === 4 ? 'exp' : 'other');
+  const days = [...new Set(cb.rows.map((r) => r.date))], many = days.length > 1;
+  const td = (v: string, cls = 'r') => `<td class="${cls}">${v}</td>`;
+  let body = '';
+  if (Math.abs(bc) >= 0.5 || Math.abs(bu) >= 0.005) body += `<tr class="cbbf"><td>${d2(cb.from)}</td><td><b>Brought forward</b></td>${td('')}${td('')}${td('')}${td('')}${td(bC(bc))}${td(bU(bu))}<td></td></tr>`;
+  for (const day of days) {
+    const rows = cb.rows.filter((r) => r.date === day), t = [0, 0, 0, 0];
+    for (const r of rows) {
+      const ic = Number(r.in_cdf), iu = Number(r.in_usd), oc = Number(r.out_cdf), ou = Number(r.out_usd);
+      bc += ic - oc; bu += iu - ou; t[0] += ic; t[1] += iu; t[2] += oc; t[3] += ou;
+      const g = sum[grp(r.ord)]; g[0] += ic - oc; g[1] += iu - ou;
+      body += `<tr><td class="nw">${d2(day)}</td><td>${esc(r.what.toUpperCase())}</td>${td(C(ic))}${td(U(iu))}${td(C(oc))}${td(U(ou))}${td(bC(bc))}${td(bU(bu))}<td>${esc(r.kind.toUpperCase())}</td></tr>`;
+    }
+    if (many) body += `<tr class="cbday"><td></td><td><b>Total ${d2(day)}</b></td>${td(`<b>${C(t[0])}</b>`)}${td(`<b>${U(t[1])}</b>`)}${td(`<b>${C(t[2])}</b>`)}${td(`<b>${U(t[3])}</b>`)}${td(`<b>${bC(bc)}</b>`)}${td(`<b>${bU(bu)}</b>`)}<td></td></tr>`;
+  }
+  if (!cb.rows.length) body += `<tr><td colspan="9">No cash moved in these dates.</td></tr>`;
+  const line = (l: string, k: [number, number], sign = '') => `<tr><td>${l}</td>${td((Math.abs(k[0]) >= 0.5 ? sign : '') + fNum(Math.abs(k[0])))}${td((Math.abs(k[1]) >= 0.005 ? sign : '') + fUSD(Math.abs(k[1])))}</tr>`;
+  const net = (l: string, k: [number, number]) => `<tr><td>${l}</td>${td((k[0] < 0 ? '-' : '+') + fNum(Math.abs(k[0])))}${td((k[1] < 0 ? '-' : '+') + fUSD(Math.abs(k[1])))}</tr>`;
+  const S = `<table class="t cbsum"><thead><tr><th>Summary</th><th class="r">CDF</th><th class="r">USD</th></tr></thead><tbody>
+    ${line('Brought forward', [Number(cb.opening.cdf), Number(cb.opening.usd)])}
+    ${line('+ Cash sales', sum.sales)}${sum.credit[0] || sum.credit[1] ? line('+ Credit sales collected (vendeurs)', sum.credit) : ''}
+    <tr><td><b>Cash collected</b></td>${td(`<b>${fNum(Number(cb.opening.cdf) + sum.sales[0] + sum.credit[0])}</b>`)}${td(`<b>${fUSD(Number(cb.opening.usd) + sum.sales[1] + sum.credit[1])}</b>`)}</tr>
+    ${sum.fx[0] || sum.fx[1] ? net('± Money exchanged', sum.fx) : ''}${sum.exp[0] || sum.exp[1] ? line('- Expenses', [-sum.exp[0], -sum.exp[1]], '-') : ''}${sum.other[0] || sum.other[1] ? net('± Other (cash taken to head office, transfers)', sum.other) : ''}
+    <tr class="cbend"><td><b>Cash in hand at the end</b></td>${td(`<b>${fNum(bc)}</b>`)}${td(`<b>${fUSD(bu)}</b>`)}</tr></tbody></table>`;
+  const table = `<style>.cb td,.cb th{font-size:11.5px;padding:4px 6px}.cb .r{text-align:right;white-space:nowrap}.cb .nw{white-space:nowrap}.cbday td{border-top:1.5px solid #000}.cbsum{max-width:560px;margin-top:16px}.cbsum td,.cbsum th{font-size:12.5px}.cbend td{border-top:2px solid #000}@page{size:A4 landscape}</style>
+    <table class="t cb"><thead><tr><th rowspan="2">Date</th><th rowspan="2">Particulars</th><th colspan="2" class="r">In</th><th colspan="2" class="r">Out</th><th colspan="2" class="r">Balance</th><th rowspan="2">Type</th></tr>
+    <tr><th class="r">CDF</th><th class="r">USD</th><th class="r">CDF</th><th class="r">USD</th><th class="r">CDF</th><th class="r">USD</th></tr></thead><tbody>${body}</tbody></table>${S}`;
+  return bookHTML(c, 'Daily cash report', `${cb.shop_name}, ${cb.from === cb.to ? d2(cb.from) : `${d2(cb.from)} to ${d2(cb.to)}`}`, table, by);
 }

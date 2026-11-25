@@ -4,7 +4,7 @@ import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useCategories, useRefresh, useReport, useSettings, useShifts, useShops, useTills } from '../data/queries';
 import { bookRate, dt, fCDF, fUSD, ld, shortCDF, tm, today } from '../lib/format';
-import { printHTML, reportHTML, shiftSlipHTML, type CategorySales, type Slip } from '../lib/print';
+import { cashBookHTML, printHTML, reportHTML, shiftSlipHTML, type CashBook, type CategorySales, type Slip } from '../lib/print';
 import { Bars, Dual2, Empty, Head, HList, Kpi, Modal, Note, useAction } from '../components/ui';
 import { rpc } from '../lib/supabase';
 import { CategoryChart, unitsText } from '../components/CategoryChart';
@@ -42,13 +42,21 @@ export default function Reports() {
     setAsk(false); setAgain(''); if (action === 'close') void refresh('shifts');
     setDoc({ title: res.shift_no ? `Shift end report, shift ${res.shift_no}` : 'Day end report', html, slip: true }); setTimeout(() => printHTML(html), 400);
   });
+  // the Admin's cash report of one shop: every move of its cash drawers, CDF and USD side by side
+  const cb = useAction();
+  const printCash = () => cb.run(async () => {
+    if (!sid) return;
+    const d = await rpc<CashBook>('cash_book', { p_from: from <= to ? from : to, p_to: from <= to ? to : from, p_shop: sid });
+    const html = cashBookHTML(d, settings.data?.company ?? {}, profile!.name);
+    setDoc({ title: 'Daily cash report', html, slip: false }); setTimeout(() => printHTML(html), 400);
+  });
   const print = () => {
     if (!r) return;
     if (single && !isAdmin) { pa.setErr(''); setCode(''); setAgain(''); setAsk(true); return; }
     if (single) {
       // day end report: one slip per shop (all shops plus a total for the Admin)
       const slips = r.slips.map((s) => shiftSlipHTML(s, profile!.username, from, settings.data?.rate ?? 0));
-      if (r.slips.length > 1) slips.push(shiftSlipHTML({ shop_name: 'All shops', n: r.n, value_fc: r.total, value_usd: r.total_usd, collected: r.slips.reduce((a, s) => a + s.collected, 0), returned: r.slips.reduce((a, s) => a + s.returned, 0), collected_usd: r.slips.reduce((a, s) => a + Number(s.collected_usd ?? 0), 0), collected_cdf: r.slips.reduce((a, s) => a + Number(s.collected_cdf ?? s.collected), 0) }, profile!.username, from, settings.data?.rate ?? 0));
+      if (r.slips.length > 1) slips.push(shiftSlipHTML({ shop_name: 'All shops', n: r.n, value_fc: r.total, value_usd: r.total_usd, collected: r.slips.reduce((a, s) => a + s.collected, 0), returned: r.slips.reduce((a, s) => a + s.returned, 0), collected_usd: r.slips.reduce((a, s) => a + Number(s.collected_usd ?? 0), 0), collected_cdf: r.slips.reduce((a, s) => a + Number(s.collected_cdf ?? s.collected), 0), ...Object.fromEntries((['vendeur_usd', 'vendeur_cdf', 'fx_usd', 'fx_cdf', 'fx_n', 'exp_usd', 'exp_cdf'] as const).map((k) => [k, r.slips.reduce((a, s) => a + Number(s[k] ?? 0), 0)])) }, profile!.username, from, settings.data?.rate ?? 0));
       const html = slips.join('<div class="pagebreak"></div>');
       setDoc({ title: 'Day end report', html, slip: true }); setTimeout(() => printHTML(html), 400);
     } else {
@@ -58,13 +66,15 @@ export default function Reports() {
   };
   return (
     <>
-      <Head t="Sales report" s={isAdmin ? 'Pick the dates, then print. A single day, such as Today, prints the day end report for the shop.' : 'Pick the dates, then print. A single day, such as Today, prints the shift end report for the shop, with the passcode the Admin gave you.'} a={<button className="btn primary" disabled={!r} onClick={print}><Icon n="printer" /> {single ? 'Print day end report' : 'Print or save as PDF'}</button>} />
+      <Head t="Sales report" s={isAdmin ? 'Pick the dates, then print. A single day, such as Today, prints the day end report for the shop. Choose a shop for its cash report: sales, credit collections, exchanges and expenses, in CDF and USD.' : 'Pick the dates, then print. A single day, such as Today, prints the shift end report for the shop, with the passcode the Admin gave you.'} a={isAdmin && sid ? <><button className="btn" disabled={!r} onClick={print}><Icon n="printer" /> {single ? 'Day end slip' : 'Sales report'}</button><button className="btn primary" id="cashrep" disabled={cb.busy} onClick={() => void printCash()}><Icon n="printer" /> Print cash report</button></>
+        : <button className="btn primary" disabled={!r} onClick={print}><Icon n="printer" /> {single ? 'Print day end report' : 'Print or save as PDF'}</button>} />
       <div className="card"><div className="rangebar">
         <div className="field"><label>From</label><input type="date" className="input" value={from} max={today()} onChange={(e) => setFrom(e.target.value)} /></div>
         <div className="field"><label>To</label><input type="date" className="input" value={to} max={today()} onChange={(e) => setTo(e.target.value)} /></div>
         {isAdmin ? <div className="field"><label>Shop</label><select className="input" value={shop} onChange={(e) => setShop(e.target.value)}><option value="all">All shops</option>{(shops.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div> : null}
         <div className="seg">{[['today', 'Today'], ['7', '7 days'], ['30', '30 days'], ['month', 'This month']].map(([k, l]) => <button key={k} onClick={() => setRange(k)}>{l}</button>)}</div>
       </div></div>
+      {cb.err ? <Note warn i="alert">{cb.err}</Note> : null}
       {!r ? <div className="card"><Empty i={rep.error ? 'alert' : 'refresh'} t={rep.error ? (rep.error as Error).message : 'Loading the report'} /></div> : <>
         <div className="kpis">
           <Kpi i="receipt" l="Sales, VAT included" tone="ok"><Dual2 b={fCDF(r.total)} s={`${r.n} invoices${isAdmin ? ', ' + fUSD(r.total_usd) : ''}${r.capped ? ' · up to the shop limit' : ''}`} /></Kpi>
