@@ -100,11 +100,15 @@ export interface SupplierReturn {
   id: string; no: string; supplier_id: string; kind: 'return' | 'short'; grn_id: string | null; reason: string; note: string; status: 'open' | 'settled' | 'cancelled';
   voucher_id: string | null; bill_id: string | null; created_by_name: string; created_at: string; settled_by_name: string | null; settled_at: string | null; cancel_reason: string | null;
   supplier_return_items: { product_id: string; qty: number }[];
+  /** made by the Admin from a shop's return (no central store); cancelling it puts the goods back in that shop */
+  from_return_id?: string | null;
 }
 export interface SupplierReturnValue { id: string; value_usd: number; amount_usd: number; bill_no: string | null }
 export interface ShopReturn {
   id: string; no: string; shop_id: string; reason: string; status: 'pending' | 'received' | 'cancelled'; created_by_name: string; created_at: string;
   received_by_name: string | null; received_at: string | null; received_note: string | null; return_items: { product_id: string; qty: number; received_qty: number | null }[];
+  /** what became of it: received into the central store, or (no central store) the Admin's decision */
+  outcome?: 'store' | 'supplier' | 'shop' | 'writeoff' | null; to_shop_id?: string | null; supplier_return_id?: string | null;
 }
 export type Cur = 'USD' | 'FC';
 export interface Ledger {

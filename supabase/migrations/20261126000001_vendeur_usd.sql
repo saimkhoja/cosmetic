@@ -5,12 +5,12 @@
 -- Francs into its Franc cash, and a dollar taken below the sales rate is booked as an exchange difference, as at the
 -- till. The shift end report, the day end slip and the reports count the vendeurs' dollars in Collected USD.
 -- Payments made before this update were all in Francs and stay as they are.
--- Already running QuickSales? Run this file once, after 20261125000001_round_50.sql. It changes no amounts.
+-- Already running QuickSales? Run this file once, after 20261125000002_shop_returns_decided.sql. It changes no amounts.
 
 -- stop at once if the update before this one was not run
 do $$ begin
-  if not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'app' and p.proname = 'to_cdf' and pg_get_functiondef(p.oid) like '%/ 50%') then
-    raise exception 'Run supabase/migrations/20261125000001_round_50.sql (and every earlier file) first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
+  if not exists (select 1 from pg_proc where proname = 'decide_return') then
+    raise exception 'Run supabase/migrations/20261125000002_shop_returns_decided.sql (and every earlier file) first, then this file. supabase/scripts/check_migrations.sql shows what is missing';
   end if;
 end $$;
 
