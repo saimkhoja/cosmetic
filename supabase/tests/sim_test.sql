@@ -740,10 +740,26 @@ select t.ok(t.unbalanced() = 0, 'a corrected expense keeps the books balanced');
 select t.ok(exists (select 1 from audit_log where action like 'Expense corrected (voucher ' || t.get('upv') || '): was %Moto expense%; now %Food expense%'), 'the log shows the expense before and after');
 select public.cancel_voucher((select voucher_id from upkeep where id = t.get('upk')::uuid), 'paid twice');
 select t.fails(format($$select public.edit_upkeep('{"id":"%s","date":"%s","category":"Food expense","description":"Lunch","amount":100,"currency":"USD"}')$$, t.get('upk'), current_date), 'was cancelled', 'an expense whose voucher was cancelled is not corrected');
+-- deleting an expense cancels its payment voucher; one already cancelled in Accounts is simply removed
+select t.fails(format($$select public.delete_upkeep('%s', '')$$, t.get('upk')), 'short reason', 'deleting an expense needs a reason');
+select t.put('updel1', public.delete_upkeep(t.get('upk')::uuid, 'entered twice')::text);
+select t.ok((t.get('updel1')::jsonb->>'cancelled')::boolean = false and not exists (select 1 from upkeep where id = t.get('upk')::uuid),
+  'an expense whose voucher was already cancelled is removed from the list');
+select public.add_upkeep(current_date, 'Stationery', 'Receipt books', 15, 'USD', null);
+select t.put('upd', (select id::text from upkeep where description = 'Receipt books'));
+select t.put('updv', (select voucher_id::text from upkeep where id = t.get('upd')::uuid));
+select t.put('updel2', public.delete_upkeep(t.get('upd')::uuid, 'bought by the shop, not head office')::text);
+select t.ok((t.get('updel2')::jsonb->>'cancelled')::boolean
+  and (select status = 'cancelled' and cancel_reason = 'Expense deleted: bought by the shop, not head office' from vouchers where id = t.get('updv')::uuid)
+  and not exists (select 1 from upkeep where id = t.get('upd')::uuid), 'deleting an expense cancels its payment voucher, with the reason');
+select t.ok(t.unbalanced() = 0, 'the books stay balanced after deleting an expense');
+select t.ok(exists (select 1 from audit_log where action like 'Expense deleted (voucher % cancelled): %, Stationery, Receipt books: 15.00 USD. Reason: bought by the shop, not head office'),
+  'the log keeps what the deleted expense was and why');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
 select t.fails(format($$select public.edit_upkeep('{"id":"%s","date":"%s","category":"Food expense","description":"Lunch","amount":1,"currency":"USD"}')$$, t.get('upk'), current_date), 'permission', 'only the Admin corrects expenses');
+select t.fails(format($$select public.delete_upkeep('%s', 'not mine')$$, t.get('upk')), 'permission', 'only the Admin deletes expenses');
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
