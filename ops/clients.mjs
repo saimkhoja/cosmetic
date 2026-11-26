@@ -4,6 +4,7 @@
 //
 //   node ops/clients.mjs list [subdomain]       JSON list of clients to work on (all, or the one named)
 //   node ops/clients.mjs db-url <ref> <file>    writes a connection string for that project to <file>
+//   node ops/clients.mjs api-check <ref> <table> asks the project's API (as an anonymous visitor) whether it serves <table>
 //
 // Environment: SUPABASE_ACCESS_TOKEN (a personal access token: supabase.com → Account → Access Tokens)
 //              CONTROL_PROJECT_REF   (the control project's ref)
@@ -54,8 +55,26 @@ async function dbUrl(ref, file) {
   console.log(`Temporary login ${login.role} for ${ref} via ${p.db_host} (valid ${login.ttl_seconds}s)`);
 }
 
+/** Whether the client's API (PostgREST) knows a table: a table it serves answers 200 or "permission denied" to an
+ *  anonymous visitor; one missing from its cache answers PGRST205. Reads nothing (no rights) and changes nothing. */
+async function apiCheck(ref, table) {
+  if (!REF.test(ref || '')) die(`Not a project ref: ${ref}`);
+  if (!/^[a-z_]{1,63}$/.test(table || '')) die('Usage: clients.mjs api-check <ref> <table>');
+  const keys = await api('GET', `/v1/projects/${ref}/api-keys`);
+  const anon = Array.isArray(keys) ? keys.find((k) => k.name === 'anon')?.api_key : null;
+  if (!anon) die(`No public (anon) key found for ${ref}.`);
+  if (inActions) console.log(`::add-mask::${anon}`);
+  const r = await fetch(`https://${ref}.supabase.co/rest/v1/${table}?select=*&limit=0`, { headers: { apikey: anon, Authorization: `Bearer ${anon}` } });
+  const body = await r.text();
+  let code = '';
+  try { code = JSON.parse(body)?.code ?? ''; } catch { /* a list, or not JSON */ }
+  if (r.ok || code === '42501') console.log(`The API serves ${table} (HTTP ${r.status}${code ? `, ${code}` : ''}): the app can read it.`);
+  else die(`The API does NOT serve ${table}: HTTP ${r.status} ${code} ${body.slice(0, 200)}`);
+}
+
 const [cmd, a, b] = process.argv.slice(2);
 if (cmd === 'list') await list(a);
 else if (cmd === 'db-url') await dbUrl(a, b);
+else if (cmd === 'api-check') await apiCheck(a, b);
 else if (cmd) die(`Unknown command: ${cmd}`);
 else die('Usage: clients.mjs list [subdomain] | db-url <ref> <file>');

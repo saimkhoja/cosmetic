@@ -1,5 +1,5 @@
 // Screens shown before the app: not configured, first-run setup, sign in, password change, idle lock.
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { emailFor, invoke, rpc, supabase } from '../lib/supabase';
@@ -7,6 +7,7 @@ import { rememberPassword } from '../offline/pwcache';
 import { useAction } from '../components/ui';
 import { QuickSalesLogo } from '../components/Brand';
 import { FEATURES } from '../components/Features';
+import { checkForUpdate } from '../lib/appupdate';
 
 const pwProblem = (p: string) => (p.length < 10 ? 'Password needs at least 10 characters' : !/[A-Za-z]/.test(p) || !/\d/.test(p) ? 'Password needs letters and numbers' : null);
 
@@ -27,6 +28,8 @@ export function Unconfigured() {
 export function Login() {
   const { signIn } = useAuth();
   const [u, setU] = useState(''), [p, setP] = useState('');
+  // the sign-in page is a safe moment to switch to a new version of the app, so whoever signs in gets the latest
+  useEffect(() => { checkForUpdate('/login'); }, []);
   const a = useAction();
   const go = (e: FormEvent) => { e.preventDefault(); if (!u.trim() || !p) { a.setErr('Enter your username and password'); return; } void a.run(() => signIn(u, p)); };
   return (

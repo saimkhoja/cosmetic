@@ -23,22 +23,16 @@ export const arrivalTotals = (list: Pick<StockArrival, 'stock_arrival_items'>[])
   return { items: items.size, units: sum(list.flatMap((a) => a.stock_arrival_items), (i) => i.qty) };
 };
 
-/** The floating notice, for the Shop Admin; shows while something that arrived is not seen yet. On the till (`till`) it is a
- *  button in the top bar instead, so it never covers the sale. */
-export function ArrivalNotice({ till = false }: { till?: boolean }) {
+/** The floating notice at the top right, for the Shop Admin on every page; shows while something that arrived is not seen yet
+ *  (so the first thing a Shop Admin sees on signing in is stock added while they were away). */
+export function ArrivalNotice() {
   const arr = useArrivals();
   const [later, setLater] = useState<string>(''), [open, setOpen] = useState<StockArrival[] | null>(null);
   const unseen = (arr.data ?? []).filter((a) => !a.seen_at);
   const key = unseen.map((a) => a.id).join(',');
   if (open) return <ArrivalsModal list={open} fresh onClose={() => setOpen(null)} />;
-  if (!unseen.length || (later === key && !till)) return null;
+  if (!unseen.length || later === key) return null;
   const t = arrivalTotals(unseen), one = unseen.length === 1 ? unseen[0] : null;
-  // on the till: a button in the top bar, so nothing covers the sale; it stays until opened
-  if (till) return (
-    <button className="arrival-chip" onClick={() => setOpen(unseen)} title={`New stock arrived: ${t.items} items, ${fNum(t.units)} units. Click to see what came in`} aria-label={`New stock arrived: ${t.items} items, ${fNum(t.units)} units. Open to see the items`} key={key}>
-      <span className="arrival-ic" aria-hidden="true"><Icon n="box" /></span><span className="arrival-chip-t">New stock</span>{unseen.length > 1 ? <b className="arrival-n">{unseen.length}</b> : null}
-    </button>
-  );
   return (
     <div className="arrival" role="status" aria-live="polite" key={key}>
       <button className="arrival-body" onClick={() => setOpen(unseen)} aria-label="New stock arrived. Open to see the items">

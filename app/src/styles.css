@@ -586,17 +586,8 @@ button.uchip svg{font-size:11px}
 @keyframes boxBob{0%,100%{transform:none}50%{transform:translateY(-3px)}}
 @keyframes ringPulse{0%{transform:scale(.85);opacity:.7}80%,100%{transform:scale(1.25);opacity:0}}
 @keyframes spark{0%{transform:translate(-50%,-50%) scale(.4);opacity:0}30%{opacity:1}100%{transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) scale(1);opacity:0}}
-/* on the till: a green button in the top bar */
-.arrival-chip{flex:none;display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 13px 0 5px;border:0;border-radius:13px;background:#0B8A55;color:#fff;font:inherit;font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 0 0 0 rgba(74,222,149,.6);animation:chipIn .55s cubic-bezier(.2,.9,.3,1.3) both,chipGlow 2.4s 1s ease-out infinite}
-.arrival-chip:hover{background:#067647}
-.arrival-chip .arrival-ic{width:32px;height:32px;border-radius:10px;font-size:19px;background:rgba(255,255,255,.95);color:#067647}
-.arrival-chip .arrival-ic::after{display:none}
-.arrival-n{min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#fff;color:#067647;font-size:12px;display:inline-grid;place-items:center}
-@keyframes chipIn{0%{transform:scale(.4);opacity:0}100%{transform:none;opacity:1}}
-@keyframes chipGlow{0%{box-shadow:0 0 0 0 rgba(74,222,149,.65)}70%,100%{box-shadow:0 0 0 10px rgba(74,222,149,0)}}
-@media(max-width:1180px){.arrival-chip-t{display:none}.arrival-chip{padding:0 5px}}
 @media(max-width:560px){.arrival{top:70px;right:16px;left:16px;width:auto}}
-@media(prefers-reduced-motion:reduce){.arrival-chip,.arrival,.arrival-ic svg,.arrival-ic::after,.arrival-ic .spark{animation:none}.arrival-ic .spark{display:none}}
+@media(prefers-reduced-motion:reduce){.arrival,.arrival-ic svg,.arrival-ic::after,.arrival-ic .spark{animation:none}.arrival-ic .spark{display:none}}
 .arrival-sec{margin-bottom:18px}.arrival-sec:last-child{margin-bottom:0}
 .arrival-head{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin-bottom:8px}
 .arrival-q{color:var(--ok);font-size:16px}

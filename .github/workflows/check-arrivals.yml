@@ -1,0 +1,67 @@
+# Checks, for ONE client, whether the Shop Admin's "new stock arrived" notices work: the database side (the update, each
+# shop's Shop Admins and notices, the last stock added) and whether the client's API serves the notices to the app.
+# Read only: it changes nothing. By hand: Actions → Check new-stock notices → Run workflow.
+name: Check new-stock notices
+on:
+  workflow_dispatch:
+    inputs:
+      client:
+        description: 'The client (its subdomain, e.g. sapcongo)'
+        required: true
+permissions:
+  contents: read
+jobs:
+  clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      clients: ${{ steps.list.outputs.clients }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Find the client
+        id: list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          CONTROL_PROJECT_REF: ${{ secrets.CONTROL_PROJECT_REF }}
+          ONLY: ${{ inputs.client }}
+        run: |
+          [ -n "$(echo "$ONLY" | tr -d ' ')" ] || { echo "::error::Name the client"; exit 1; }
+          node ops/clients.mjs list "$ONLY"
+          grep -q '^count=1$' "$GITHUB_OUTPUT" || { echo "::error::No active client called $ONLY"; exit 1; }
+
+  check:
+    needs: clients
+    name: ${{ matrix.client.subdomain }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        client: ${{ fromJSON(needs.clients.outputs.clients) }}
+    env:
+      REF: ${{ matrix.client.ref }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PSQL: /usr/lib/postgresql/17/bin/psql
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: ops/install-pg17.sh
+      - name: Connect
+        env:
+          OWN_URL: ${{ secrets[matrix.client.db_secret] }}
+        run: |
+          echo "## ${{ matrix.client.subdomain }}: new-stock notices" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$OWN_URL" ]; then printf '%s' "$OWN_URL" > "$RUNNER_TEMP/db.url"; else node ops/clients.mjs db-url "$REF" "$RUNNER_TEMP/db.url"; fi
+          chmod 600 "$RUNNER_TEMP/db.url"
+      - name: The database
+        run: ops/check-arrivals.sh "$RUNNER_TEMP/db.url"
+      - name: The API the app reads through
+        run: |
+          r=$(node ops/clients.mjs api-check "$REF" stock_arrivals 2>&1) && ok=1 || ok=0
+          echo "$r"; echo "- $r" >> "$GITHUB_STEP_SUMMARY"
+          [ "$ok" = 1 ]
+      - name: Clean up
+        if: always()
+        run: rm -f "$RUNNER_TEMP/db.url"
