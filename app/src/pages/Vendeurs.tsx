@@ -125,16 +125,24 @@ export default function Vendeurs() {
 }
 
 function VendeurForm({ v, onClose }: { v: Vendeur | null; onClose: () => void }) {
-  const refresh = useRefresh(), toast = useToast(), a = useAction(), b = useAction();
+  const refresh = useRefresh(), toast = useToast(), a = useAction(), b = useAction(), book = bookRate(useSettings().data);
+  // what is owed from before: Francs, dollars at a rate, or both (a vendeur saved before owed Francs only)
+  const oc0 = v ? (v.opening_cdf ?? (v.opening_usd ? 0 : v.opening_balance)) : 0;
   const [f, setF] = useState({ name: v?.name ?? '', phone: v?.phone ?? '', address: v?.address ?? '', notes: v?.notes ?? '', credit_days: String(v?.credit_days ?? 30),
-    credit_limit: v ? String(v.credit_limit) : '', opening_balance: v?.opening_balance ? String(v.opening_balance) : '', active: v?.active ?? true });
+    credit_limit: v ? String(v.credit_limit) : '', opening_cdf: oc0 ? String(oc0) : '', opening_usd: v?.opening_usd ? String(v.opening_usd) : '', active: v?.active ?? true });
+  const [typedRate, setRate] = useState<string | null>(v?.opening_usd && v.opening_rate ? String(v.opening_rate) : null);
+  const orate = Number(typedRate ?? book) || 0, ou = Math.round((num(f.opening_usd) || 0) * 100) / 100, oc = num(f.opening_cdf) || 0;
+  const obTotal = oc + (ou > 0 ? Math.round(ou * orate) : 0), rateOff = ou > 0 && (orate < book / 2 || orate > book * 2);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const save = () => a.run(async () => {
     if (!f.name.trim()) throw new Error('Enter the vendeur name');
     const lim = num(f.credit_limit), days = num(f.credit_days);
     if (!(lim > 0)) throw new Error('Enter the credit limit in CDF');
     if (!(days >= 0 && days <= 365) || days % 1) throw new Error('Credit period must be 0 to 365 days');
-    await rpc('save_vendeur', { p: { id: v?.id ?? null, ...f, credit_limit: lim, credit_days: days, opening_balance: num(f.opening_balance) || 0 } });
+    if (oc < 0 || oc % 1 || ou < 0) throw new Error('Opening balance must be a whole amount of 0 or more');
+    if (rateOff) throw new Error(`Check the rate: ${fCDF(orate)} is far from the internal rate (${fCDF(book)})`);
+    await rpc('save_vendeur', { p: { id: v?.id ?? null, name: f.name, phone: f.phone, address: f.address, notes: f.notes, active: f.active, credit_limit: lim, credit_days: days,
+      opening_cdf: oc, opening_usd: ou, opening_rate: ou > 0 ? orate : null } });
     await refresh('vendeurs', 'audit'); toast(v ? 'Vendeur saved' : `Vendeur ${f.name.trim()} added`); onClose();
   });
   const del = () => b.run(async () => { if (v && await deleteVendeur(v, toast, refresh)) onClose(); });
@@ -144,7 +152,17 @@ function VendeurForm({ v, onClose }: { v: Vendeur | null; onClose: () => void })
       <div className="frow"><div className="field"><label htmlFor="vdays">Credit period (days)</label><input id="vdays" className="input" type="number" min="0" max="365" step="1" value={f.credit_days} onChange={set('credit_days')} /><span className="hint">Goods given are due after this many days</span></div>
         <div className="field"><label htmlFor="vlim">Credit limit (CDF)</label><input id="vlim" className="input" type="number" min="1" step="1" value={f.credit_limit} onChange={set('credit_limit')} /><span className="hint">The most the vendeur should owe at once. Payments bring the credit back.</span></div></div>
       <div className="frow"><div className="field"><label htmlFor="vphone">Phone</label><input id="vphone" className="input" maxLength={30} value={f.phone} onChange={set('phone')} /></div>
-        <div className="field"><label htmlFor="vob">Already owes (CDF)</label><input id="vob" className="input" type="number" min="0" step="1" value={f.opening_balance} placeholder="0" onChange={set('opening_balance')} /><span className="hint">What the vendeur owed before QuickSales, if anything</span></div></div>
+      </div>
+      <div className="card" style={{ background: 'var(--bg)', padding: 12, marginBottom: 12 }} id="vopening"><b>Already owes</b> <span className="code">what the vendeur owed before QuickSales, if anything: in CDF, USD or both</span>
+        <div className="frow" style={{ marginTop: 8 }}>
+          <div className="field"><label htmlFor="vob">CDF</label><input id="vob" className="input" type="number" min="0" step="1" value={f.opening_cdf} placeholder="0" onChange={set('opening_cdf')} /></div>
+          <div className="field"><label htmlFor="vobusd">USD</label><input id="vobusd" className="input" type="number" min="0" step="0.01" value={f.opening_usd} placeholder="0" onChange={set('opening_usd')} /></div>
+          {ou > 0 ? <div className="field"><label htmlFor="vobrate">Taux: 1 USD in CDF{typedRate !== null && Number(typedRate) !== book ? <span className="chip warn" style={{ marginLeft: 6 }}>typed by hand</span> : null}</label>
+            <input id="vobrate" className="input" type="number" min="1" step="1" value={typedRate ?? String(book)} onChange={(e) => setRate(e.target.value)} />
+            <span className="hint">{typedRate !== null && Number(typedRate) !== book ? <button type="button" className="linkbtn" onClick={() => setRate(null)}>Use the internal rate ({fCDF(book)})</button> : 'The internal rate, as for dollar payments'}</span></div> : null}
+        </div>
+        {obTotal > 0 ? <div className={rateOff ? 'lerr' : 'code'} style={{ marginTop: 2 }}>{rateOff ? `Check the rate: ${fCDF(orate)} is far from the internal rate (${fCDF(book)})` : <>Owes from before: <b>{fCDF(obTotal)}</b>{ou > 0 ? ` (${fUSD(ou)} × ${fCDF(orate)}${oc ? ` + ${fCDF(oc)}` : ''})` : ''}</>}</div> : null}
+      </div>
       <div className="field"><label htmlFor="vaddr">Address</label><input id="vaddr" className="input" maxLength={80} value={f.address} onChange={set('address')} /></div>
       <div className="field"><label htmlFor="vnotes">Notes</label><input id="vnotes" className="input" maxLength={200} value={f.notes} onChange={set('notes')} /></div>
       {v ? <label className="switch"><input type="checkbox" checked={f.active} onChange={set('active')} /><span>Active: goods can be given to this vendeur</span></label> : null}

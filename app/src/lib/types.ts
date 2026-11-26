@@ -52,7 +52,9 @@ export interface VendeurState {
 }
 export interface Vendeur extends VendeurState {
   id: string; shop_id: string; shop_name: string; name: string; phone: string; address: string; notes: string;
-  credit_days: number; credit_limit: number; opening_balance: number; active: boolean; created_at: string; created_by_name: string;
+  credit_days: number; credit_limit: number; opening_balance: number; active: boolean;
+  /** what was owed from before, as entered: dollars at opening_rate and Francs (opening_balance is the total in CDF) */
+  opening_usd?: number; opening_cdf?: number; opening_rate?: number | null; created_at: string; created_by_name: string;
 }
 export interface PromoLine { name: string; unit: string; qty: number; value?: number; line?: number }
 /** The promo items of a shop still open at the end of a month: each item and how many were given out, all vendeurs

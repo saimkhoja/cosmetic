@@ -1446,6 +1446,25 @@ select t.as('00000000-0000-0000-0000-00000000000c');
 select t.put('v1', public.save_vendeur('{"name":"Papa Jean","phone":"+243 990 000 000","credit_days":7,"credit_limit":20000,"opening_balance":3000}')::text);
 select t.fails($$select public.save_vendeur('{"name":"papa JEAN","credit_days":7,"credit_limit":20000}')$$, 'already exists', 'vendeur names are unique in a shop');
 select t.fails($$select public.save_vendeur('{"name":"No limit","credit_days":7,"credit_limit":0}')$$, 'credit limit', 'a vendeur needs a credit limit');
+-- an opening balance in USD and CDF: the dollars at the internal rate, or a taux typed
+select t.put('obr', (select coalesce(nullif(book_rate, 0), rate)::text from settings where id = 1));
+select t.fails($$select public.save_vendeur('{"name":"Old debt","credit_days":7,"credit_limit":900000,"opening_usd":100,"opening_rate":280}')$$, 'Check the rate', 'a taux with a zero missing is caught');
+select t.put('vob', public.save_vendeur('{"name":"Old debt","credit_days":7,"credit_limit":900000,"opening_usd":100,"opening_cdf":50000}')::text);
+reset role;
+select t.ok((select opening_balance = 50000 + round(100 * t.get('obr')::numeric) and opening_usd = 100 and opening_cdf = 50000 and opening_rate = t.get('obr')::numeric
+  from vendeurs where id = t.get('vob')::uuid), 'a vendeur can owe dollars and Francs from before: the dollars at the internal rate');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select public.save_vendeur(jsonb_build_object('id', t.get('vob'), 'name', 'Old debt', 'credit_days', 7, 'credit_limit', 900000, 'opening_usd', 100, 'opening_cdf', 50000, 'opening_rate', 2700));
+select t.put('vobst', public.vendeur_statement(t.get('vob')::uuid, current_date - 1, current_date)::text);
+reset role;
+select t.ok((select opening_balance = 320000 and opening_rate = 2700 from vendeurs where id = t.get('vob')::uuid)
+  and exists (select 1 from jsonb_array_elements(t.get('vobst')::jsonb->'lines') l where l->>'what' = 'Opening balance, $100.00 at 2700 FC + 50 000 CDF' and (l->>'dr')::bigint = 320000),
+  'or at a taux typed; the statement shows how the opening was made up');
+select t.ok((select abs(app.opening_base(a) - (100 + 50000 / (select rate from settings where id = 1))) < 0.01 from accounts a join vendeurs v on v.account_id = a.id where v.id = t.get('vob')::uuid),
+  'in the books the opening is worth the dollars plus the Francs at the sales rate');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
 select t.fails($$select public.save_vendeur('{"name":"Too long","credit_days":400,"credit_limit":100}')$$, '0 to 365 days', 'the credit period is 0 to 365 days');
 -- goods on credit, with a promo item from the stock
 select t.put('cinv1', gen_random_uuid()::text);
@@ -1684,7 +1703,7 @@ reset role;
 update settings set features = features - 'vendeurs' where id = 1;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
-select t.ok(jsonb_array_length(public.vendeur_list()) = 3, 'the Admin sees the vendeurs of every shop');
+select t.ok(jsonb_array_length(public.vendeur_list()) = 4, 'the Admin sees the vendeurs of every shop');
 reset role;
 
 -- ===== no central store: stock added straight into the shops, typed or from the item Excel template =====
