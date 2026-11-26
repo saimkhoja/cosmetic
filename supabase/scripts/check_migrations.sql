@@ -1,4 +1,4 @@
--- QuickSales: which database updates (migrations 10 to 47) this installation has.
+-- QuickSales: which database updates (migrations 10 to 48) this installation has.
 -- Paste it into the Supabase SQL Editor and click Run. It only reads; it changes nothing.
 -- Each "MISSING" file must be run, in order. A migration re-creates functions from the newest version it knows, so
 -- after running a missing older file, run every later file again too (they are safe to run twice). For example,
@@ -41,5 +41,6 @@ select step, case when ok then 'done' else 'MISSING: run this file' end as statu
   (44, '20261127000002_stock_arrivals.sql',     exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'stock_arrivals')),
   (45, '20261128000001_upkeep_delete.sql',       exists (select 1 from pg_proc where proname = 'delete_upkeep')),
   (46, '20261129000001_money_exchange.sql',     exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'money_exchanges')),
-  (47, '20261130000001_round_50_fix.sql',        exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'app' and p.proname = 'to_cdf' and pg_get_functiondef(p.oid) like '%/ 10) * 10 / 50%'))
+  (47, '20261130000001_round_50_fix.sql',        exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'app' and p.proname = 'to_cdf' and pg_get_functiondef(p.oid) like '%/ 10) * 10 / 50%')),
+  (48, '20261201000001_vendeur_opening_usd.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'vendeurs' and column_name = 'opening_usd'))
 ) as m(n, step, ok) order by n;
