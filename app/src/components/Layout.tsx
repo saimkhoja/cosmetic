@@ -80,6 +80,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="brand"><div className="logo"><CartMark size={30} /></div><div style={{ minWidth: 0 }}><div className="bt"><span>Quick</span><span className="bt2">Sales</span></div><div className="bs">{shopName ?? 'Central store'}</div></div></div>
         {pos ? <div id="topslot" className="topslot" /> : <div className="sp" />}
         {canSearch(profile.role) && !pos ? <GlobalSearch /> : null}
+        {profile.role === 'shopadmin' && pos ? <ArrivalNotice till /> : null}
         {pill}
         <div className="who" title={`${profile.name}, ${R[profile.role]}`}><span className="av"><Icon n={ROLEICON[profile.role]} /></span><div><b>{profile.name}</b><small>{R[profile.role]}</small></div></div>
         <button className="iconbtn" id="themebtn" onClick={switchTheme} title={`Screen: ${THEME_LABEL[theme]}. Click to change`} aria-label={`Screen colours: ${THEME_LABEL[theme]}. Click to change`}><Icon n={THEME_ICON[theme]} /></button>
@@ -91,7 +92,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         {/* a new search result opens the tab afresh, so it reads the record's filters from the link */}
         <main ref={main} key={findKey} className={pos ? 'posmain' : ''}>{children}</main>
       </div>
-      {/* the Shop Admin is told when stock is put straight into the shop (no central store); not over the till while selling */}
+      {/* the Shop Admin is told when stock is put straight into the shop (no central store); on the till it is a button in the top bar instead, clear of the sale */}
       {profile.role === 'shopadmin' && !pos ? <ArrivalNotice /> : null}
     </>
   );
