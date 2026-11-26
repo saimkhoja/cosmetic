@@ -13,6 +13,11 @@ describe('money', () => {
     expect(toCDF(1.5, 2850)).toBe(4300);   // 4 275
     expect(toCDF(1.48, 2850)).toBe(4250);  // 4 218
     expect(toCDF(0.1, 3000)).toBe(300);    // 300.00000000000006 stays 300
+    // a fraction of a Franc, or a few Francs, over a round price leaves it as it was
+    expect(toCDF(1.0715, 2800)).toBe(3000);  // 3 000.2
+    expect(toCDF(3004 / 2800, 2800)).toBe(3000);
+    expect(toCDF(3005 / 2800, 2800)).toBe(3050); // 3 010 at the nearest 10
+    expect(toCDF(3040 / 2800, 2800)).toBe(3050);
     expect([up50(4201), up50(4249), up50(4250), up50(4251), up50(4300), up50(0)]).toEqual([4250, 4250, 4250, 4300, 4300, 0]);
     expect(toCDF(16, 2850)).toBe(45600);
     expect(toCDF(30, 2850)).toBe(85500);

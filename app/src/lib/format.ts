@@ -2,8 +2,10 @@
 /** Francs rounded UP to the next 50 (4 220 -> 4 250, 4 260 -> 4 300); whole 50s stay. Cents first, so float noise
  *  (0.1 x 3000 = 300.00000000000006) does not push a round amount up. Mirrors app.to_cdf. */
 export const up50 = (cdf: number) => Math.ceil(Math.round((Number(cdf) || 0) * 100) / 100 / 50) * 50;
-/** Shop price in Francs: USD x the sales rate, rounded up to the next 50 FC. */
-export const toCDF = (usd: number, rate: number) => up50(Number(usd) * Number(rate));
+/** Shop price in Francs: USD x the sales rate to the nearest 10 FC first (the price as it always was, so a fraction of a
+ *  Franc never moves 3 000 to 3 050), then up to the next 50 FC: 3 000 stays, 3 010 and 3 040 become 3 050, 4 280 becomes
+ *  4 300. Mirrors app.to_cdf. */
+export const toCDF = (usd: number, rate: number) => up50(Math.round(Math.round(Number(usd) * Number(rate) * 100) / 100 / 10) * 10);
 /** Francs the rounding added to a price (USD x rate up to the next 50), to the whole Franc: 4 275 -> 4 300 is 25. */
 export const roundedBy = (usd: number, rate: number) => Math.max(0, Math.round(toCDF(usd, rate) - Number(usd) * Number(rate)));
 export const fNum = (n: number) => Math.round(Number(n) || 0).toLocaleString('en-US').replace(/,/g, ' ');
