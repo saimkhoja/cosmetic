@@ -558,7 +558,7 @@ set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
 select t.put('inv9', gen_random_uuid()::text);
 select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv9'), 'no', 'GOM-T2-000050', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16, 'customer', '  ',
-  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', (select app_price from (select (ceil(price_usd * 2850 / 50) * 50)::bigint app_price from products where id = t.get('lotion')::uuid) x)))))->>'status') = 'ok', 'a sale without a customer name is accepted');
+  'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', (select app_price from (select (ceil(round(price_usd * 2850 / 10) * 10 / 50) * 50)::bigint app_price from products where id = t.get('lotion')::uuid) x)))))->>'status') = 'ok', 'a sale without a customer name is accepted');
 select t.ok((select customer from invoices where id = t.get('inv9')::uuid) = '', 'the invoice keeps an empty customer');
 select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000051","device_id":"%s","customer":"%s","rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":4600}]}')$$, gen_random_uuid(), t.get('dev2'), repeat('x', 61), t.get('lotion')),
   'too long', 'a customer name is still at most 60 characters');
@@ -586,7 +586,7 @@ select public.save_settings(jsonb_build_object('rate', 2850, 'vat', 16, 'company
 reset role;
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000d');
-select t.put('lot_price', (select (ceil(price_usd * 2850 / 50) * 50)::bigint::text from products where id = t.get('lotion')::uuid));
+select t.put('lot_price', (select (ceil(round(price_usd * 2850 / 10) * 10 / 50) * 50)::bigint::text from products where id = t.get('lotion')::uuid));
 select t.put('inv10', gen_random_uuid()::text);
 select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('inv10'), 'no', 'GOM-T1-000060', 'device_id', t.get('dev1'), 'rate', 2850, 'vat_rate', 16, 'customer', 'Maman Rose',
   'items', jsonb_build_array(jsonb_build_object('product_id', t.get('lotion'), 'mult', 1, 'qty', 1, 'price', t.get('lot_price')::bigint))))->>'status') = 'ok', 'the till operator sells directly when the switch is on');
@@ -675,7 +675,7 @@ reset role;
 -- ===== payment in USD (switch, off by default) =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000c');
-select t.put('lp', (select (ceil(price_usd * 2850 / 50) * 50)::bigint::text from products where id = t.get('lotion')::uuid));
+select t.put('lp', (select (ceil(round(price_usd * 2850 / 10) * 10 / 50) * 50)::bigint::text from products where id = t.get('lotion')::uuid));
 select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000070","device_id":"%s","customer":"A","paid_usd":20,"rate":2850,"vat_rate":16,"items":[{"product_id":"%s","mult":1,"qty":1,"price":%s}]}')$$, gen_random_uuid(), t.get('dev2'), t.get('lotion'), t.get('lp')),
   'not turned on', 'with the switch off a payment in USD is refused');
 reset role;
@@ -864,6 +864,8 @@ select t.put('cream', public.save_product('{"name":"Test cream","category":"Skin
 reset role;
 select t.put('hp', (select app.unit_price(p, 'half ctn', 2850)::text from products p where id = t.get('cream')::uuid));
 select t.put('qp', (select app.unit_price(p, 'quarter ctn', 2850)::text from products p where id = t.get('cream')::uuid));
+select t.ok(app.to_cdf(1.0715, 2800) = 3000 and app.to_cdf(3004 / 2800.0, 2800) = 3000 and app.to_cdf(3005 / 2800.0, 2800) = 3050 and app.to_cdf(1.5, 2850) = 4300,
+  'a round price stays round: the nearest 10 FC first, then up to the next 50 FC');
 select t.ok(t.get('hp')::bigint = 71250 and t.get('qp')::bigint = 35650, 'half carton 71 250 and quarter carton 35 650 CDF: half and a quarter of 142 500, rounded up to 50 CDF');
 select t.put('cno1', (select 'GOM-' || code || '-' || lpad((last_seq + 1)::text, 6, '0') from devices where id = t.get('dev2')::uuid));
 select t.put('cno2', (select 'GOM-' || code || '-' || lpad((last_seq + 2)::text, 6, '0') from devices where id = t.get('dev2')::uuid));

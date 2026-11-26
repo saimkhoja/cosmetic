@@ -324,7 +324,7 @@ const sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
 const rate=()=>Number(db.settings.rate)||1;
 // Francs rounded UP to the next 50 (4 220 -> 4 250, 4 260 -> 4 300); cents first so float noise does not push a round amount up
 const up50=n=>Math.ceil(Math.round((Number(n)||0)*100)/100/50)*50;
-const toCDF=usd=>up50(usd*rate());
+const toCDF=usd=>up50(Math.round(Math.round(usd*rate()*100)/100/10)*10);
 // the Francs the rounding added, as a small tag beside the price (nothing when it was already round)
 const rnd=usd=>{const by=Math.max(0,Math.round(toCDF(usd)-usd*rate()));return by>0?`<span class="rnd" title="Rounded up by ${by} FC to end in 50 or 00">+${by} rounded</span>`:''};
 const fCDF=n=>Math.round(n).toLocaleString('en-US').replace(/,/g,' ')+' FC';
@@ -941,7 +941,7 @@ function saveDelivery(){
 }
 function deliveryNote(id){
   const o=db.orders.find(x=>x.id===id),shop=shopOf(o.shopId),c=db.settings.company,r=o.rate||rate(),showUSD=seesCost(),edited=o.edits&&o.edits.length;
-  const cdfOf=u=>up50(u*r);
+  const cdfOf=u=>up50(Math.round(Math.round(u*r*100)/100/10)*10);
   const total=sum(o.items,it=>(it.priceUSD??prod(it.pid).priceUSD)*it.qty),totalCDF=sum(o.items,it=>cdfOf(it.priceUSD??prod(it.pid).priceUSD)*it.qty);
   const html=`<div class="doc" id="dn"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2>${esc(c.name)}</h2><div>Central store, ${esc(c.address)}</div><div>RCCM ${esc(c.rccm)}, NIF ${esc(c.nif)}</div></div><div style="text-align:right"><h2>Delivery note${edited?' (REVISED)':''}</h2><div><b>DN-${o.id.slice(4)}</b></div><div>${dt(o.doneAt||o.t)}</div></div></div>
   <hr style="border:0;border-top:1px solid #ccc;margin:14px 0"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><div><b>Deliver to:</b> ${esc(shop.name)}, ${esc(shop.address)}</div><div><b>Rate:</b> 1 USD = ${fCDF(r)}</div></div>
