@@ -91,8 +91,8 @@ export default function Layout({ children }: { children: ReactNode }) {
         {/* a new search result opens the tab afresh, so it reads the record's filters from the link */}
         <main ref={main} key={findKey} className={pos ? 'posmain' : ''}>{children}</main>
       </div>
-      {/* the Shop Admin is told when stock is put straight into the shop (no central store); not over the till while selling */}
-      {profile.role === 'shopadmin' && !pos ? <ArrivalNotice /> : null}
+      {/* the Shop Admin is told, on every page (the till too), when stock is put straight into the shop (no central store) */}
+      {profile.role === 'shopadmin' ? <ArrivalNotice /> : null}
     </>
   );
 }

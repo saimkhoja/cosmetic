@@ -132,4 +132,7 @@ for e in "${pending[@]}"; do
   fi
   note "Done: $(basename "$f")"
 done
+# the Supabase API (PostgREST) keeps a cache of the tables and functions it serves: tell it to read them again, so a new
+# table or function is reachable at once (Supabase normally does this by itself; this makes sure)
+if ((${#pending[@]} > 0)); then q -c "notify pgrst, 'reload schema'" >/dev/null || note "Could not ask the API to reload (it reloads by itself)."; fi
 note "Up to date."

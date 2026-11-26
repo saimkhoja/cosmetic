@@ -7,9 +7,12 @@ import './styles.css';
 import { applyTheme, getTheme } from './lib/theme';
 import { loadTenant } from './lib/tenant';
 import { TenantProblem } from './pages/TenantProblem';
+import { checkForUpdate, setRegistration, watchForUpdates } from './lib/appupdate';
 
 applyTheme(getTheme());
-registerSW({ immediate: true });
+// a new version is installed as soon as it is found; it is also looked for later, at safe moments (lib/appupdate.ts)
+registerSW({ immediate: true, onRegisteredSW: (_url, r) => { setRegistration(r); checkForUpdate(); } });
+watchForUpdates();
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 
 void loadTenant().then(async (r) => {

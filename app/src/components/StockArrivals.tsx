@@ -23,7 +23,8 @@ export const arrivalTotals = (list: Pick<StockArrival, 'stock_arrival_items'>[])
   return { items: items.size, units: sum(list.flatMap((a) => a.stock_arrival_items), (i) => i.qty) };
 };
 
-/** The floating notice, for the Shop Admin; shows while something that arrived is not seen yet. */
+/** The floating notice at the top right, for the Shop Admin on every page; shows while something that arrived is not seen yet
+ *  (so the first thing a Shop Admin sees on signing in is stock added while they were away). */
 export function ArrivalNotice() {
   const arr = useArrivals();
   const [later, setLater] = useState<string>(''), [open, setOpen] = useState<StockArrival[] | null>(null);
