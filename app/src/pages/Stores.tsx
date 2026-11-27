@@ -178,8 +178,10 @@ export function GoodsIn() {
           <td>{g.grn_items.map((i) => { const p = byId.get(i.product_id); return <div key={i.product_id}>{i.qty} {p?.stock_unit} {p?.name}{p && ctnTxt(p, i.qty) ? <span className="code"> ({ctnTxt(p, i.qty)})</span> : null}</div>; })}{g.note ? <div className="code">{g.note}</div> : null}</td>
           <td>{g.status === 'cancelled' ? <><span className="chip bad">Deleted</span><div className="code">{g.cancelled_by_name}: {g.cancel_reason}</div></> : g.status === 'billed' ? <span className="chip ok">Bill entered</span> : <span className="chip warn">Waiting for the bill</span>}
             {g.edited_at ? <div className="code">corrected by {g.edited_by_name}, {dt(g.edited_at)}</div> : null}</td>
-          <td><div className="act" style={{ justifyContent: 'flex-end' }}>{isAdmin && g.status === 'awaiting_bill' ? <button className="btn primary sm" onClick={() => setBill(g)}><Icon n="receipt" /> Enter bill</button> : null}
-            {mayChange(g) ? <><button title={`Correct ${g.no}`} aria-label={`Correct ${g.no}`} onClick={() => setEdit(g)}><Icon n="edit" /></button><button title={`Delete ${g.no}`} aria-label={`Delete ${g.no}`} onClick={() => setDel(g)}><Icon n="trash" /></button></> : null}</div></td></tr>)}
+          {/* Enter bill is a full button beside the icon buttons, not one of them (.act squares its buttons) */}
+          <td className="nw"><div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
+            {isAdmin && g.status === 'awaiting_bill' ? <button className="btn primary sm nw" onClick={() => setBill(g)}><Icon n="receipt" /> Enter bill</button> : null}
+            {mayChange(g) ? <div className="act"><button title={`Correct ${g.no}`} aria-label={`Correct ${g.no}`} onClick={() => setEdit(g)}><Icon n="edit" /></button><button title={`Delete ${g.no}`} aria-label={`Delete ${g.no}`} onClick={() => setDel(g)}><Icon n="trash" /></button></div> : null}</div></td></tr>)}
       </tbody></table> : <Empty i="truck" t={grns.isLoading ? 'Loading' : 'Nothing received yet'} />}</div></div>
       {noStore ? null : <SupplierReturnsList />}
       {recv ? <ReceiveGoodsModal onClose={() => setRecv(false)} /> : null}
