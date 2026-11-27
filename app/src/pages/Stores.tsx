@@ -1,6 +1,6 @@
 // Goods in from suppliers, returns from the shops to the central store, and the stock and
 // shop statements the warehouse can read.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useCosts, useGrns, useLedgers, useProducts, useRefresh, useReturns, useSettings, useShops, useStock, useSupplierReturns, useSupplierReturnValues, useSuppliers } from '../data/queries';
@@ -163,24 +163,108 @@ export function GoodsIn() {
   const noStore = useNoStore(), shops = useShops();
   const shopName = (id?: string | null) => (id ? shops.data?.find((x) => x.id === id)?.name ?? '' : '');
   const [recv, setRecv] = useState(false), [rts, setRts] = useState(false), [bill, setBill] = useState<Grn | null>(null), [f, setF] = useState<'all' | 'awaiting_bill'>('all');
+  const [edit, setEdit] = useState<Grn | null>(null), [del, setDel] = useState<Grn | null>(null);
+  // the Admin corrects or deletes any receipt; the warehouse only those still waiting for the bill
+  const mayChange = (g: Grn) => g.status !== 'cancelled' && (isAdmin || g.status === 'awaiting_bill');
   const byId = useMemo(() => new Map((products.data ?? []).map((p) => [p.id, p])), [products.data]);
   const supName = (id: string) => suppliers.data?.find((s) => s.id === id)?.name ?? '';
   const list = (grns.data ?? []).filter((g) => f === 'all' || g.status === f), waiting = (grns.data ?? []).filter((g) => g.status === 'awaiting_bill').length;
   return (
     <>
-      <Head t="Goods in" s="Every delivery from a supplier, with what came in. Each one waits for the Admin to enter the supplier's bill." a={<>{noStore ? null : <button id="rtsbtn" className="btn ghost" onClick={() => setRts(true)}><Icon n="exchange" /> Return to supplier</button>}<button className="btn primary" onClick={() => setRecv(true)}><Icon n="truck" /> Receive from supplier</button></>} />
+      <Head t="Goods in" s="Every delivery from a supplier, with what came in. Each one waits for the Admin to enter the supplier's bill. A receipt can be corrected or deleted, before or after its bill." a={<>{noStore ? null : <button id="rtsbtn" className="btn ghost" onClick={() => setRts(true)}><Icon n="exchange" /> Return to supplier</button>}<button className="btn primary" onClick={() => setRecv(true)}><Icon n="truck" /> Receive from supplier</button></>} />
       <div className="toolbar"><div className="seg"><button className={f === 'all' ? 'on' : ''} onClick={() => setF('all')}>All</button><button className={f === 'awaiting_bill' ? 'on' : ''} onClick={() => setF('awaiting_bill')}>Waiting for the bill ({waiting})</button></div></div>
       <div className="card p0"><div className="tw">{list.length ? <table className="t"><thead><tr><th>Receipt</th><th>Supplier</th><th>Received</th><th>Items</th><th>Bill</th><th /></tr></thead><tbody>
         {list.map((g) => <tr key={g.id}><td><b>{g.no}</b>{g.ref ? <div className="code">{g.ref}</div> : null}</td><td>{supName(g.supplier_id)}</td><td className="nw">{dt(g.received_at)}<div className="code">{g.received_by_name}{g.shop_id ? ` · into ${shopName(g.shop_id)}` : ''}</div></td>
           <td>{g.grn_items.map((i) => { const p = byId.get(i.product_id); return <div key={i.product_id}>{i.qty} {p?.stock_unit} {p?.name}{p && ctnTxt(p, i.qty) ? <span className="code"> ({ctnTxt(p, i.qty)})</span> : null}</div>; })}{g.note ? <div className="code">{g.note}</div> : null}</td>
-          <td>{g.status === 'billed' ? <span className="chip ok">Bill entered</span> : <span className="chip warn">Waiting for the bill</span>}</td>
-          <td>{isAdmin && g.status === 'awaiting_bill' ? <button className="btn primary sm" onClick={() => setBill(g)}><Icon n="receipt" /> Enter bill</button> : null}</td></tr>)}
+          <td>{g.status === 'cancelled' ? <><span className="chip bad">Deleted</span><div className="code">{g.cancelled_by_name}: {g.cancel_reason}</div></> : g.status === 'billed' ? <span className="chip ok">Bill entered</span> : <span className="chip warn">Waiting for the bill</span>}
+            {g.edited_at ? <div className="code">corrected by {g.edited_by_name}, {dt(g.edited_at)}</div> : null}</td>
+          <td><div className="act" style={{ justifyContent: 'flex-end' }}>{isAdmin && g.status === 'awaiting_bill' ? <button className="btn primary sm" onClick={() => setBill(g)}><Icon n="receipt" /> Enter bill</button> : null}
+            {mayChange(g) ? <><button title={`Correct ${g.no}`} aria-label={`Correct ${g.no}`} onClick={() => setEdit(g)}><Icon n="edit" /></button><button title={`Delete ${g.no}`} aria-label={`Delete ${g.no}`} onClick={() => setDel(g)}><Icon n="trash" /></button></> : null}</div></td></tr>)}
       </tbody></table> : <Empty i="truck" t={grns.isLoading ? 'Loading' : 'Nothing received yet'} />}</div></div>
       {noStore ? null : <SupplierReturnsList />}
       {recv ? <ReceiveGoodsModal onClose={() => setRecv(false)} /> : null}
       {rts ? <ReturnToSupplierModal onClose={() => setRts(false)} /> : null}
       {bill ? <BillModal grn={bill} onClose={() => setBill(null)} /> : null}
+      {edit ? <EditGrnModal g={edit} onClose={() => setEdit(null)} /> : null}
+      {del ? <DeleteGrnModal g={del} onClose={() => setDel(null)} /> : null}
     </>
+  );
+}
+
+/** A receipt with its items and, once billed, its bill as entered (from grn_detail). */
+type GrnDetail = { grn: Grn; supplier: string; shop_name: string | null; items: { product_id: string; name: string; unit: string; qty: number; cost: number }[];
+  bill: { voucher: string; bill_no: string; bill_date: string; due_date: string | null; currency: 'USD' | 'FC'; rate: number; amount: number; vat: number } | null;
+  locked: string | null; claims: number };
+
+/** Correcting a receipt: quantities (0 takes an item off), items added, reference and note; once billed, the bill too.
+ *  The stock and both vouchers follow, in place. */
+function EditGrnModal({ g, onClose }: { g: Grn; onClose: () => void }) {
+  const refresh = useRefresh(), toast = useToast(), a = useAction(), products = useProducts();
+  const [d, setD] = useState<GrnDetail | null>(null), [lines, setLines] = useState<Record<string, string>>({}), [add, setAdd] = useState(''), [ref, setRef] = useState(g.ref), [note, setNote] = useState(g.note);
+  const [b, setB] = useState<{ bill_no: string; bill_date: string; due_date: string; currency: 'USD' | 'FC'; rate: string; amount: string; vat: string } | null>(null);
+  const load = useAction();
+  useEffect(() => { void load.run(async () => {
+    const x = await rpc<GrnDetail>('grn_detail', { p_id: g.id }); setD(x);
+    setLines(Object.fromEntries(x.items.map((i) => [i.product_id, String(i.qty)])));
+    if (x.bill) setB({ bill_no: x.bill.bill_no, bill_date: x.bill.bill_date, due_date: x.bill.due_date ?? '', currency: x.bill.currency, rate: String(x.bill.rate), amount: String(x.bill.amount), vat: String(x.bill.vat || '') });
+  }); }, [g.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const byId = new Map((products.data ?? []).map((p) => [p.id, p]));
+  const ids = Object.keys(lines), billed = g.status === 'billed', blocked = d?.locked ?? (billed && d && d.claims > 0 ? 'The bill has a claim for goods billed but not received. Cancel the claim under Returns to supplier first.' : null);
+  const save = () => a.run(async () => {
+    const l = ids.map((id) => ({ product_id: id, qty: Math.max(0, parseInt(lines[id]) || 0) }));
+    if (!l.some((x) => x.qty > 0)) throw new Error('A receipt needs at least one item. To take it all back, delete it');
+    await rpc('edit_grn', { p: { id: g.id, ref, note, lines: l, ...(billed && b ? { bill: { bill_no: b.bill_no, bill_date: b.bill_date, due_date: b.due_date || null, currency: b.currency,
+      rate: Number(b.rate) || null, amount: Number(b.amount), vat: Number(b.vat) || 0 } } : {}) } });
+    await refresh('grns', 'products', 'stock', 'audit'); toast(`${g.no} corrected${billed ? ' with its bill' : ''}`); onClose();
+  });
+  return (
+    <Modal title={`Correct ${g.no}`} icon="edit" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="grnsave" disabled={a.busy || !d || !!blocked} onClick={() => void save()}><Icon n="check" /> Save changes</button></>}>
+      {!d ? <Empty i={load.err ? 'alert' : 'refresh'} t={load.err || 'Loading'} /> : <>
+        {blocked ? <Note warn i="lock">{blocked}</Note> : <Note i="truck">{d.supplier}{d.shop_name ? `, into ${d.shop_name}` : ''}. The stock and the goods-in voucher follow the new quantities{billed ? '; the bill is corrected in place, with the same voucher number' : ''}. A quantity of 0 takes the item off the receipt.</Note>}
+        <div className="tw"><table className="t" id="grnlines"><thead><tr><th>Item</th><th className="r">Received</th><th style={{ width: 140 }}>Now</th></tr></thead><tbody>
+          {ids.map((id) => { const p = byId.get(id), was = d.items.find((i) => i.product_id === id); return <tr key={id}><td><b>{p?.name ?? was?.name}</b><div className="code">{p?.stock_unit ?? was?.unit}</div></td>
+            <td className="r">{was ? was.qty : <span className="chip">added</span>}</td>
+            <td><input className="input" type="number" min="0" step="1" inputMode="numeric" value={lines[id]} onChange={(e) => setLines({ ...lines, [id]: e.target.value })} aria-label={`Quantity of ${p?.name ?? ''}`} /></td></tr>; })}
+        </tbody></table></div>
+        <div className="frow" style={{ marginTop: 8 }}><div className="field"><label htmlFor="grnadd">Add an item</label><select id="grnadd" className="input" value={add} onChange={(e) => { const v = e.target.value; setAdd(''); if (v && !(v in lines)) setLines({ ...lines, [v]: '1' }); }}>
+          <option value="">Choose an item</option>{(products.data ?? []).filter((p) => p.active && !(p.id in lines)).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+          <div className="field"><label htmlFor="grnref">Reference</label><input id="grnref" className="input" maxLength={60} value={ref} onChange={(e) => setRef(e.target.value)} /></div></div>
+        <div className="field"><label htmlFor="grnnote">Note</label><input id="grnnote" className="input" maxLength={120} value={note} onChange={(e) => setNote(e.target.value)} /></div>
+        {billed && b ? <div className="card" style={{ background: 'var(--bg)', padding: 12 }} id="grnbill"><b>Bill {d.bill?.voucher}</b>
+          <div className="frow three" style={{ marginTop: 8 }}>
+            <div className="field"><label htmlFor="gbno">Supplier's bill number</label><input id="gbno" className="input" maxLength={60} value={b.bill_no} onChange={(e) => setB({ ...b, bill_no: e.target.value })} /></div>
+            <div className="field"><label htmlFor="gbdate">Bill date</label><input id="gbdate" className="input" type="date" value={b.bill_date} onChange={(e) => setB({ ...b, bill_date: e.target.value })} /></div>
+            <div className="field"><label htmlFor="gbdue">Due date</label><input id="gbdue" className="input" type="date" value={b.due_date} onChange={(e) => setB({ ...b, due_date: e.target.value })} /></div></div>
+          <div className="frow">
+            <div className="field"><label htmlFor="gbamt">Amount (before VAT)</label><input id="gbamt" className="input" type="number" min="0" step="0.01" value={b.amount} onChange={(e) => setB({ ...b, amount: e.target.value })} /></div>
+            <div className="field"><label htmlFor="gbvat">VAT</label><input id="gbvat" className="input" type="number" min="0" step="0.01" value={b.vat} placeholder="0" onChange={(e) => setB({ ...b, vat: e.target.value })} /></div>
+            <div className="field"><label htmlFor="gbcur">Currency</label><select id="gbcur" className="input" value={b.currency} onChange={(e) => setB({ ...b, currency: e.target.value as 'USD' | 'FC' })}><option>USD</option><option value="FC">CDF</option></select></div>
+            {b.currency === 'FC' ? <div className="field"><label htmlFor="gbrate">Rate</label><input id="gbrate" className="input" type="number" min="1" value={b.rate} onChange={(e) => setB({ ...b, rate: e.target.value })} /></div> : null}</div>
+          <span className="hint">A bill that differs from the goods at item cost goes to Purchase price difference, as when it was entered.</span></div> : null}
+      </>}
+      <div className="lerr">{a.err}</div>
+    </Modal>
+  );
+}
+
+/** Deleting a receipt, with a reason: its goods leave the stock again; its goods-in voucher and its bill are cancelled. */
+function DeleteGrnModal({ g, onClose }: { g: Grn; onClose: () => void }) {
+  const refresh = useRefresh(), toast = useToast(), a = useAction(), [why, setWhy] = useState(''), load = useAction(), [d, setD] = useState<GrnDetail | null>(null);
+  useEffect(() => { void load.run(async () => setD(await rpc<GrnDetail>('grn_detail', { p_id: g.id }))); }, [g.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = () => a.run(async () => {
+    if (why.trim().length < 4) throw new Error('Write a short reason for deleting this receipt');
+    const r = await rpc<{ no: string; bill: string | null }>('delete_grn', { p_id: g.id, p_reason: why });
+    await refresh('grns', 'products', 'stock', 'sreturns', 'audit'); toast(`${r.no} deleted${r.bill ? ` with its bill ${r.bill}` : ''}`, 'warn'); onClose();
+  });
+  return (
+    <Modal title={`Delete ${g.no}?`} icon="trash" onClose={onClose} foot={<><button className="btn" onClick={onClose}>Keep it</button><button className="btn danger" id="grndel" disabled={a.busy || !d || !!d?.locked || why.trim().length < 4} onClick={() => void go()}><Icon n="trash" /> Delete receipt</button></>}>
+      {!d ? <Empty i={load.err ? 'alert' : 'refresh'} t={load.err || 'Loading'} /> : <>
+        <p style={{ marginTop: 0 }}><b>{d.supplier}</b>{d.shop_name ? `, into ${d.shop_name}` : ''}: {d.items.map((i) => `${i.qty} ${i.unit} ${i.name}`).join(', ')}.</p>
+        {d.locked ? <Note warn i="lock">{d.locked}</Note> : <Note warn i="alert">The goods leave the {d.shop_name ? 'shop' : 'store'}'s stock again and the goods-in voucher is cancelled{d.bill ? <>; the bill <b>{d.bill.bill_no}</b> ({d.bill.voucher}) is cancelled too{d.claims ? ', with its claim for goods not received' : ''}</> : ''}. This cannot be undone; the activity log keeps what it was.</Note>}
+        <div className="field"><label htmlFor="grnwhy">Reason</label><input id="grnwhy" className="input" maxLength={120} value={why} onChange={(e) => setWhy(e.target.value)} placeholder="e.g. Entered twice" autoFocus /></div>
+      </>}
+      <div className="lerr">{a.err}</div>
+    </Modal>
   );
 }
 

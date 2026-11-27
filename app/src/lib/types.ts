@@ -7,6 +7,8 @@ export interface Features { customer_optional?: boolean; barcode?: boolean; till
   no_warehouse?: boolean;
   /** the shop admin keeps vendeurs: goods on credit, their payments, promo items and the monthly promo report */
   vendeurs?: boolean;
+  /** the shop admin gives promo items free with cash sales (not invoiced); they add up in the monthly promo report */
+  cash_promo?: boolean;
   /** the shop admin changes money at the counter: buys and sells dollars at the rates set in Settings */
   money_exchange?: boolean }
 /** rate: the sales rate (prices, tickets, tills). book_rate: the internal rate (suppliers, expenses, vouchers). */
@@ -46,35 +48,41 @@ export interface Invoice {
 }
 /** What a vendeur owes, from the server: payments settle the oldest goods first. Amounts in CDF. */
 export interface VendeurOpen { invoice_id: string | null; no: string; date: string; due: string; amount: number; owed: number; days_overdue: number }
+/** What a vendeur owes, in USD: balance, credit limit and credit left, overdue; balance_cdf is the balance at today's sales rate. */
 export interface VendeurState {
-  balance: number; available: number; over_limit: boolean; overdue: boolean; overdue_amount: number; oldest_due: string | null; days_overdue: number;
-  open: VendeurOpen[]; last_payment: { no: string; at: string; amount: number } | null; promo_open: number; promo_open_n: number;
+  balance: number; balance_cdf?: number; credit_limit_usd: number; available: number; over_limit: boolean; overdue: boolean; overdue_amount: number; oldest_due: string | null; days_overdue: number;
+  open: VendeurOpen[]; last_payment: { no: string; at: string; amount: number; amount_cdf?: number } | null; promo_open: number; promo_open_n: number;
 }
 export interface Vendeur extends VendeurState {
   id: string; shop_id: string; shop_name: string; name: string; phone: string; address: string; notes: string;
   credit_days: number; credit_limit: number; opening_balance: number; active: boolean;
   /** what was owed from before, as entered: dollars at opening_rate and Francs (opening_balance is the total in CDF) */
-  opening_usd?: number; opening_cdf?: number; opening_rate?: number | null; created_at: string; created_by_name: string;
+  opening_usd?: number; opening_cdf?: number; opening_rate?: number | null; opening_value_usd?: number; created_at: string; created_by_name: string;
 }
 export interface PromoLine { name: string; unit: string; qty: number; value?: number; line?: number }
 /** The promo items of a shop still open at the end of a month: each item and how many were given out, all vendeurs
  *  together (no vendeur names). qty is in the item's stock unit (pcs, or sets); carried, from earlier months. */
 export interface PromoData {
   month: string; n: number; value: number; pcs: number; carried_pcs: number;
-  items: { name: string; unit: string; qty: number; carried: number }[];
+  /** pieces given with cash sales and with goods on credit (reports made before the split have neither) */
+  cash_pcs?: number; credit_pcs?: number;
+  items: { name: string; unit: string; qty: number; carried: number; cash_qty?: number; credit_qty?: number }[];
+  /** the promos given with cash sales, one by one */
+  cash_promos?: { id: string; no: string; date: string; invoice: string | null; value: number; by_name: string; items: { name: string; unit: string; qty: number }[] | null }[];
 }
 export interface PromoReport extends PromoData {
   shop_id: string; shop_name: string; oldest_open: string | null;
   reports: { id: string; month: string; status: 'kept' | 'settled'; n: number; total: number; by_name: string; at: string; data: PromoData }[];
 }
 /** What vendeur_pay answers: amount is what came off the debt, in CDF; the rest says how it was paid. */
-export interface VendeurPaid { id: string; no: string; amount: number; at: string; by_name: string; vendeur: string; before: number; state: VendeurState;
+export interface VendeurPaid { id: string; no: string; amount: number; amount_cdf?: number; at: string; by_name: string; vendeur: string; before: number; state: VendeurState;
   paid_usd: number; paid_cdf: number; usd_rate: number | null; change_cdf: number }
 export interface VendeurStatement {
   vendeur: Omit<Vendeur, keyof VendeurState>; from: string; to: string; brought_forward: number; total_dr: number; total_cr: number; closing: number;
-  lines: { date: string; no: string; what: string; dr: number; cr: number; due: string | null; invoice_id: string | null }[];
+  /** dr and cr in USD; cdf what the line was in Francs (goods at their sale's rate) */
+  lines: { date: string; no: string; what: string; dr: number; cr: number; cdf?: number | null; rate?: number | null; due: string | null; invoice_id: string | null }[];
   promos: { id: string; no: string; date: string; value: number; status: 'open' | 'settled'; note: string; invoice: string | null; items: { name: string; unit: string; qty: number; line: number }[] }[];
-  payments: { id: string; no: string; at: string; amount: number; note: string; status: 'ok' | 'cancelled'; by_name: string; cancel_reason: string | null;
+  payments: { id: string; no: string; at: string; amount: number; amount_cdf?: number; note: string; status: 'ok' | 'cancelled'; by_name: string; cancel_reason: string | null;
     paid_usd?: number; paid_cdf?: number; usd_rate?: number | null; change_cdf?: number }[];
   state: VendeurState;
 }
@@ -100,7 +108,8 @@ export interface Supplier {
   id: string; name: string; contact: string; phone: string; email: string; address: string; tax_no: string; credit_days: number; credit_limit: number;
   currency: 'USD' | 'FC'; notes: string; active: boolean; account_id: string; supplier_items?: { product_id: string }[];
 }
-export interface Grn { id: string; no: string; supplier_id: string; shop_id?: string | null; ref: string; note: string; status: 'awaiting_bill' | 'billed'; bill_voucher_id: string | null; received_by_name: string; received_at: string; grn_items: { product_id: string; qty: number; std_cost_usd?: number }[] }
+export interface Grn { id: string; no: string; supplier_id: string; shop_id?: string | null; ref: string; note: string; status: 'awaiting_bill' | 'billed' | 'cancelled'; bill_voucher_id: string | null; received_by_name: string; received_at: string;
+  cancel_reason?: string | null; cancelled_by_name?: string | null; edited_by_name?: string | null; edited_at?: string | null; grn_items: { product_id: string; qty: number; std_cost_usd?: number }[] }
 /** Goods sent back to a supplier, or billed but not received. Values come separately, for the Admin only. */
 export interface SupplierReturn {
   id: string; no: string; supplier_id: string; kind: 'return' | 'short'; grn_id: string | null; reason: string; note: string; status: 'open' | 'settled' | 'cancelled';

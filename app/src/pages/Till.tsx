@@ -16,7 +16,7 @@ import { useDeliveries, useOrders } from '../data/queries';
 import { getDevice, getParked, getSnapshot, nextInvoiceNo, peekInvoiceNo, takeInvoiceNo, outboxAll, outboxPut, setDevice, setParked, setSnapshot, type Device, type OutboxEntry, type Parked, type Snapshot } from '../offline/store';
 import { isNetworkError, startSync, syncOutbox } from '../offline/sync';
 import type { Category, Invoice, Product, Rank, SaleOrder, Settings, Shop, StockRow, Vendeur } from '../lib/types';
-import { CreditModal } from './Vendeurs';
+import { CreditModal, PromoPicker, promoLines } from './Vendeurs';
 
 const SHORT: Record<string, string> = { 'half dzn': '½ dz', dzn: 'dz', carton: 'ctn', 'half ctn': '½ ctn', 'quarter ctn': '¼ ctn' };
 /** A line of the sale: one item in one unit. */
@@ -92,6 +92,8 @@ export default function Till() {
   const [pick, setPick] = useState<{ pid: string; k: string | null } | null>(null), [check, setCheck] = useState(false), [disc, setDisc] = useState(false), [tok, setTok] = useState<string | null>(null), [askCode, setAskCode] = useState(false), [reject, setReject] = useState<SaleOrder | null>(null);
   const [last, setLast] = useState<Invoice | null>(null), [view, setView] = useState<Invoice | null>(null), [outbox, setOutbox] = useState<OutboxEntry[]>([]), [flash, setFlash] = useState(false);
   const [credit, setCredit] = useState(false);
+  // promo items given free with this cash sale (Shop Admin, with the switch on): sent just after the sale, not invoiced
+  const [promoLn, setPromoLn] = useState<Record<string, string>>({}), [promoPick, setPromoPick] = useState(false);
   const [cashFor, setCashFor] = useState<{ total: number; info: string; prints?: boolean; go: (pay: PayIn) => Promise<boolean>; cancel: () => void } | null>(null);
   // the highlighted line (n changes on every scan, so the same line flashes and scrolls into view again)
   const [sel, setSel] = useState<{ k: string; n: number } | null>(null), [parked, setParkedList] = useState<Parked[]>([]), [showParked, setShowParked] = useState(false);
@@ -168,7 +170,7 @@ export default function Till() {
     String(orderTotal(o)), ...o.items.map((i) => byId.get(i.product_id)?.name ?? '')].join(' ').toLowerCase().includes(rql));
 
   const startCustomer = () => { const c = custDraft.trim().replace(/\s+/g, ' ').slice(0, 60); if (!c) { if (optCust) scan.current?.focus(); else toast('Type the customer name, then press Enter', 'warn'); return; } setCustomer(c); setCustDraft(''); setTimeout(() => scan.current?.focus(), 50); };
-  const resetSale = () => { setCart([]); setDp(0); setTok(null); setCustomer(''); setSel(null); };
+  const resetSale = () => { setCart([]); setDp(0); setTok(null); setCustomer(''); setSel(null); setPromoLn({}); };
   const hi = (k: string) => { setSel((s) => ({ k, n: (s?.n ?? 0) + 1 })); setFlash(true); setTimeout(() => setFlash(false), 600); };
   const add = (pid: string, ui?: number) => {
     if (!ready) { toast('Type the customer name first', 'warn'); custIn.current?.focus(); return; }
@@ -228,6 +230,8 @@ export default function Till() {
 
   // the Admin's Settings: one copy of each invoice (the customer's) instead of two
   const oneCopy = !!snap?.settings.features?.one_copy;
+  // the Admin's Settings: the Shop Admin gives promo items free with cash sales
+  const cashPromoOn = isAdmin && !!snap?.settings.features?.cash_promo;
   // a dollar at the till is worth the internal rate, not the sales rate the goods are priced at
   const usdRate = snap ? bookRate(snap.settings) : 0;
   // a till operator's discount goes with the token of their Discount passcode entry; no discount, nothing is sent
@@ -275,9 +279,18 @@ export default function Till() {
       await outboxPut({ id, t, shop_id: shopId, tries: 0, invoice: inv, payload: { id, no, device_id: tillInv ? tillInv.device_id! : dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(isAdmin ? (typeof disc === 'number' ? { disc_pct: disc } : { disc: S.disc }) : tillDisc(disc, S.disc)), tendered: tend, ...(usd ? { paid_usd: usd.paid_usd, paid_cdf: usd.paid_cdf, change_usd: usd.change_usd, usd_rate: usd.usd_rate } : {}), customer: cust, order_id: order?.id ?? null, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })) } });
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
+      // promo items with the sale: out of the till's stock now, recorded on the server just after (it needs the connection)
+      const promo = cashPromoOn ? promoLines(promoLn) : [];
+      for (const l of promo) { const p = byId.get(l.product_id); if (p) stock[p.id] = takeLocal(stock[p.id] ?? { qty: 0, open_pieces: 0 }, l.qty, 1, false, p.pieces_per_set); }
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
       if (!tillInv || revised) printHTML(saleCopies(inv, snap.settings.company, snap.shop, cashStep, oneCopy));
       setLast(inv);
+      if (promo.length) {
+        if (!navigator.onLine) toast(`Sale ${no} done. The promo items were not recorded: they need the internet connection. Give them again once online.`, 'warn');
+        else void rpc<{ no: string; value: number }>('give_cash_promo', { p: { invoice_no: no, rate, lines: promo } })
+          .then((r) => toast(`Promo ${r.no} with ${no}: ${fCDF(r.value)} of items, free, not invoiced`))
+          .catch((e: Error) => toast(`Sale ${no} done, but the promo items were not recorded: ${e.message}`, 'bad'));
+      }
       const chg = inv.change > 0 ? ` Change ${changeText(inv)}.` : '';
       toast(tillInv ? (revised ? `Invoice ${no} for ${custName(cust)} changed and approved, ${fCDF(S.total)}.${chg} Printing the corrected invoice; the copy printed at the till is void.` : `Invoice ${no} for ${custName(cust)} approved, ${fCDF(S.total)}.${chg} Sale complete, nothing to print.`)
         : order ? `Order ${orderRef(order.id)} for ${custName(cust)} approved as ${no}, ${fCDF(S.total)}.${chg} Printing the invoice.` : `Sale ${no} for ${custName(cust)} done, ${fCDF(S.total)}.${chg} Printing.`);
@@ -413,6 +426,8 @@ export default function Till() {
           {T.disc ? <div className={`row ${overLimit(T) ? 'bad' : ''}`}><span>Discount {T.pct}%</span><span>- {fCDF(T.disc)}</span></div> : null}
           <div className="row muted"><span>Incl. VAT {vat}%</span><span>{fCDF(T.vat)}</span></div></div>
           <div className="grand"><span>{sells ? 'To pay' : 'Order total'}</span><b>{fCDF(T.total)}</b></div></div>
+        {cashPromoOn && sells ? <button type="button" id="promobtn" className={`btn sm full ${promoLines(promoLn).length ? 'primary' : 'ghost'}`} style={{ marginBottom: 8 }} onClick={() => setPromoPick(true)} disabled={!priced.length}>
+          <Icon n="gift" /> {promoLines(promoLn).length ? `Promo items: ${promoLines(promoLn).reduce((a, l) => a + l.qty, 0)} pcs, free with this sale` : 'Add promo items, free with this sale'}</button> : null}
         <div className={`cact ${onCredit ? 'four' : 'three'}`}>
           {/* the till operator's Discount button is locked: it opens with the Discount passcode from the Admin, once per invoice */}
           {<button id="discbtn" className={`btn ${T.disc ? 'primary' : ''}`} onClick={() => (isAdmin || tok ? setDisc(true) : setAskCode(true))} disabled={!cart.length} title={isAdmin || tok ? 'Discount on this invoice, as a percentage or an amount' : 'Discount on this invoice: locked, it opens with the Discount passcode'} aria-label="Discount on this invoice"><Icon n={isAdmin || tok ? 'tag' : 'lock'} /><span>{T.disc ? (typeof dp === 'number' ? `${dp}%` : fNum(T.disc)) : 'Discount'}</span></button>}
@@ -473,6 +488,14 @@ export default function Till() {
       {reject ? <RejectModal o={reject} onClose={() => setReject(null)} onDone={() => { if (editing?.id === reject.id) setEditing(null); setReject(null); void orders.refetch(); }} /> : null}
       {editing ? <OrderEditor o={editing} init={orderLines(editing)} byId={byId} snap={snap} onClose={() => setEditing(null)} onReject={() => { setReject(editing); }} onApprove={async (lines, d) => { if (await sellOrder(lines, d, editing)) setEditing(null); }} /> : null}
       {cashFor ? <CashModal total={cashFor.total} info={cashFor.info} prints={cashFor.prints !== false} rate={rate} usdRate={usdRate} usdPay={usdPay} onClose={() => { cashFor.cancel(); setCashFor(null); }} onPay={async (p) => { if (await cashFor.go(p)) setCashFor(null); }} /> : null}
+      {promoPick && snap ? <Modal title="Promo items with this sale" icon="gift" wide onClose={() => setPromoPick(false)} foot={<><button className="btn" onClick={() => { setPromoLn({}); setPromoPick(false); }}>Clear</button><button className="btn primary" id="promook" onClick={() => {
+          const short = promoLines(promoLn).find((l) => { const p = byId.get(l.product_id); return !p || l.qty > left(p); });
+          if (short) { toast(`Not enough ${byId.get(short.product_id)?.name ?? 'stock'} in the shop for the promo`, 'warn'); return; }
+          setPromoPick(false); }}><Icon n="check" /> Done</button></>}>
+          <Note i="gift">Free with this cash sale: taken from the stock, not on the invoice. They are recorded when the sale is taken (this needs the connection) and add up in the monthly promo report.</Note>
+          {!navigator.onLine ? <Note warn i="wifioff">No connection now: promo items cannot be recorded until the till is online.</Note> : null}
+          <PromoPicker products={snap.products} stockOf={(id) => { const p = byId.get(id); return p ? left(p) : 0; }} rate={rate} lines={promoLn} setLines={setPromoLn} />
+        </Modal> : null}
       {credit ? <CreditModal total={T.total} count={T.count} products={snap.products} stockOf={(id) => { const p = byId.get(id); return p ? left(p) : 0; }} rate={rate} onClose={() => setCredit(false)} onGive={sellCredit} /> : null}
       {showParked ? <ParkedModal list={parked} onResume={resume} onDelete={unpark} onClose={() => setShowParked(false)} /> : null}
       {tickets ? <TicketsModal products={hotSort(snap.products, snap.ranks)} rate={rate} shopName={snap.shop.name} onClose={() => setTickets(false)} /> : null}

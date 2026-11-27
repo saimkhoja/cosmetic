@@ -86,7 +86,7 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   <tbody>${inv.items.map((it) => `<tr><td colspan="5">${esc(it.name.toUpperCase())}</td></tr><tr><td>${esc((it.piece ? 'piece' : it.unit).toUpperCase())}</td><td class="r">${it.qty}</td><td class="r">${n0(it.price)}</td><td class="r">${Number(inv.disc_pct) || 0}</td><td class="r">${n0(it.line)}</td></tr>`).join('')}</tbody></table>
   <table class="rsum"><tr><td class="small"><b>Total Items</b>&nbsp; ${sum(inv.items, (i) => i.qty)}</td><td>Total H.T</td><td class="r">${n2(inv.ht)}</td></tr>${tot(`TVA${inv.vat_rate ? ' ' + inv.vat_rate + '%' : ''}`, n2(inv.vat))}${tot('Remise', n2(inv.disc))}</table>
   <div class="rttc"><b>Total T.T.C - CDF</b><span class="rbox">${n2(inv.total)}</span></div>
-  ${inv.vendeur_id ? `<div class="c" style="margin:6px 0;font-weight:700">VENTE À CRÉDIT${inv.due_date ? ` · ÉCHÉANCE ${ymdFr(inv.due_date)}` : ''}</div><div class="c small">Montant dû par le vendeur, non payé à la caisse</div>` : ''}
+  ${inv.vendeur_id ? `<div class="c" style="margin:6px 0;font-weight:700">VENTE À CRÉDIT${inv.due_date ? ` · ÉCHÉANCE ${ymdFr(inv.due_date)}` : ''}</div><div class="c small">Montant dû par le vendeur, non payé à la caisse</div><table class="rsum"><tr><td></td><td><b>Dû - USD</b></td><td class="r"><b>$${n2(Math.round((inv.total / inv.rate) * 100) / 100)}</b></td></tr><tr><td></td><td class="small">Taux</td><td class="r small">1 USD = ${n0(inv.rate)} CDF</td></tr></table>` : ''}
   ${inv.paid_usd ? `<table class="rsum rcash"><tr><td></td><td>Paid USD</td><td class="r">${n2(inv.paid_usd)}</td></tr><tr><td></td><td class="small">= CDF</td><td class="r small">${n2(Math.round(inv.paid_usd * (inv.usd_rate || inv.rate)))}</td></tr>${inv.paid_cdf ? `<tr><td></td><td>Paid CDF</td><td class="r">${n2(inv.paid_cdf)}</td></tr>` : ''}<tr><td></td><td class="small">Rate</td><td class="r small">1 USD = ${n0(inv.usd_rate || inv.rate)} CDF</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${inv.change_usd ? `$${inv.change_usd} + ${n2(inv.change_cdf ?? 0)} CDF` : n2(inv.change)}</b></td></tr></table>`
     : opt.cash || inv.tendered > inv.total ? `<table class="rsum rcash"><tr><td></td><td>Cash received</td><td class="r">${n2(inv.tendered)}</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${n2(inv.change)}</b></td></tr></table>` : ''}
   <div class="rl">Sales Person&nbsp;&nbsp; ${esc(inv.cashier_name)}</div>${inv.prepared_by_name ? `<div class="rl small">Prepared by&nbsp;&nbsp; ${esc(inv.prepared_by_name)}</div>` : ''}
@@ -264,16 +264,16 @@ export function statementHTML(st: Statement, c: Company, by: string) {
 export function vendeurStatementHTML(st: VendeurStatement, c: Company, by: string) {
   let run = st.brought_forward;
   const v = st.vendeur, o = st.state;
-  const rows = st.lines.map((l) => { run += l.dr - l.cr; return `<tr><td>${esc(l.date)}</td><td>${esc(l.no)}</td><td>${esc(l.what)}${l.due ? `<br><small>due ${esc(l.due)}</small>` : ''}</td><td class="r">${l.dr ? fCDF(l.dr) : ''}</td><td class="r">${l.cr ? fCDF(l.cr) : ''}</td><td class="r">${fCDF(run)}</td></tr>`; }).join('');
+  const rows = st.lines.map((l) => { run += l.dr - l.cr; return `<tr><td>${esc(l.date)}</td><td>${esc(l.no)}</td><td>${esc(l.what)}${l.due ? `<br><small>due ${esc(l.due)}</small>` : ''}</td><td class="r"><small>${l.cdf ? fCDF(l.cdf) + (l.rate ? ` @ ${l.rate}` : '') : ''}</small></td><td class="r">${l.dr ? fUSD(l.dr) : ''}</td><td class="r">${l.cr ? fUSD(l.cr) : ''}</td><td class="r">${fUSD(run)}</td></tr>`; }).join('');
   const promos = st.promos.length ? `<h3 style="margin:18px 0 6px">Promo items given (not owed)</h3><table class="t"><thead><tr><th>Date</th><th>Promo</th><th>Items</th><th class="r">Value CDF</th><th>Status</th></tr></thead><tbody>
     ${st.promos.map((p) => `<tr><td>${esc(p.date)}</td><td>${esc(p.no)}${p.invoice ? `<br><small>with ${esc(p.invoice)}</small>` : ''}</td><td>${(p.items ?? []).map((i) => `${i.qty} ${esc(i.unit)} ${esc(i.name)}`).join(', ')}${p.note ? `<br><small>${esc(p.note)}</small>` : ''}</td><td class="r">${fCDF(p.value)}</td><td>${p.status === 'settled' ? 'Settled' : 'Open'}</td></tr>`).join('')}
     <tr><td colspan="3"><b>Total promo items</b></td><td class="r"><b>${fCDF(sum(st.promos, (p) => p.value))}</b></td><td></td></tr></tbody></table>` : '';
-  const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(v.name)}</b>, vendeur of ${esc(v.shop_name)}${v.phone ? `, ${esc(v.phone)}` : ''}<br>Credit ${v.credit_days} days, limit ${fCDF(v.credit_limit)}</p>
-  <table class="t"><thead><tr><th>Date</th><th>No.</th><th>Particulars</th><th class="r">Goods CDF</th><th class="r">Paid CDF</th><th class="r">Balance CDF</th></tr></thead><tbody>
-  <tr><td>${esc(st.from)}</td><td></td><td><b>Brought forward</b></td><td></td><td></td><td class="r">${fCDF(st.brought_forward)}</td></tr>
-  ${rows || '<tr><td colspan="6">No entries in this period</td></tr>'}
-  <tr><td colspan="3"><b>Totals for the period</b></td><td class="r"><b>${fCDF(st.total_dr)}</b></td><td class="r"><b>${fCDF(st.total_cr)}</b></td><td class="r"><b>${fCDF(st.closing)}</b></td></tr></tbody></table>
-  <p style="margin-top:10px">Owed today: <b>${fCDF(o.balance)}</b>; credit left ${fCDF(o.available)}${o.overdue ? `; <b>overdue ${fCDF(o.overdue_amount)}</b> (since ${esc(o.oldest_due ?? '')})` : ''}.</p>${promos}`;
+  const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(v.name)}</b>, vendeur of ${esc(v.shop_name)}${v.phone ? `, ${esc(v.phone)}` : ''}<br>Credit ${v.credit_days} days, limit ${fUSD(Number(o.credit_limit_usd ?? 0))}</p>
+  <table class="t"><thead><tr><th>Date</th><th>No.</th><th>Particulars</th><th class="r">CDF</th><th class="r">Goods USD</th><th class="r">Paid USD</th><th class="r">Balance USD</th></tr></thead><tbody>
+  <tr><td>${esc(st.from)}</td><td></td><td><b>Brought forward</b></td><td></td><td></td><td></td><td class="r">${fUSD(st.brought_forward)}</td></tr>
+  ${rows || '<tr><td colspan="7">No entries in this period</td></tr>'}
+  <tr><td colspan="4"><b>Totals for the period</b></td><td class="r"><b>${fUSD(st.total_dr)}</b></td><td class="r"><b>${fUSD(st.total_cr)}</b></td><td class="r"><b>${fUSD(st.closing)}</b></td></tr></tbody></table>
+  <p style="margin-top:10px">Owed today: <b>${fUSD(o.balance)}</b>; credit left ${fUSD(o.available)}${o.overdue ? `; <b>overdue ${fUSD(o.overdue_amount)}</b> (since ${esc(o.oldest_due ?? '')})` : ''}.</p>${promos}`;
   return bookHTML(c, 'Vendeur statement', `${st.from} to ${st.to}`, body, by);
 }
 
@@ -284,10 +284,10 @@ export function vendeurPaymentHTML(x: { no: string; at: string; amount: number; 
   return `<div class="receipt inv"><div class="c"><div class="big">${esc((c.name || shop.name).toUpperCase())}</div><div>${esc((shop.address || c.address || '').toUpperCase())}</div>${c.phone ? `<div>Tél: ${esc(c.phone)}</div>` : ''}</div>
   <div class="c"><span class="rbox">REÇU # : ${esc(x.no)}</span></div>
   <div class="rl"><b>Vendeur:</b> ${esc(x.vendeur.toUpperCase())}</div><div class="rl"><b>Date:</b> ${rDate(x.at)}&nbsp;&nbsp; <b>Time:</b> ${rTime(x.at)}</div>
-  <table class="rsum">${row('Dû avant', n2(x.before))}</table>
-  <div class="rttc"><b>Payé - CDF</b><span class="rbox">${n2(x.amount)}</span></div>
-  ${x.paid_usd ? `<table class="rsum rcash">${row('Payé USD', '$' + n2(x.paid_usd))}${row('<span class="small">Taux</span>', `<span class="small">1 USD = ${n0(x.usd_rate ?? 0)} CDF</span>`)}${row('<span class="small">= CDF</span>', `<span class="small">${n2(Math.round(x.paid_usd * (x.usd_rate ?? 0)))}</span>`)}${x.paid_cdf ? row('Payé CDF', n2(x.paid_cdf)) : ''}${x.change_cdf ? row('<b>Monnaie rendue</b>', `<b>${n2(x.change_cdf)} CDF</b>`) : ''}</table>` : ''}
-  <table class="rsum">${row('<b>Reste à payer</b>', `<b>${n2(x.state.balance)}</b>`)}${x.state.overdue ? row('Dont en retard', n2(x.state.overdue_amount)) : ''}</table>
+  <table class="rsum">${row('Dû avant - USD', '$' + n2(x.before))}</table>
+  <div class="rttc"><b>Payé - USD</b><span class="rbox">$${n2(x.amount)}</span></div>
+  <table class="rsum rcash">${x.paid_usd ? row('Reçu USD', '$' + n2(x.paid_usd)) : ''}${x.paid_cdf ? row('Reçu CDF', n2(x.paid_cdf)) + row('<span class="small">Taux</span>', `<span class="small">1 USD = ${n0(x.usd_rate ?? 0)} CDF</span>`) : ''}${x.change_cdf ? row('<b>Monnaie rendue</b>', `<b>${n2(x.change_cdf)} CDF</b>`) : ''}</table>
+  <table class="rsum">${row('<b>Reste à payer - USD</b>', `<b>$${n2(x.state.balance)}</b>`)}${x.state.overdue ? row('Dont en retard', '$' + n2(x.state.overdue_amount)) : ''}</table>
   <div class="rl">Reçu par&nbsp;&nbsp; ${esc(x.by_name)}</div></div>`;
 }
 
@@ -295,10 +295,10 @@ export function vendeurPaymentHTML(x: { no: string; at: string; amount: number; 
 export function promoReportHTML(d: PromoData, c: Company, shopName: string, by: string, status: 'open' | 'kept' | 'settled') {
   const m = new Date(d.month + 'T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(shopName)}</b>: promo items given out, open at the end of ${esc(m)}${d.carried_pcs ? `, ${d.carried_pcs} pieces of them from earlier months` : ''}. ${status === 'settled' ? '<b>Settled.</b>' : status === 'kept' ? 'Kept, not settled.' : 'Not yet kept or settled.'}</p>
-  <table class="t"><thead><tr><th>Item</th><th class="r">Pieces given out</th></tr></thead><tbody>
-  ${(d.items ?? []).map((i) => `<tr><td>${esc(i.name)}</td><td class="r">${i.qty}${i.unit !== 'pcs' ? ' ' + esc(i.unit) : ''}</td></tr>`).join('') || '<tr><td colspan="2">No promo items</td></tr>'}
-  <tr><td><b>Total</b></td><td class="r"><b>${d.pcs ?? 0}</b></td></tr></tbody></table>
-  <p style="margin-top:10px">Promo items are not invoiced and not owed by the vendeurs.</p>`;
+  <table class="t"><thead><tr><th>Item</th><th class="r">Pieces given out</th><th class="r">From cash sales</th><th class="r">From credit sales</th></tr></thead><tbody>
+  ${(d.items ?? []).map((i) => `<tr><td>${esc(i.name)}</td><td class="r">${i.qty}${i.unit !== 'pcs' ? ' ' + esc(i.unit) : ''}</td><td class="r">${i.cash_qty ?? '-'}</td><td class="r">${i.credit_qty ?? i.qty}</td></tr>`).join('') || '<tr><td colspan="4">No promo items</td></tr>'}
+  <tr><td><b>Total</b></td><td class="r"><b>${d.pcs ?? 0}</b></td><td class="r"><b>${d.cash_pcs ?? '-'}</b></td><td class="r"><b>${d.credit_pcs ?? d.pcs ?? 0}</b></td></tr></tbody></table>
+  <p style="margin-top:10px">Promo items are given free: they are not invoiced, and the vendeurs do not owe them.</p>`;
   return bookHTML(c, 'Promo report', m, body, by);
 }
 

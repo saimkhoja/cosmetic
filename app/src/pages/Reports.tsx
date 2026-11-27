@@ -8,6 +8,7 @@ import { cashBookHTML, printHTML, reportHTML, shiftSlipHTML, type CashBook, type
 import { Bars, Dual2, Empty, Head, HList, Kpi, Modal, Note, useAction } from '../components/ui';
 import { rpc } from '../lib/supabase';
 import { CategoryChart, unitsText } from '../components/CategoryChart';
+import { PromoReportModal } from './Vendeurs';
 
 export default function Reports() {
   const { profile } = useAuth();
@@ -44,6 +45,8 @@ export default function Reports() {
   });
   // the Admin's cash report of one shop: every move of its cash drawers, CDF and USD side by side
   const cb = useAction();
+  // the Shop Admin's monthly promo report: promo items given with cash sales and with goods on credit
+  const [promo, setPromo] = useState(false), promoOn = !isAdmin && !!(settings.data?.features?.cash_promo || settings.data?.features?.vendeurs);
   const printCash = () => cb.run(async () => {
     if (!sid) return;
     const d = await rpc<CashBook>('cash_book', { p_from: from <= to ? from : to, p_to: from <= to ? to : from, p_shop: sid });
@@ -67,7 +70,7 @@ export default function Reports() {
   return (
     <>
       <Head t="Sales report" s={isAdmin ? 'Pick the dates, then print. A single day, such as Today, prints the day end report for the shop. Choose a shop for its cash report: sales, credit collections, exchanges and expenses, in CDF and USD.' : 'Pick the dates, then print. A single day, such as Today, prints the shift end report for the shop, with the passcode the Admin gave you.'} a={isAdmin && sid ? <><button className="btn" disabled={!r} onClick={print}><Icon n="printer" /> {single ? 'Day end slip' : 'Sales report'}</button><button className="btn primary" id="cashrep" disabled={cb.busy} onClick={() => void printCash()}><Icon n="printer" /> Print cash report</button></>
-        : <button className="btn primary" disabled={!r} onClick={print}><Icon n="printer" /> {single ? 'Print day end report' : 'Print or save as PDF'}</button>} />
+        : <>{promoOn ? <button className="btn ghost" id="promorep2" onClick={() => setPromo(true)}><Icon n="gift" /> Promo report</button> : null}<button className="btn primary" disabled={!r} onClick={print}><Icon n="printer" /> {single ? 'Print day end report' : 'Print or save as PDF'}</button></>} />
       <div className="card"><div className="rangebar">
         <div className="field"><label>From</label><input type="date" className="input" value={from} max={today()} onChange={(e) => setFrom(e.target.value)} /></div>
         <div className="field"><label>To</label><input type="date" className="input" value={to} max={today()} onChange={(e) => setTo(e.target.value)} /></div>
@@ -75,6 +78,7 @@ export default function Reports() {
         <div className="seg">{[['today', 'Today'], ['7', '7 days'], ['30', '30 days'], ['month', 'This month']].map(([k, l]) => <button key={k} onClick={() => setRange(k)}>{l}</button>)}</div>
       </div></div>
       {cb.err ? <Note warn i="alert">{cb.err}</Note> : null}
+      {promo ? <PromoReportModal month={today().slice(0, 8) + '01'} shopName={shopName(profile!.shop_id ?? '')} onClose={() => setPromo(false)} /> : null}
       {!r ? <div className="card"><Empty i={rep.error ? 'alert' : 'refresh'} t={rep.error ? (rep.error as Error).message : 'Loading the report'} /></div> : <>
         <div className="kpis">
           <Kpi i="receipt" l="Sales, VAT included" tone="ok"><Dual2 b={fCDF(r.total)} s={`${r.n} invoices${isAdmin ? ', ' + fUSD(r.total_usd) : ''}${r.capped ? ' · up to the shop limit' : ''}`} /></Kpi>
