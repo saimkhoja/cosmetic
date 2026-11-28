@@ -1,4 +1,4 @@
--- QuickSales: which database updates (migrations 10 to 51) this installation has.
+-- QuickSales: which database updates (migrations 10 to 52) this installation has.
 -- Paste it into the Supabase SQL Editor and click Run. It only reads; it changes nothing.
 -- Each "MISSING" file must be run, in order. A migration re-creates functions from the newest version it knows, so
 -- after running a missing older file, run every later file again too (they are safe to run twice). For example,
@@ -45,5 +45,6 @@ select step, case when ok then 'done' else 'MISSING: run this file' end as statu
   (48, '20261201000001_vendeur_opening_usd.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'vendeurs' and column_name = 'opening_usd')),
   (49, '20261202000001_usd_credit_grn_edit_cash_promo.sql', exists (select 1 from pg_proc where proname = 'edit_grn')),
   (50, '20261203000001_credit_at_internal_rate.sql', exists (select 1 from pg_proc where proname = 'post_invoice' and pg_get_functiondef(oid) like '%Exchange on goods on credit%')),
-  (51, '20261204000001_import_updates_items.sql', exists (select 1 from pg_proc where proname = 'import_products' and pg_get_functiondef(oid) like '%items updated%'))
+  (51, '20261204000001_import_updates_items.sql', exists (select 1 from pg_proc where proname = 'import_products' and pg_get_functiondef(oid) like '%items updated%')),
+  (52, '20261205000001_stock_in_with_store.sql', exists (select 1 from pg_proc where proname = 'stock_in_shops' and pg_get_functiondef(oid) like '%with a central store too%'))
 ) as m(n, step, ok) order by n;

@@ -206,8 +206,10 @@ export function ShopStockAll() {
   const noStore = useNoStore(), [stockIn, setStockIn] = useState(false);
   return (
     <>
-      <Head t="Shop stock" s={noStore ? 'What each shop has right now, best sellers of the last 30 days first. Add stock straight into the shops from here, typed or from an Excel file.' : 'What each outlet has right now, next to the central store, best sellers of the last 30 days first. Send stock straight from here.'} a={<><button className="btn ghost" onClick={() => setCount(true)}><Icon n="printer" /> Print stock count sheet</button>{noStore ? (isAdmin ? <button className="btn primary" id="stockin" onClick={() => setStockIn(true)}><Icon n="plus" /> Add stock to shops</button> : null)
-          : <button className="btn primary" onClick={() => setSend({ pid: '' })}><Icon n="truck" /> New delivery</button>}</>} />
+      <Head t="Shop stock" s={noStore ? 'What each shop has right now, best sellers of the last 30 days first. Add stock straight into the shops from here, typed or from an Excel file.' : 'What each outlet has right now, next to the central store, best sellers of the last 30 days first. Send stock from the store, or add stock straight into the shops, typed or from an Excel file.'} a={<><button className="btn ghost" onClick={() => setCount(true)}><Icon n="printer" /> Print stock count sheet</button>
+          {/* the Admin adds stock straight into the shops, with or without a central store */}
+          {isAdmin ? <button className={`btn ${noStore ? 'primary' : 'ghost'}`} id="stockin" onClick={() => setStockIn(true)}><Icon n="plus" /> Add stock to shops</button> : null}
+          {noStore ? null : <button className="btn primary" onClick={() => setSend({ pid: '' })}><Icon n="truck" /> New delivery</button>}</>} />
       <div className="toolbar"><div className="search"><Icon n="search" /><input placeholder="Search by name, code or category" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <select className="input" style={{ width: 'auto' }} value={only} onChange={(e) => setOnly(e.target.value)}><option value="all">All outlets</option>{(shops.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
         <span className="chip warn">5 or fewer</span><span className="chip bad">None or sold on order</span></div>
@@ -248,6 +250,7 @@ function CountSheet({ first, values, onClose, print }: { first: string; values: 
  *  the item template. Items not in the catalogue are made from the file with its details (gross and net cost, prices);
  *  items already in it only get the quantity. Booked at cost as opening stock. */
 function StockInModal({ sid, onClose }: { sid?: string; onClose: () => void }) {
+  const noStore = useNoStore();
   const shops = useShops(), products = useProducts(), stock = useStock(), settings = useSettings(), refresh = useRefresh(), toast = useToast(), a = useAction();
   const [sel, setSel] = useState<string[]>(sid ? [sid] : []), [lines, setLines] = useState<Record<string, Line>>({});
   const [imp, setImp] = useState<{ file: string; rows: StockImportRow[] } | null>(null), [reading, setReading] = useState(false), [impErr, setImpErr] = useState('');
@@ -290,7 +293,7 @@ function StockInModal({ sid, onClose }: { sid?: string; onClose: () => void }) {
     <Modal title="Add stock to shops" icon="plus" xl onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="stockgo" disabled={a.busy || reading} onClick={() => void save()}><Icon n="check" /> Add stock{chosen.length + newRows.length ? ` · ${chosen.length + newRows.length} items` : ''}</button></>}>
       <div className="field"><label>Add to these shops</label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{(shops.data ?? []).filter((s) => s.active).map((s) => <label key={s.id} className="chip" style={{ cursor: 'pointer', padding: '8px 12px', fontSize: 14, ...(sel.includes(s.id) ? { background: 'var(--btn)', color: '#fff' } : {}) }}><input type="checkbox" checked={sel.includes(s.id)} onChange={(e) => toggle(s.id, e.target.checked)} /> {s.name}</label>)}</div>
-        <span className="hint">There is no central store: the stock goes straight into each shop ticked, the same quantities in each.</span></div>
+        <span className="hint">{noStore ? 'There is no central store: the' : 'The'} stock goes straight into each shop ticked, the same quantities in each{noStore ? '' : ', without passing through the central store (whose stock does not change)'}.</span></div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0 12px' }}>
         <label className="btn" style={{ cursor: 'pointer' }}><Icon n="download" /> Import from Excel<input id="stockfile" type="file" accept=".xlsx,.csv,.txt" style={{ display: 'none' }} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }} /></label>
         <button className="btn ghost" onClick={() => saveBlob(templateXlsx(), 'QuickSales-items-template.xlsx')}><Icon n="download" /> Download Excel template</button>

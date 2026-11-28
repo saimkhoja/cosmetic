@@ -1743,7 +1743,11 @@ reset role;
 -- ===== no central store: stock added straight into the shops, typed or from the item Excel template =====
 set role authenticated;
 select t.as('00000000-0000-0000-0000-00000000000a');
-select t.fails(format($$select public.stock_in_shops(array['%s']::uuid[], '[{"product_id":"%s","qty":5}]')$$, t.get('gom'), t.get('cgel')), 'by delivery', 'with a central store, stock goes to the shops by delivery');
+select t.put('sinst0', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid));
+select t.put('sinres', public.stock_in_shops(array[t.get('gom')::uuid], jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'qty', 5)))::text);
+select t.ok((t.get('sinres')::jsonb->>'units')::int = 5
+  and (select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid) = t.get('sinst0')::int + 5,
+  'with a central store too, the Admin adds stock straight into a shop');
 reset role;
 update settings set features = features || '{"no_warehouse": true}' where id = 1;
 select t.put('sin_gom0', (select qty::text from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid));
