@@ -335,7 +335,7 @@ export default function Till() {
       const next = { ...snap, stock }; setSnap(next); void setSnapshot(next);
       printHTML(saleCopies(inv, snap.settings.company, snap.shop, false, oneCopy));
       setLast(inv);
-      toast(`Invoice ${no}: ${fCDF(S.total)} on credit to ${v.name}, due ${res.due_date ? res.due_date.split('-').reverse().join('/') : ''}.${res.promo ? ` Promo ${res.promo.no}: ${fCDF(res.promo.value)} of items, not invoiced.` : ''} Printing.`);
+      toast(`Invoice ${no}: ${fUSD(Math.round((S.total / ir) * 100) / 100)} on credit to ${v.name}, due ${res.due_date ? res.due_date.split('-').reverse().join('/') : ''}.${res.promo ? ` Promo ${res.promo.no}: ${fCDF(res.promo.value)} of items, not invoiced.` : ''} Printing.`);
       resetSale();
       return true;
     } catch (e) {

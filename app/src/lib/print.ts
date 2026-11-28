@@ -76,6 +76,9 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   const ed = inv.edits && inv.edits.length ? inv.edits[inv.edits.length - 1] : null;
   const tot = (a: string, b: string) => `<tr><td></td><td>${a}</td><td class="r">${b}</td></tr>`;
   const rccm = c.rccm ? (/^rccm/i.test(c.rccm) ? c.rccm : 'RCCM ' + c.rccm) : '';
+  // goods on credit are owed in USD: every amount in dollars, at the internal rate of the sale
+  const cr = inv.vendeur_id ? Number(inv.usd_rate || inv.rate) || 1 : 0;
+  const m0 = (n: number) => (cr ? '$' + n2(Math.round((n / cr) * 100) / 100) : n0(n)), m2 = (n: number) => (cr ? '$' + n2(Math.round((n / cr) * 100) / 100) : n2(n));
   return `<div class="receipt inv"><div class="c"><div class="big">${esc((c.name || shop.name).toUpperCase())}</div>${rccm ? `<div>${esc(rccm)}</div>` : ''}${c.idnat ? `<div>ID NAT: ${esc(c.idnat)}</div>` : ''}${c.nif ? `<div>N° IMPOT: ${esc(c.nif)}</div>` : ''}<div>${esc((shop.address || c.address || '').toUpperCase())}</div>${c.phone ? `<div>Tél: ${esc(c.phone)}</div>` : ''}</div>
   <div class="c"><span class="rbox">INVOICE # : ${esc(inv.no)}</span></div>
   <div class="c small">${opt.copy === 'shop' ? 'Copie magasin' : 'Copie client'}${opt.dup ? ' · DUPLICATA' : ''}${ed || inv.revised_from != null ? ' · FACTURE MODIFIÉE' : ''}</div>
@@ -83,10 +86,10 @@ export function receiptHTML(inv: Invoice, c: Company, shop: Shop, opt: { copy?: 
   ${inv.customer ? `<div class="rl"><b>Customer:</b> ${esc(inv.customer.toUpperCase())}</div>` : ''}
   <div class="rl"><b>Date:</b> ${rDate(inv.t)}&nbsp;&nbsp; <b>Time:</b> ${rTime(inv.t)}</div>
   <table class="ritems"><thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">%</th><th class="r">Total</th></tr></thead>
-  <tbody>${inv.items.map((it) => `<tr><td colspan="5">${esc(it.name.toUpperCase())}</td></tr><tr><td>${esc((it.piece ? 'piece' : it.unit).toUpperCase())}</td><td class="r">${it.qty}</td><td class="r">${n0(it.price)}</td><td class="r">${Number(inv.disc_pct) || 0}</td><td class="r">${n0(it.line)}</td></tr>`).join('')}</tbody></table>
-  <table class="rsum"><tr><td class="small"><b>Total Items</b>&nbsp; ${sum(inv.items, (i) => i.qty)}</td><td>Total H.T</td><td class="r">${n2(inv.ht)}</td></tr>${tot(`TVA${inv.vat_rate ? ' ' + inv.vat_rate + '%' : ''}`, n2(inv.vat))}${tot('Remise', n2(inv.disc))}</table>
-  <div class="rttc"><b>Total T.T.C - CDF</b><span class="rbox">${n2(inv.total)}</span></div>
-  ${inv.vendeur_id ? `<div class="c" style="margin:6px 0;font-weight:700">VENTE À CRÉDIT${inv.due_date ? ` · ÉCHÉANCE ${ymdFr(inv.due_date)}` : ''}</div><div class="c small">Montant dû par le vendeur, non payé à la caisse</div><table class="rsum"><tr><td></td><td><b>Dû - USD</b></td><td class="r"><b>$${n2(Math.round((inv.total / (inv.usd_rate || inv.rate)) * 100) / 100)}</b></td></tr><tr><td></td><td class="small">Taux interne</td><td class="r small">1 USD = ${n0(inv.usd_rate || inv.rate)} CDF</td></tr></table>` : ''}
+  <tbody>${inv.items.map((it) => `<tr><td colspan="5">${esc(it.name.toUpperCase())}</td></tr><tr><td>${esc((it.piece ? 'piece' : it.unit).toUpperCase())}</td><td class="r">${it.qty}</td><td class="r">${m0(it.price)}</td><td class="r">${Number(inv.disc_pct) || 0}</td><td class="r">${m0(it.line)}</td></tr>`).join('')}</tbody></table>
+  <table class="rsum"><tr><td class="small"><b>Total Items</b>&nbsp; ${sum(inv.items, (i) => i.qty)}</td><td>Total H.T</td><td class="r">${m2(inv.ht)}</td></tr>${tot(`TVA${inv.vat_rate ? ' ' + inv.vat_rate + '%' : ''}`, m2(inv.vat))}${tot('Remise', m2(inv.disc))}</table>
+  <div class="rttc"><b>Total T.T.C - ${cr ? 'USD' : 'CDF'}</b><span class="rbox">${m2(inv.total)}</span></div>
+  ${inv.vendeur_id ? `<div class="c" style="margin:6px 0;font-weight:700">VENTE À CRÉDIT${inv.due_date ? ` · ÉCHÉANCE ${ymdFr(inv.due_date)}` : ''}</div><div class="c small">Montant dû par le vendeur en USD, non payé à la caisse</div><div class="c small">Taux interne: 1 USD = ${n0(cr)} CDF</div>` : ''}
   ${inv.paid_usd ? `<table class="rsum rcash"><tr><td></td><td>Paid USD</td><td class="r">${n2(inv.paid_usd)}</td></tr><tr><td></td><td class="small">= CDF</td><td class="r small">${n2(Math.round(inv.paid_usd * (inv.usd_rate || inv.rate)))}</td></tr>${inv.paid_cdf ? `<tr><td></td><td>Paid CDF</td><td class="r">${n2(inv.paid_cdf)}</td></tr>` : ''}<tr><td></td><td class="small">Rate</td><td class="r small">1 USD = ${n0(inv.usd_rate || inv.rate)} CDF</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${inv.change_usd ? `$${inv.change_usd} + ${n2(inv.change_cdf ?? 0)} CDF` : n2(inv.change)}</b></td></tr></table>`
     : opt.cash || inv.tendered > inv.total ? `<table class="rsum rcash"><tr><td></td><td>Cash received</td><td class="r">${n2(inv.tendered)}</td></tr><tr><td></td><td><b>Change</b></td><td class="r"><b>${n2(inv.change)}</b></td></tr></table>` : ''}
   <div class="rl">Sales Person&nbsp;&nbsp; ${esc(inv.cashier_name)}</div>${inv.prepared_by_name ? `<div class="rl small">Prepared by&nbsp;&nbsp; ${esc(inv.prepared_by_name)}</div>` : ''}
@@ -264,15 +267,15 @@ export function statementHTML(st: Statement, c: Company, by: string) {
 export function vendeurStatementHTML(st: VendeurStatement, c: Company, by: string) {
   let run = st.brought_forward;
   const v = st.vendeur, o = st.state;
-  const rows = st.lines.map((l) => { run += l.dr - l.cr; return `<tr><td>${esc(l.date)}</td><td>${esc(l.no)}</td><td>${esc(l.what)}${l.due ? `<br><small>due ${esc(l.due)}</small>` : ''}</td><td class="r"><small>${l.cdf ? fCDF(l.cdf) + (l.rate ? ` @ ${l.rate}` : '') : ''}</small></td><td class="r">${l.dr ? fUSD(l.dr) : ''}</td><td class="r">${l.cr ? fUSD(l.cr) : ''}</td><td class="r">${fUSD(run)}</td></tr>`; }).join('');
+  const rows = st.lines.map((l) => { run += l.dr - l.cr; return `<tr><td>${esc(l.date)}</td><td>${esc(l.no)}</td><td>${esc(l.what)}${l.due ? `<br><small>due ${esc(l.due)}</small>` : ''}</td><td class="r">${l.dr ? fUSD(l.dr) : ''}</td><td class="r">${l.cr ? fUSD(l.cr) : ''}</td><td class="r">${fUSD(run)}</td></tr>`; }).join('');
   const promos = st.promos.length ? `<h3 style="margin:18px 0 6px">Promo items given (not owed)</h3><table class="t"><thead><tr><th>Date</th><th>Promo</th><th>Items</th><th class="r">Value CDF</th><th>Status</th></tr></thead><tbody>
     ${st.promos.map((p) => `<tr><td>${esc(p.date)}</td><td>${esc(p.no)}${p.invoice ? `<br><small>with ${esc(p.invoice)}</small>` : ''}</td><td>${(p.items ?? []).map((i) => `${i.qty} ${esc(i.unit)} ${esc(i.name)}`).join(', ')}${p.note ? `<br><small>${esc(p.note)}</small>` : ''}</td><td class="r">${fCDF(p.value)}</td><td>${p.status === 'settled' ? 'Settled' : 'Open'}</td></tr>`).join('')}
     <tr><td colspan="3"><b>Total promo items</b></td><td class="r"><b>${fCDF(sum(st.promos, (p) => p.value))}</b></td><td></td></tr></tbody></table>` : '';
   const body = `<p style="color:#000;margin:0 0 8px"><b>${esc(v.name)}</b>, vendeur of ${esc(v.shop_name)}${v.phone ? `, ${esc(v.phone)}` : ''}<br>Credit ${v.credit_days} days, limit ${fUSD(Number(o.credit_limit_usd ?? 0))}</p>
-  <table class="t"><thead><tr><th>Date</th><th>No.</th><th>Particulars</th><th class="r">CDF</th><th class="r">Goods USD</th><th class="r">Paid USD</th><th class="r">Balance USD</th></tr></thead><tbody>
-  <tr><td>${esc(st.from)}</td><td></td><td><b>Brought forward</b></td><td></td><td></td><td></td><td class="r">${fUSD(st.brought_forward)}</td></tr>
-  ${rows || '<tr><td colspan="7">No entries in this period</td></tr>'}
-  <tr><td colspan="4"><b>Totals for the period</b></td><td class="r"><b>${fUSD(st.total_dr)}</b></td><td class="r"><b>${fUSD(st.total_cr)}</b></td><td class="r"><b>${fUSD(st.closing)}</b></td></tr></tbody></table>
+  <table class="t"><thead><tr><th>Date</th><th>No.</th><th>Particulars</th><th class="r">Goods USD</th><th class="r">Paid USD</th><th class="r">Balance USD</th></tr></thead><tbody>
+  <tr><td>${esc(st.from)}</td><td></td><td><b>Brought forward</b></td><td></td><td></td><td class="r">${fUSD(st.brought_forward)}</td></tr>
+  ${rows || '<tr><td colspan="6">No entries in this period</td></tr>'}
+  <tr><td colspan="3"><b>Totals for the period</b></td><td class="r"><b>${fUSD(st.total_dr)}</b></td><td class="r"><b>${fUSD(st.total_cr)}</b></td><td class="r"><b>${fUSD(st.closing)}</b></td></tr></tbody></table>
   <p style="margin-top:10px">Owed today: <b>${fUSD(o.balance)}</b>; credit left ${fUSD(o.available)}${o.overdue ? `; <b>overdue ${fUSD(o.overdue_amount)}</b> (since ${esc(o.oldest_due ?? '')})` : ''}.</p>${promos}`;
   return bookHTML(c, 'Vendeur statement', `${st.from} to ${st.to}`, body, by);
 }
