@@ -142,10 +142,11 @@ describe('import', () => {
     expect(r[2].msg).toMatch(/Net carton cost must be a number/);
     expect(r[3].msg).toMatch(/pc is below/);
   });
-  it('skips names already in the catalogue and flags bad rows', () => {
-    const rows = [['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per carton USD'], ['Shea lotion', 'Skin', 76, 24, 5, 108], ['Cheap', 'X', 100, 10, 5, 90], ['New one', 'X', 10, 10, 2, 15]];
+  it('updates items already in the catalogue, makes new ones and flags bad rows', () => {
+    const rows = [['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per carton USD', 'Opening cartons'], ['Shea lotion', 'Skin', 76, 24, 5, 108, 2], ['Cheap', 'X', 100, 10, 5, 90], ['New one', 'X', 10, 10, 2, 15], ['New one', 'X', 10, 10, 2, 15]];
     const r = impParse(rows, ['shea lotion'], []);
-    expect(r.map((x) => x.status)).toEqual(['skip', 'bad', 'ok']);
+    expect(r.map((x) => x.status)).toEqual(['update', 'bad', 'ok', 'bad']);
+    expect([r[0].qty, r[0].msg, r[3].msg]).toEqual([48, 'In the catalogue: details updated, 48 pcs added', 'This name is in the file twice']);
   });
   it('parses numbers written the French way', () => { expect(inum('1,80')).toBe(1.8); expect(inum('$1 500')).toBe(1500); });
   it('crc32 matches the standard value', () => expect(crc32(new TextEncoder().encode('123456789'))).toBe(0xcbf43926));
@@ -160,11 +161,11 @@ describe('supermarket', () => {
     expect(findByCode(list, '')).toBeUndefined();
   });
   it('shows a sale without a name as walk-in', () => { expect(custName('')).toBe('Walk-in'); expect(custName('Mama Rose')).toBe('Mama Rose'); });
-  it('imports barcodes and skips those already used', () => {
+  it('imports barcodes: a known one updates its item, one used twice in the file is refused', () => {
     const rows = [['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Barcode'],
       ['Soap A', 'Bath', 24, 24, 1.5, 6001234567890], ['Soap B', 'Bath', 24, 24, 1.5, '6009 9999'], ['Soap C', 'Bath', 24, 24, 1.5, '6009 9999'], ['Soap D', 'Bath', 24, 24, 1.5, '60*1']];
     const r = impParse(rows, [], [], ['6001234567890']);
-    expect(r.map((x) => x.status)).toEqual(['skip', 'ok', 'skip', 'bad']);
+    expect(r.map((x) => x.status)).toEqual(['update', 'ok', 'bad', 'bad']);
     expect(r[1].barcode).toBe('60099999');
   });
 });
@@ -273,11 +274,11 @@ describe('several barcodes', () => {
     expect(barcodesOf(items[1])).toEqual(['333333']);
   });
   it('splits barcodes typed or imported together', () => { expect(splitBarcodes('111 111; 222222,111111|333333')).toEqual(['111111', '222222', '333333']); });
-  it('imports several barcodes in one cell and skips a row reusing one', () => {
+  it('imports several barcodes in one cell, refuses a row reusing one and updates the item with a known one', () => {
     const rows = [['Name', 'Category', 'Carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Barcode'],
       ['A', 'Bath', 24, 24, 1.5, '444444;555555'], ['B', 'Bath', 24, 24, 1.5, '666666, 555555'], ['C', 'Bath', 24, 24, 1.5, '222222']];
     const r = impParse(rows, [], [], ['222222']);
-    expect(r.map((x) => x.status)).toEqual(['ok', 'skip', 'skip']);
+    expect(r.map((x) => x.status)).toEqual(['ok', 'bad', 'update']);
     expect(r[0].barcode).toBe('444444;555555');
   });
 });

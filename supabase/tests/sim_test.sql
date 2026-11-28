@@ -102,9 +102,8 @@ select t.put('sup_acc', (select account_id::text from suppliers where id = t.get
 select t.ok((select group_code from accounts where id = t.get('sup_acc')::uuid) = 'creditors', 'a supplier gets its own ledger under Sundry Creditors');
 select t.fails($$select public.save_supplier('{"name":"beauty import sarl"}')$$, 'already exists', 'supplier names are unique');
 select t.ok((public.import_products('[{"row":2,"name":"Aloe gel","category":"Skin care","carton_cost":60,"per_carton":24,"pc":4,"dzn":45,"ctn":90,"open_cartons":5},
-  {"row":3,"name":"Test Lotion","category":"Skin care","carton_cost":60,"per_carton":24,"pc":4,"ctn":90},
   {"row":4,"name":"Argan shampoo","category":"Hair care","carton_cost":72,"per_carton":12,"pc":9,"ctn":100,"sku":"AR-1"}]', 'test.xlsx')->>'imported')::int = 2,
-  'import adds new rows and skips a duplicate name');
+  'import adds new rows');
 select t.ok((select wh_qty from products where name='Aloe gel') = 120 and (select reorder from products where name='Aloe gel') = 24, 'import opening stock and default reorder');
 select t.ok(exists (select 1 from categories where name = 'Hair care'), 'import creates a category it does not know');
 select t.fails($$select public.import_products('[{"row":2,"name":"Fine","category":"X","carton_cost":10,"per_carton":10,"pc":2,"ctn":15},{"row":3,"name":"Cheap","category":"X","carton_cost":100,"per_carton":10,"pc":5,"ctn":90}]')$$,
@@ -517,7 +516,7 @@ select t.ok((select barcode from products where id = t.get('scan')::uuid) = '600
 select t.fails($$select public.save_product('{"name":"Scan soap 2","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"6001234567890"}')$$, 'already used by Scan soap', 'a barcode belongs to one item');
 select t.fails($$select public.save_product('{"name":"Scan soap 3","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"60*1"}')$$, 'not valid', 'a barcode with symbols is refused');
 select t.ok((public.import_products('[{"row":2,"name":"Scan cream","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"6001234567890"},
-  {"row":3,"name":"Scan gel","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"6009999999999"}]')->>'imported')::int = 1, 'import skips a row whose barcode is already used');
+  {"row":3,"name":"Scan gel","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"6009999999999"}]')->>'imported')::int = 1, 'a row whose barcode is already used updates that item instead of making a new one');
 select t.ok((select barcode from products where name = 'Scan gel') = '6009999999999', 'import saves the barcode');
 select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,'barcode',''));
 select t.ok((select barcode from products where id = t.get('scan')::uuid) is null, 'a barcode can be removed');
@@ -526,7 +525,7 @@ select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan 
 select t.ok((select barcodes = '{111111,222222}' and barcode = '111111' from products where id = t.get('scan')::uuid), 'an item keeps several barcodes, the first also as its main one');
 select t.fails($$select public.save_product('{"name":"Scan soap 4","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"999999;222222"}')$$, '222222 is already used by Scan soap', 'a second barcode belongs to one item too');
 select t.ok((public.import_products('[{"row":2,"name":"Scan cream B","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"333333;444444"},
-  {"row":3,"name":"Scan cream C","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"555555,111111"}]')->>'imported')::int = 1, 'import takes several barcodes and skips a row reusing one');
+  {"row":3,"name":"Scan cream C","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"barcode":"555555,111111"}]')->>'imported')::int = 1, 'import takes several barcodes; a row with a known one updates that item');
 select t.ok((select barcodes from products where name = 'Scan cream B') = '{333333,444444}', 'import saves every barcode of the row');
 select public.save_product(jsonb_build_object('id', t.get('scan'), 'name','Scan soap','category','Skin care','carton_cost',24,'per_carton',24,'pc',1.5,'barcode','222222'));
 select t.ok((select barcodes = '{222222}' and barcode = '222222' from products where id = t.get('scan')::uuid), 'removing one barcode keeps the other');
@@ -1997,6 +1996,24 @@ select t.as('00000000-0000-0000-0000-00000000000c');
 select public.cancel_promo((t.get('cp1')::jsonb->>'id')::uuid, 'given by mistake');
 reset role;
 select t.ok((select qty from shop_stock where shop_id = t.get('gom')::uuid and product_id = t.get('cgel')::uuid) = t.get('cp0')::int, 'a cancelled cash-sale promo goes back into the stock');
+
+-- ===== Inventory import: items already in the catalogue are updated =====
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000a');
+-- an item already in the catalogue: updated from its row, its stock added to the store at cost
+select public.import_products('[{"row":2,"name":"Upd item","category":"Skin care","carton_cost":24,"per_carton":24,"pc":1.5,"ctn":30,"open_cartons":1,"barcode":"7770001"}]');
+select t.put('upd0', (select count(*)::text from vouchers where type = 'opening'));
+select t.put('updres', public.import_products('[{"row":2,"name":"upd ITEM","category":"Hair care","carton_cost":48,"per_carton":24,"pc":2.5,"ctn":55,"open_cartons":2,"open_pcs":3,"barcode":"7770002"},
+  {"row":3,"name":"Upd new","category":"Hair care","carton_cost":24,"per_carton":24,"pc":1.5}]', 'upd.xlsx')::text);
+select t.ok((t.get('updres')::jsonb->>'imported')::int = 1 and (t.get('updres')::jsonb->>'updated')::int = 1 and (t.get('updres')::jsonb->>'stock')::int = 51
+  and (select p.name = 'Upd item' and p.category = 'Hair care' and p.price_usd = 2.5 and p.carton_usd = 55 and p.wh_qty = 24 + 51 and p.barcodes = '{7770001,7770002}' and c.cost_usd = 2
+       from products p join product_costs c on c.product_id = p.id where lower(p.name) = 'upd item')
+  and (select count(*)::text from vouchers where type = 'opening') <> t.get('upd0'),
+  'an item already in the catalogue takes the row''s category, prices, cost and new barcode, keeps its name, and gets its stock added at cost');
+select t.fails($$select public.import_products('[{"row":2,"name":"Upd item","category":"X","carton_cost":24,"per_carton":24,"pc":1.5},{"row":3,"name":"Upd item","category":"X","carton_cost":24,"per_carton":24,"pc":1.6}]')$$,
+  'more than one row', 'an item on two rows of one file is refused');
+reset role;
+select t.ok(t.unbalanced() = 0, 'the import keeps the books balanced');
 
 -- the live API (Supabase's safeupdate) refuses a DELETE or UPDATE without WHERE; these tests run as the owner, where
 -- it does not apply, so every function is checked for one here instead

@@ -120,7 +120,8 @@ export function templateXlsx(): Blob {
 }
 
 export interface ImportRow {
-  n: number; status: 'ok' | 'bad' | 'skip'; msg: string; sku: string; barcode: string; qty: number;
+  /** ok: a new item; update: an item already in the catalogue, whose details the row updates and whose stock it adds to */
+  n: number; status: 'ok' | 'update' | 'bad' | 'skip'; msg: string; sku: string; barcode: string; qty: number;
   o: { name: string; category: string; carton_cost: number; net_cost: number; per_carton: number; pc: number; half: number; dzn: number; ctn: number; open_cartons: number; open_pcs: number; reorder: number | null };
 }
 /** Turns sheet rows into checked import rows; names, codes and barcodes already in the catalogue are skipped. */
@@ -133,7 +134,9 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
   const miss = Object.keys(label).filter((f) => col[f] === undefined);
   if (miss.length) throw new Error('Missing columns: ' + miss.map((f) => label[f]).join(', '));
   const g = (r: Cell[], f: string) => (col[f] === undefined ? '' : r[col[f]] ?? '');
-  const names = new Set(existingNames.map((n) => n.trim().toLowerCase())), skus = new Set(existingSkus.map((s) => s.toLowerCase())), codes = new Set(existingBarcodes);
+  // what the catalogue has, and what the rows above already used
+  const names0 = new Set(existingNames.map((n) => n.trim().toLowerCase())), skus0 = new Set(existingSkus.map((s) => s.toLowerCase())), codes0 = new Set(existingBarcodes);
+  const names = new Set<string>(), skus = new Set<string>(), codes = new Set<string>();
   const out: ImportRow[] = [];
   rows.slice(hi + 1).forEach((r, i) => {
     if (!r || !r.some((c) => String(c ?? '').trim() !== '')) return;
@@ -142,9 +145,11 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
     const o = { name, category: String(g(r, 'category')).trim().replace(/\s+/g, ' ').slice(0, 30) || 'Other', carton_cost: inum(g(r, 'cartonCost')), net_cost: inum(g(r, 'netCost')), per_carton: inum(g(r, 'perCarton')), pc: (() => { const v = inum(g(r, 'pc')); return isNaN(v) ? 0 : v; })(), half: isNaN(hz) ? 0 : hz, dzn: isNaN(dz) ? 0 : dz, ctn: isNaN(ct) ? 0 : ct,
       open_cartons: isNaN(oc) ? 0 : oc, open_pcs: isNaN(op) ? 0 : op, reorder: isNaN(ro) ? null : ro };
     const row: ImportRow = { n: hi + i + 2, o, sku, barcode, status: 'ok', msg: '', qty: 0 };
-    if (name && names.has(name.toLowerCase())) { row.status = 'skip'; row.msg = 'Name already exists'; }
-    else if (sku && skus.has(sku.toLowerCase())) { row.status = 'skip'; row.msg = 'Code already exists'; }
-    else if (bl.some((b) => codes.has(b))) { row.status = 'skip'; row.msg = `Barcode already exists (${bl.find((b) => codes.has(b))})`; }
+    // an item already in the catalogue (by its code, name or a barcode) is updated from the row and gets its stock
+    const known = (!!sku && skus0.has(sku.toLowerCase())) || (!!name && names0.has(name.toLowerCase())) || bl.some((b) => codes0.has(b));
+    if (name && names.has(name.toLowerCase())) { row.status = 'bad'; row.msg = 'This name is in the file twice'; }
+    else if (sku && skus.has(sku.toLowerCase())) { row.status = 'bad'; row.msg = 'This code is in the file twice'; }
+    else if (bl.some((b) => codes.has(b))) { row.status = 'bad'; row.msg = `This barcode is in the file twice (${bl.find((b) => codes.has(b))})`; }
     else if (bl.some((b) => !/^[A-Za-z0-9-]{3,32}$/.test(b))) { row.status = 'bad'; row.msg = 'Each barcode must be 3 to 32 letters or digits; separate several with ;'; }
     else if (bl.length > MAX_BARCODES) { row.status = 'bad'; row.msg = `At most ${MAX_BARCODES} barcodes per item`; }
     else if (isNaN(o.net_cost) && String(g(r, 'netCost')).trim() !== '') { row.status = 'bad'; row.msg = 'Net carton cost must be a number, or left empty'; }
@@ -153,7 +158,11 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
       if (p) { row.status = 'bad'; row.msg = p; }
       else if (oc < 0 || op < 0 || ro < 0) { row.status = 'bad'; row.msg = 'Stock and reorder cannot be negative'; }
       else if ([oc, op, ro].some((x) => !isNaN(x) && x % 1)) { row.status = 'bad'; row.msg = 'Stock and reorder must be whole numbers'; }
-      else { row.qty = o.open_cartons * o.per_carton + o.open_pcs; if (row.o.reorder === null) row.o.reorder = o.per_carton; names.add(name.toLowerCase()); if (sku) skus.add(sku.toLowerCase()); bl.forEach((b) => codes.add(b)); }
+      else {
+        row.qty = o.open_cartons * o.per_carton + o.open_pcs; if (row.o.reorder === null && !known) row.o.reorder = o.per_carton;
+        if (known) { row.status = 'update'; row.msg = row.qty > 0 ? `In the catalogue: details updated, ${row.qty} pcs added` : 'In the catalogue: details updated'; }
+        names.add(name.toLowerCase()); if (sku) skus.add(sku.toLowerCase()); bl.forEach((b) => codes.add(b));
+      }
     }
     out.push(row);
   });

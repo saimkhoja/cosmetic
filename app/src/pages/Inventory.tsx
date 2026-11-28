@@ -177,7 +177,9 @@ function SalesRateModal({ rate, onClose }: { rate: number; onClose: () => void }
 function ImportModal({ products, rate, onClose }: { products: Product[]; rate: number; onClose: () => void }) {
   const refresh = useRefresh(), toast = useToast(), a = useAction();
   const [rowsIn, setRows] = useState<ImportRow[]>([]), [file, setFile] = useState(''), [reading, setReading] = useState(false);
-  const ok = rowsIn.filter((r) => r.status === 'ok'), bad = rowsIn.filter((r) => r.status === 'bad'), skip = rowsIn.filter((r) => r.status === 'skip');
+  // new items and items already in the catalogue (updated, their stock added) both go; rows with errors do not
+  const fresh = rowsIn.filter((r) => r.status === 'ok'), upd = rowsIn.filter((r) => r.status === 'update'), ok = [...fresh, ...upd];
+  const bad = rowsIn.filter((r) => r.status === 'bad'), skip = rowsIn.filter((r) => r.status === 'skip');
   const fp = (v: number) => (v > 0 ? fCDF(toCDF(v, rate)) : '-');
   const pick = async (f?: File) => {
     if (!f) return; setFile(f.name); a.setErr(''); setRows([]); setReading(true);
@@ -190,12 +192,12 @@ function ImportModal({ products, rate, onClose }: { products: Product[]; rate: n
     } catch (e) { a.setErr((e as Error).message); } finally { setReading(false); }
   };
   const go = () => a.run(async () => {
-    const res = await rpc<{ imported: number; new_categories: number }>('import_products', { p_rows: ok.map((r) => ({ row: r.n, name: r.o.name, category: r.o.category, carton_cost: r.o.carton_cost, net_cost: hasNet(r.o.net_cost) ? r.o.net_cost : null, per_carton: r.o.per_carton, pc: r.o.pc, half: r.o.half, dzn: r.o.dzn, ctn: r.o.ctn, open_cartons: r.o.open_cartons, open_pcs: r.o.open_pcs, reorder: r.o.reorder, sku: r.sku, barcode: r.barcode })), p_file: file });
-    await refresh('products', 'costs', 'stock', 'audit', 'categories'); toast(`${res.imported} item${res.imported === 1 ? '' : 's'} imported${res.new_categories ? `, ${res.new_categories} new categor${res.new_categories === 1 ? 'y' : 'ies'} made` : ''}`); onClose();
+    const res = await rpc<{ imported: number; updated?: number; stock?: number; new_categories: number }>('import_products', { p_rows: ok.map((r) => ({ row: r.n, name: r.o.name, category: r.o.category, carton_cost: r.o.carton_cost, net_cost: hasNet(r.o.net_cost) ? r.o.net_cost : null, per_carton: r.o.per_carton, pc: r.o.pc, half: r.o.half, dzn: r.o.dzn, ctn: r.o.ctn, open_cartons: r.o.open_cartons, open_pcs: r.o.open_pcs, reorder: r.o.reorder, sku: r.sku, barcode: r.barcode })), p_file: file });
+    await refresh('products', 'costs', 'stock', 'audit', 'categories'); toast(`${res.imported} new item${res.imported === 1 ? '' : 's'}${res.updated ? `, ${res.updated} updated` : ''}${res.stock ? `, ${res.stock} pcs added to the store` : ''}${res.new_categories ? `, ${res.new_categories} new categor${res.new_categories === 1 ? 'y' : 'ies'} made` : ''}`); onClose();
   });
   return (
-    <Modal title="Import items from Excel" icon="download" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="impBtn" disabled={!ok.length || a.busy} onClick={() => void go()}><Icon n="check" /> Import {ok.length} item{ok.length === 1 ? '' : 's'}</button></>}>
-      <Note i="doc">One row per new item. Several barcodes for one item go in the same Barcode cell, separated with ; (for example 6001234567890;6009876543210). Prices are in USD, like the item form. The net carton cost is optional: when given it is the item's cost; left empty, the gross carton cost counts. Stock is counted in pcs. Leave any price (per pc, half dozen, dozen or carton) empty when an item is not sold that way; each item needs at least one. A category that does not exist yet is created. Items whose name or code already exists are skipped, so nothing is overwritten.</Note>
+    <Modal title="Import items from Excel" icon="download" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" id="impBtn" disabled={!ok.length || a.busy} onClick={() => void go()}><Icon n="check" /> Import {ok.length} row{ok.length === 1 ? '' : 's'}</button></>}>
+      <Note i="doc">One row per item. A new item is made from its row. An item already in the catalogue (the same code, name or barcode) takes the row's category, prices and costs (a new cost revalues its stock) and gets any new barcodes; its cartons and pcs are added to the store as opening stock. Its name and code stay. Several barcodes for one item go in the same Barcode cell, separated with ; (for example 6001234567890;6009876543210). Prices are in USD, like the item form. The net carton cost is optional: when given it is the item's cost; left empty, the gross carton cost counts. Stock is counted in pcs. Leave any price (per pc, half dozen, dozen or carton) empty when an item is not sold that way; each item needs at least one. A category that does not exist yet is created. Items whose name or code already exists are skipped, so nothing is overwritten.</Note>
       <div className="tw" style={{ marginBottom: 12 }}><table className="t nw" style={{ fontSize: 13 }}><thead><tr>{IMPCOLS.map((c) => <th key={c}>{c}</th>)}</tr></thead><tbody><tr><td>Aloe vera gel 300 ml</td><td>Skin care</td><td>60</td><td /><td>24</td><td>4</td><td>23</td><td>45</td><td>90</td><td>5</td><td>0</td><td>24</td><td /><td /></tr></tbody></table></div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
         <button className="btn ghost" onClick={() => saveBlob(templateXlsx(), 'SIM-items-template.xlsx')}><Icon n="download" /> Download Excel template</button>
@@ -204,14 +206,14 @@ function ImportModal({ products, rate, onClose }: { products: Product[]; rate: n
       </div>
       {reading ? <Empty i="refresh" t={`Reading ${file}`} /> : null}
       {rowsIn.length ? <>
-        <div className="toolbar"><span className="chip ok"><Icon n="check" /> {ok.length} ready</span>{bad.length ? <span className="chip bad"><Icon n="alert" /> {bad.length} with errors</span> : null}{skip.length ? <span className="chip warn">{skip.length} skipped, already in the catalogue</span> : null}</div>
+        <div className="toolbar"><span className="chip ok"><Icon n="check" /> {fresh.length} new</span>{upd.length ? <span className="chip"><Icon n="refresh" /> {upd.length} to update</span> : null}{bad.length ? <span className="chip bad"><Icon n="alert" /> {bad.length} with errors</span> : null}{skip.length ? <span className="chip warn">{skip.length} skipped, already in the catalogue</span> : null}</div>
         <div className="tw" style={{ maxHeight: '44vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}><table className="t" style={{ fontSize: 13.5 }}><thead><tr><th>Row</th><th>Item</th><th>Carton</th><th className="r">Per pc</th><th className="r">Half dozen</th><th className="r">Per dozen</th><th className="r">Per carton</th><th className="r">Opening</th><th>Status</th></tr></thead><tbody>
           {rowsIn.slice(0, 500).map((r) => <tr key={r.n}><td className="code">{r.n}</td><td><b>{r.o.name || '(no name)'}</b><div className="code">{r.o.category}{r.sku ? ' · ' + r.sku : ''}{r.barcode ? ' · ' + r.barcode.split(';').join(', ') : ''}</div></td>
             <td className="nw">{isNaN(r.o.carton_cost) ? '-' : fUSD(r.o.carton_cost)}{hasNet(r.o.net_cost) ? <div className="code">net {fUSD(r.o.net_cost)}</div> : null}<div className="code">{isNaN(r.o.per_carton) ? '-' : r.o.per_carton} pcs</div></td>
             <td className="r nw">{fp(r.o.pc)}</td><td className="r nw">{r.o.per_carton === 6 ? <span className="code">= carton</span> : fp(r.o.half)}</td><td className="r nw">{r.o.per_carton === 12 ? <span className="code">= carton</span> : fp(r.o.dzn)}</td><td className="r nw">{fp(r.o.ctn)}</td><td className="r nw">{r.status === 'ok' ? r.qty + ' pcs' : ''}</td>
-            <td>{r.status === 'ok' ? <span className="chip ok">Ready</span> : <span className={`chip ${r.status === 'skip' ? 'warn' : 'bad'}`}>{r.msg}</span>}</td></tr>)}
+            <td>{r.status === 'ok' ? <span className="chip ok">New item</span> : r.status === 'update' ? <span className="chip">{r.msg}</span> : <span className={`chip ${r.status === 'skip' ? 'warn' : 'bad'}`}>{r.msg}</span>}</td></tr>)}
         </tbody></table></div>
-        {bad.length ? <Note i="alert" warn style={{ marginTop: 12 }}>Rows with errors are not imported. Fix them in Excel and import the file again; items already imported are skipped.</Note> : null}
+        {bad.length ? <Note i="alert" warn style={{ marginTop: 12 }}>Rows with errors stop the import. Fix them in Excel and choose the file again: items already in the catalogue are then updated, not made twice.</Note> : null}
       </> : null}
       <div id="imperr" className="lerr">{a.err}</div>
     </Modal>
