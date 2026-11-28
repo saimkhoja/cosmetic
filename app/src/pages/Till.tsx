@@ -307,7 +307,8 @@ export default function Till() {
   // goods on credit to a vendeur (shop admin, Vendeurs on): the server checks and records it at once, so it needs the
   // connection; the till number is used up only once the server has the invoice
   const onCredit = isAdmin && !!snap?.settings.features?.vendeurs;
-  const sellCredit = async (v: Vendeur, promo: { product_id: string; qty: number }[], note: string) => {
+  // day: today, or a past day for a credit sale entered late; ir: the internal rate it is owed at, in USD
+  const sellCredit = async (v: Vendeur, promo: { product_id: string; qty: number }[], note: string, day: string, ir: number) => {
     if (busy.current || !snap) return false;
     if (!dev) { toast('Connect to the internet once to register this till', 'bad'); return false; }
     if (!navigator.onLine) { toast('Goods on credit need the internet connection', 'bad'); return false; }
@@ -317,15 +318,16 @@ export default function Till() {
     if (overLimit(S)) { toast(discProblem(dp, S.gross), 'warn'); return false; }
     busy.current = true;
     try {
-      const { no, n } = await peekInvoiceNo(dev), id = crypto.randomUUID(), t = new Date().toISOString();
+      // a past day: the sale is dated at noon of that day
+      const { no, n } = await peekInvoiceNo(dev), id = crypto.randomUUID(), t = day && day < today() ? new Date(day + 'T12:00:00').toISOString() : new Date().toISOString();
       const items = pr.map((l) => ({ product_id: l.pid, name: l.p.name, unit: l.u.piece ? 'piece' : l.u.u, mult: l.u.piece ? 0 : l.u.mult, piece: !!l.u.piece, qty: l.qty, price: l.price, line: l.price * l.qty }));
       const res = await rpc<{ status: string; no: string; due_date: string | null; promo: { no: string; value: number } | null }>('submit_invoice', { p: {
-        id, no, device_id: dev.id, cashier_id: profile!.id, t, rate, vat_rate: vat, ...(typeof dp === 'number' ? { disc_pct: dp } : { disc: S.disc }),
+        id, no, device_id: dev.id, cashier_id: profile!.id, t, rate, usd_rate: ir, vat_rate: vat, ...(typeof dp === 'number' ? { disc_pct: dp } : { disc: S.disc }),
         customer: v.name, vendeur_id: v.id, items: items.map(({ product_id, unit, mult, piece, qty, price }) => ({ product_id, unit, mult, piece, qty, price })),
         ...(promo.length ? { promo, promo_note: note } : {}) } });
       await takeInvoiceNo(dev, n);
       const inv: Invoice = { id, no, shop_id: shopId, cashier_id: profile!.id, cashier_name: profile!.name, t, rate, vat_rate: vat, gross: S.gross, disc_pct: S.pct, disc: S.disc, total: S.total, vat: S.vat, ht: S.ht,
-        tendered: 0, change: 0, copies: oneCopy ? 1 : 2, printed: oneCopy ? 1 : 2, items, edits: [], synced: true, customer: v.name, order_id: null, prepared_by_name: null, vendeur_id: v.id, due_date: res.due_date };
+        tendered: 0, change: 0, copies: oneCopy ? 1 : 2, printed: oneCopy ? 1 : 2, items, edits: [], synced: true, customer: v.name, order_id: null, prepared_by_name: null, vendeur_id: v.id, due_date: res.due_date, usd_rate: ir };
       // the till's stock: the goods, and the promo items (pcs or sets)
       const stock = { ...snap.stock };
       for (const l of pr) stock[l.pid] = takeLocal(stock[l.pid] ?? { qty: 0, open_pieces: 0 }, l.qty, l.u.piece ? 0 : l.u.mult, !!l.u.piece, l.p.pieces_per_set);
@@ -496,7 +498,7 @@ export default function Till() {
           {!navigator.onLine ? <Note warn i="wifioff">No connection now: promo items cannot be recorded until the till is online.</Note> : null}
           <PromoPicker products={snap.products} stockOf={(id) => { const p = byId.get(id); return p ? left(p) : 0; }} rate={rate} lines={promoLn} setLines={setPromoLn} />
         </Modal> : null}
-      {credit ? <CreditModal total={T.total} count={T.count} products={snap.products} stockOf={(id) => { const p = byId.get(id); return p ? left(p) : 0; }} rate={rate} onClose={() => setCredit(false)} onGive={sellCredit} /> : null}
+      {credit ? <CreditModal total={T.total} count={T.count} products={snap.products} stockOf={(id) => { const p = byId.get(id); return p ? left(p) : 0; }} rate={rate} usdRate={usdRate} onClose={() => setCredit(false)} onGive={sellCredit} /> : null}
       {showParked ? <ParkedModal list={parked} onResume={resume} onDelete={unpark} onClose={() => setShowParked(false)} /> : null}
       {tickets ? <TicketsModal products={hotSort(snap.products, snap.ranks)} rate={rate} shopName={snap.shop.name} onClose={() => setTickets(false)} /> : null}
       {view ? <Modal title={'Invoice ' + view.no} icon="receipt" onClose={() => setView(null)} foot={<button className="btn" onClick={() => setView(null)}>Close</button>}><div className="rwrap" dangerouslySetInnerHTML={{ __html: receiptHTML(view, snap.settings.company, snap.shop, { copy: 'client', cash: cashStep }) }} /></Modal> : null}

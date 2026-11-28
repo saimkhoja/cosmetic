@@ -315,30 +315,42 @@ export function PromoReportModal({ month: m0, shopName, onClose }: { month: stri
 
 /** At the till: give the goods in the sale on credit to a vendeur, with promo items if any. Warns (but allows) when the
  *  vendeur is overdue or the goods take them over the credit limit. */
-export function CreditModal({ total, count, products, stockOf, rate, onClose, onGive }: {
-  total: number; count: number; products: Product[]; stockOf: (id: string) => number; rate: number; onClose: () => void;
-  onGive: (v: Vendeur, promo: { product_id: string; qty: number }[], note: string) => Promise<boolean>;
+export function CreditModal({ total, count, products, stockOf, rate, usdRate, onClose, onGive }: {
+  total: number; count: number; products: Product[]; stockOf: (id: string) => number; rate: number; usdRate: number; onClose: () => void;
+  onGive: (v: Vendeur, promo: { product_id: string; qty: number }[], note: string, day: string, ir: number) => Promise<boolean>;
 }) {
+  // the day of the sale (a credit sale given earlier can be entered on its day) and the internal rate it is owed at
+  const [day, setDay] = useState(today()), [irTyped, setIr] = useState<string | null>(null);
+  const ir = Number(irTyped ?? usdRate) || 0, irOff = ir < usdRate / 2 || ir > usdRate * 2, past = day < today();
   const vend = useVendeurs(navigator.onLine), a = useAction();
   const [q, setQ] = useState(''), [sel, setSel] = useState<string | null>(null), [promoOn, setPromoOn] = useState(false), [lines, setLines] = useState<Record<string, string>>({}), [note, setNote] = useState('');
   const live = (vend.data ?? []).filter((v) => v.active), ql = q.trim().toLowerCase();
   const list = live.filter((v) => !ql || (v.name + ' ' + v.phone).toLowerCase().includes(ql));
   const v = live.find((x) => x.id === sel) ?? null;
-  // the goods are owed in USD, at the rate they are sold at
-  const totalUsd = rate > 0 ? Math.round((total / rate) * 100) / 100 : 0;
+  // the goods are owed in USD at the internal rate (taux interne) of the sale
+  const totalUsd = ir > 0 ? Math.round((total / ir) * 100) / 100 : 0;
   const warns = v ? creditWarnings(v, totalUsd) : [];
-  const due = v ? ld(Date.now() + v.credit_days * 864e5) : '';
+  const due = v ? ld(new Date(day + 'T12:00:00').getTime() + v.credit_days * 864e5) : '';
   const go = () => a.run(async () => {
     if (!v) throw new Error('Choose the vendeur');
     const promo = promoOn ? promoLines(lines) : [];
     const short = promo.find((l) => l.qty > stockOf(l.product_id));
     if (short) throw new Error(`Not enough ${products.find((p) => p.id === short.product_id)?.name ?? 'stock'} in the shop for the promo`);
-    if (await onGive(v, promo, note)) onClose();
+    if (!day || day > today()) throw new Error('Choose the date of the sale: today or a day before');
+    if (!(ir > 0) || irOff) throw new Error(`Check the internal rate: ${fCDF(ir)} is far from the internal rate (${fCDF(usdRate)})`);
+    if (await onGive(v, promo, note, day, ir)) onClose();
   });
   return (
     <Modal title="Give the goods on credit" icon="users" wide onClose={onClose} foot={<><button className="btn" onClick={onClose}>Cancel</button>
       <button className={`btn ${warns.length ? 'danger' : 'primary'}`} id="creditgo" disabled={a.busy || !v} onClick={() => void go()}><Icon n="printer" /> {warns.length ? 'Give on credit anyway and print' : 'Give on credit and print'}</button></>}>
-      <p style={{ marginTop: 0 }}><b>{fUSD(totalUsd)}</b> ({fCDF(total)} at {rate}), {count} {count === 1 ? 'item' : 'items'}: the stock leaves the shop now, nothing is paid at the till, and the vendeur owes {fUSD(totalUsd)}.</p>
+      <p style={{ marginTop: 0 }}><b>{fUSD(totalUsd)}</b> ({fCDF(total)} at the internal rate {ir}), {count} {count === 1 ? 'item' : 'items'}: the stock leaves the shop now, nothing is paid at the till, and the vendeur owes {fUSD(totalUsd)}.</p>
+      <div className="frow" id="creddate">
+        <div className="field"><label htmlFor="credday">Date of the sale</label><input id="credday" className="input" type="date" value={day} max={today()} onChange={(e) => setDay(e.target.value || today())} />
+          <span className="hint">{past ? 'A credit sale given earlier, entered on its day: it is due after the credit days from that date.' : 'Today. Pick an earlier day to enter a credit sale given before.'}</span></div>
+        <div className="field"><label htmlFor="credir">Internal rate (taux interne){irTyped !== null && Number(irTyped) !== usdRate ? <span className="chip warn" style={{ marginLeft: 6 }}>typed by hand</span> : null}</label>
+          <input id="credir" className="input" type="number" min="1" step="1" value={irTyped ?? String(usdRate)} onChange={(e) => setIr(e.target.value)} />
+          <span className={irOff ? 'lerr' : 'hint'}>{irOff ? `Check the rate: far from the internal rate (${fCDF(usdRate)})` : irTyped !== null && Number(irTyped) !== usdRate ? <button type="button" className="linkbtn" onClick={() => setIr(null)}>Use today's internal rate ({fCDF(usdRate)})</button> : past ? 'Type the internal rate of that day if it was different.' : "Today's internal rate, from Settings."}</span></div>
+      </div>
       {!navigator.onLine ? <Note i="wifioff" warn>Goods on credit need the internet connection, to check what the vendeur owes.</Note>
         : vend.isLoading ? <Empty i="refresh" t="Loading vendeurs" /> : vend.error ? <Note i="alert" warn>{(vend.error as Error).message}</Note> : !live.length ? <Note i="users" warn>No vendeurs yet. Add them in the Vendeurs tab.</Note> : <>
         <div className="search" style={{ marginBottom: 8 }}><Icon n="search" /><input id="credq" placeholder="Find the vendeur" value={q} onChange={(e) => setQ(e.target.value)} autoFocus aria-label="Find the vendeur" /></div>
