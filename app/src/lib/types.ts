@@ -80,7 +80,9 @@ export interface VendeurPaid { id: string; no: string; amount: number; amount_cd
 export interface VendeurStatement {
   vendeur: Omit<Vendeur, keyof VendeurState>; from: string; to: string; brought_forward: number; total_dr: number; total_cr: number; closing: number;
   /** dr and cr in USD; cdf what the line was in Francs (goods at their sale's rate) */
-  lines: { date: string; no: string; what: string; dr: number; cr: number; cdf?: number | null; rate?: number | null; due: string | null; invoice_id: string | null }[];
+  lines: { date: string; no: string; what: string; dr: number; cr: number; cdf?: number | null; rate?: number | null; due: string | null; invoice_id: string | null;
+    /** the items of a sale on credit, each with its amount in USD */
+    items?: { name: string; unit: string; qty: number; amount: number }[] | null }[];
   promos: { id: string; no: string; date: string; value: number; status: 'open' | 'settled'; note: string; invoice: string | null; items: { name: string; unit: string; qty: number; line: number }[] }[];
   payments: { id: string; no: string; at: string; amount: number; amount_cdf?: number; note: string; status: 'ok' | 'cancelled'; by_name: string; cancel_reason: string | null;
     paid_usd?: number; paid_cdf?: number; usd_rate?: number | null; change_cdf?: number }[];

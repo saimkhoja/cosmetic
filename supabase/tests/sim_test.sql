@@ -1487,7 +1487,7 @@ select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('cinv2'), 'no'
   'vendeur_id', t.get('v1'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 2, 'price', 5700))))->>'status') = 'ok',
   'goods on credit over the limit are still given');
 select t.ok((t.vstate('Papa Jean')->>'over_limit')::boolean and (t.vstate('Papa Jean')->>'available')::numeric = -2, 'the vendeur is shown over the limit');
-select t.ok(t.logged('Invoice GOM-T2-000901 for Papa Jean, on credit, due %, over the credit limit of $7.00%'), 'the log notes the limit was passed, in USD');
+select t.ok(t.logged('Invoice GOM-T2-000901 for Papa Jean, on credit at 2850, due %, over the credit limit of $7.00%'), 'the log notes the limit was passed, in USD');
 select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000902","device_id":"%s","rate":2850,"vat_rate":16,"vendeur_id":"%s","paid_usd":5,"items":[{"product_id":"%s","mult":1,"qty":1,"price":5700}]}')$$,
   gen_random_uuid(), t.get('dev2'), t.get('v1'), t.get('cgel')), 'not paid at the till', 'goods on credit take no money at the till');
 -- payments: partial, never more than owed; the oldest goods are settled first
@@ -1502,7 +1502,7 @@ reset role;
 select t.ok((select string_agg(a.code || a.group_code || l.side, ',' order by l.side, a.group_code) from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
   where v.source_type = 'invoice' and v.source_id = t.get('cinv1')::uuid and l.amount = 11400) is null
   and exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
-    where v.source_type = 'invoice' and v.source_id = t.get('cinv1')::uuid and a.vendeur_id = t.get('v1')::uuid and l.side = 'Dr' and l.amount = 11400 and l.currency = 'FC')
+    where v.source_type = 'invoice' and v.source_id = t.get('cinv1')::uuid and a.vendeur_id = t.get('v1')::uuid and l.side = 'Dr' and l.amount = 4 and l.currency = 'USD')
   and not exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
     where v.source_type = 'invoice' and v.source_id = t.get('cinv1')::uuid and a.code like 'CASH_SHOP%'), 'a sale on credit is Dr the vendeur''s ledger, not the cash');
 select t.ok((select a.group_code from accounts a where a.vendeur_id = t.get('v1')::uuid) = 'debtors', 'each vendeur has a ledger under Sundry Debtors');
@@ -1533,7 +1533,7 @@ select t.put('cinv3', gen_random_uuid()::text);
 select t.ok((public.submit_invoice(jsonb_build_object('id', t.get('cinv3'), 'no', 'GOM-T2-000903', 'device_id', t.get('dev2'), 'rate', 2850, 'vat_rate', 16,
   'vendeur_id', t.get('v1'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 1, 'price', 5700))))->'vendeur'->>'overdue')::boolean,
   'goods are still given to an overdue vendeur; the answer says they are overdue');
-select t.ok(t.logged('Invoice GOM-T2-000903 for Papa Jean, on credit, due %, $2.00 overdue%'), 'goods given to an overdue vendeur are logged with what is overdue');
+select t.ok(t.logged('Invoice GOM-T2-000903 for Papa Jean, on credit at 2850, due %, $2.00 overdue%'), 'goods given to an overdue vendeur are logged with what is overdue');
 -- the statement
 select t.ok((select jsonb_array_length(x->'lines') = 5 and (x->>'closing')::numeric = 8 and x->>'currency' = 'USD' and jsonb_array_length(x->'promos') = 1
   from public.vendeur_statement(t.get('v1')::uuid, current_date - 30, current_date) x), 'the statement lists the opening balance, the goods and the payment; the promo apart');
@@ -1613,6 +1613,36 @@ select t.put('vrep', public.sales_report(current_date, current_date, t.get('gom'
 reset role;
 select t.ok(exists (select 1 from jsonb_array_elements(t.get('vrep')::jsonb->'slips'->0->'vendeurs') v where v->>'name' = 'Dollar payer'), 'the day end slip lists them too');
 
+-- a sale on credit counts in USD at the internal rate of its sale: 5 700 CDF sold at 2 850, internal rate 2 800 = $2.04
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.put('cinvi', gen_random_uuid()::text);
+select public.submit_invoice(jsonb_build_object('id', t.get('cinvi'), 'no', 'GOM-T2-000912', 'device_id', t.get('dev2'), 'rate', 2850, 'usd_rate', 2800, 'vat_rate', 16,
+  'vendeur_id', t.get('v_usd'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 1, 'price', 5700))));
+select t.ok((t.vstate('Dollar payer')->>'balance')::numeric = 2.04
+  and exists (select 1 from jsonb_array_elements(public.vendeur_statement(t.get('v_usd')::uuid, current_date, current_date)->'lines') l
+    where l->>'no' = 'GOM-T2-000912' and (l->>'dr')::numeric = 2.04 and (l->>'rate')::numeric = 2800 and (l->>'cdf')::bigint = 5700
+      and l->'items'->0->>'name' = 'Credit gel' and (l->'items'->0->>'qty')::int = 1 and (l->'items'->0->>'amount')::numeric = 2.04),
+  'a sale on credit is owed in USD at the internal rate of its sale; the statement lists its items with their amount in USD');
+reset role;
+select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+    where v.source_type = 'invoice' and v.source_id = t.get('cinvi')::uuid and a.vendeur_id = t.get('v_usd')::uuid and l.side = 'Dr' and l.currency = 'USD') = 2.04
+  and exists (select 1 from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
+    where v.source_type = 'invoice' and v.source_id = t.get('cinvi')::uuid and a.code = 'FX_GAIN' and l.side = 'Cr')
+  and t.unbalanced() = 0, 'in the books the vendeur owes the same USD; the difference with the sales rate is exchange, and the books balance');
+set role authenticated;
+select t.as('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.vendeur_pay(jsonb_build_object('vendeur_id', t.get('v_usd'), 'paid_cdf', 5700, 'rate', 2800))->'state'->>'balance')::numeric = 0,
+  'paid back in Francs at the internal rate, the same Francs clear it');
+-- a sale on credit entered for a past day, at that day's internal rate: due after the credit days from that date
+select public.submit_invoice(jsonb_build_object('id', gen_random_uuid(), 'no', 'GOM-T2-000913', 'device_id', t.get('dev2'), 'rate', 2850, 'usd_rate', 2750, 'vat_rate', 16,
+  't', (current_date - 10)::timestamp + interval '12 hours', 'vendeur_id', t.get('v_usd'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 1, 'price', 5700))));
+select t.fails(format($$select public.submit_invoice('{"id":"%s","no":"GOM-T2-000914","device_id":"%s","rate":2850,"usd_rate":275,"vat_rate":16,"vendeur_id":"%s","items":[{"product_id":"%s","mult":1,"qty":1,"price":5700}]}')$$,
+  gen_random_uuid(), t.get('dev2'), t.get('v_usd'), t.get('cgel')), 'Check the internal rate', 'an internal rate with a zero missing is caught');
+reset role;
+select t.ok((select due_date = current_date - 10 + 7 and usd_rate = 2750 from invoices where no = 'GOM-T2-000913') and (t.vstate('Dollar payer')->>'balance')::numeric = 2.07
+  and t.logged('Invoice GOM-T2-000913 for Dollar payer, on credit dated % at 2750, due %'),
+  'a sale on credit can be entered for a past day, with that day''s internal rate');
 update settings set rate = t.get('r0')::numeric, book_rate = t.get('b0')::numeric where id = 1;
 -- ===== money exchange at the counter, and expenses paid from the shop's cash =====
 select t.put('xslip0', t.slip_today(t.get('gom')::uuid)::text);
