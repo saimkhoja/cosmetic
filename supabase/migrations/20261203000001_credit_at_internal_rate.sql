@@ -5,6 +5,7 @@
 -- (same voucher numbers): the vendeur's ledger in USD, the difference with the sale at the sales rate as exchange.
 -- A sale on credit can be entered for a past day (the Shop Admin picks the date at the till), with the internal rate of
 -- that day: it is due after the credit days from that date.
+-- A vendeur's statement lists the items of each sale on credit, with their amount in USD.
 -- Already running QuickSales? Run this file once, after 20261202000001_usd_credit_grn_edit_cash_promo.sql.
 
 -- stop at once if the update before this one was not run
@@ -64,16 +65,21 @@ begin
     select v.created_at as t, (v.created_at at time zone tz)::date as d, ''::text as no,
       'Opening balance' || case when v.opening_usd > 0 or v.opening_cdf > 0 then ', ' || concat_ws(' + ', case when v.opening_usd > 0 then app.usd(v.opening_usd) end,
         case when v.opening_cdf > 0 then app.fc(v.opening_cdf) || coalesce(' at ' || trim_scale(v.opening_rate), '') end) else '' end as what,
-      round(v.opening_value_usd, 2) as dr, 0::numeric as cr, v.opening_balance::bigint as cdf, null::numeric as rate, null::date as due, null::uuid as invoice_id
+      round(v.opening_value_usd, 2) as dr, 0::numeric as cr, v.opening_balance::bigint as cdf, null::numeric as rate, null::date as due, null::uuid as invoice_id,
+      null::jsonb as items
     where v.opening_value_usd > 0
     union all
     select i.t, (i.t at time zone tz)::date, i.no,
       'Goods on credit, ' || (select coalesce(sum(qty), 0) from invoice_items where invoice_id = i.id) || ' items'
         || case when exists (select 1 from invoice_edits where invoice_id = i.id) then ' (changed)' else '' end,
-      round(i.total / coalesce(i.usd_rate, i.rate), 2), 0, i.total, coalesce(i.usd_rate, i.rate), i.due_date, i.id
+      round(i.total / coalesce(i.usd_rate, i.rate), 2), 0, i.total, coalesce(i.usd_rate, i.rate), i.due_date, i.id,
+      -- each item and its amount in USD (after the invoice's discount, at the internal rate of the sale)
+      (select jsonb_agg(jsonb_build_object('name', ii.name, 'unit', case when ii.piece then 'piece' else ii.unit end, 'qty', ii.qty,
+          'amount', round(ii.line * i.total::numeric / nullif(i.gross, 0) / coalesce(i.usd_rate, i.rate), 2)) order by ii.line_no)
+        from invoice_items ii where ii.invoice_id = i.id)
     from invoices i where i.vendeur_id = v.id
     union all
-    select x.at, (x.at at time zone tz)::date, x.no, 'Payment' || app.vp_how(x) || coalesce(', ' || nullif(x.note, ''), ''), 0, round(x.amount_usd, 2), x.amount, null, null, null
+    select x.at, (x.at at time zone tz)::date, x.no, 'Payment' || app.vp_how(x) || coalesce(', ' || nullif(x.note, ''), ''), 0, round(x.amount_usd, 2), x.amount, null, null, null, null
     from vendeur_payments x where x.vendeur_id = v.id and x.status = 'ok'
   )
   select jsonb_build_object(
@@ -81,7 +87,7 @@ begin
     'vendeur', (to_jsonb(v) - 'account_id') || jsonb_build_object('shop_name', (select name from shops where id = v.shop_id)),
     'from', p_from, 'to', p_to,
     'brought_forward', (select coalesce(sum(dr - cr), 0) from l where d < p_from),
-    'lines', (select coalesce(jsonb_agg(jsonb_build_object('date', d, 'no', no, 'what', what, 'dr', dr, 'cr', cr, 'cdf', cdf, 'rate', rate, 'due', due, 'invoice_id', invoice_id) order by t, no), '[]')
+    'lines', (select coalesce(jsonb_agg(jsonb_build_object('date', d, 'no', no, 'what', what, 'dr', dr, 'cr', cr, 'cdf', cdf, 'rate', rate, 'due', due, 'invoice_id', invoice_id, 'items', items) order by t, no), '[]')
               from l where d between p_from and p_to),
     'total_dr', (select coalesce(sum(dr), 0) from l where d between p_from and p_to),
     'total_cr', (select coalesce(sum(cr), 0) from l where d between p_from and p_to),

@@ -1621,8 +1621,9 @@ select public.submit_invoice(jsonb_build_object('id', t.get('cinvi'), 'no', 'GOM
   'vendeur_id', t.get('v_usd'), 'items', jsonb_build_array(jsonb_build_object('product_id', t.get('cgel'), 'mult', 1, 'qty', 1, 'price', 5700))));
 select t.ok((t.vstate('Dollar payer')->>'balance')::numeric = 2.04
   and exists (select 1 from jsonb_array_elements(public.vendeur_statement(t.get('v_usd')::uuid, current_date, current_date)->'lines') l
-    where l->>'no' = 'GOM-T2-000912' and (l->>'dr')::numeric = 2.04 and (l->>'rate')::numeric = 2800 and (l->>'cdf')::bigint = 5700),
-  'a sale on credit is owed in USD at the internal rate of its sale');
+    where l->>'no' = 'GOM-T2-000912' and (l->>'dr')::numeric = 2.04 and (l->>'rate')::numeric = 2800 and (l->>'cdf')::bigint = 5700
+      and l->'items'->0->>'name' = 'Credit gel' and (l->'items'->0->>'qty')::int = 1 and (l->'items'->0->>'amount')::numeric = 2.04),
+  'a sale on credit is owed in USD at the internal rate of its sale; the statement lists its items with their amount in USD');
 reset role;
 select t.ok((select l.amount from voucher_lines l join vouchers v on v.id = l.voucher_id join accounts a on a.id = l.account_id
     where v.source_type = 'invoice' and v.source_id = t.get('cinvi')::uuid and a.vendeur_id = t.get('v_usd')::uuid and l.side = 'Dr' and l.currency = 'USD') = 2.04
