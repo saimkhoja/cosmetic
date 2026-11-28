@@ -71,13 +71,14 @@ Use an **empty** project (no tables of your own yet). There are two ways; pick o
    49. `supabase/migrations/20261202000001_usd_credit_grn_edit_cash_promo.sql` (vendeurs owe in USD: credit limit, balances, payments and statements in dollars; goods in corrected or deleted, waiting for the bill or billed, with stock and both vouchers following; promo items on cash sales, a switch in Settings, with the monthly promo report split into cash and credit; changes no amounts)
    50. `supabase/migrations/20261203000001_credit_at_internal_rate.sql` (a sale on credit counts in USD at the internal rate of its sale, existing ones too, booked again with the same voucher numbers)
    51. `supabase/migrations/20261204000001_import_updates_items.sql` (Inventory → Import from Excel also updates items already in the catalogue: category, prices, costs and new barcodes from the row, and adds its cartons and pcs to the store as opening stock; changes no data)
+   52. `supabase/migrations/20261205000001_stock_in_with_store.sql` (Shop stock → Add stock to shops, typed or from Excel, also with a central store; changes no data)
 
-   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 to 51). Run it **before** the new app goes live. They keep your data:
+   **Already running QuickSales?** Run only the files you have not run yet, in order (for example only 18 to 52). Run it **before** the new app goes live. They keep your data:
    - the categories your items already use are kept, so nothing breaks; edit or add more under **Inventory → Categories**;
    - the stock already in the store and in each shop is booked once, at cost, as the opening stock of the books (voucher OPN-00001). Sales, deliveries and expenses from before are not booked; the books start on the day you run file 6;
    - enter the opening balances (cash in hand, bank, capital, what you owe each supplier) under **Accounts → Ledgers** and **Accounts → Suppliers**.
 
-   **Check what an installation has.** Run `supabase/scripts/check_migrations.sql` in the SQL Editor: it lists files 10 to 51 as done or MISSING and changes nothing. Never skip a file: each one rebuilds some functions from the newest version it knows, and those use what the earlier files added (for example the Reports page fails with "column inv.paid_usd does not exist", and sales fail too, when 14 was skipped). Files 18 to 21 stop with a message naming the file to run first. If one was missed, run it and then every later file again, in order (they are safe to run twice): with 14 to 17 missing, run 14, 15, 16, 17, then 18, 19, 20, 21.
+   **Check what an installation has.** Run `supabase/scripts/check_migrations.sql` in the SQL Editor: it lists files 10 to 52 as done or MISSING and changes nothing. Never skip a file: each one rebuilds some functions from the newest version it knows, and those use what the earlier files added (for example the Reports page fails with "column inv.paid_usd does not exist", and sales fail too, when 14 was skipped). Files 18 to 21 stop with a message naming the file to run first. If one was missed, run it and then every later file again, in order (they are safe to run twice): with 14 to 17 missing, run 14, 15, 16, 17, then 18, 19, 20, 21.
 
    To check, run this in a new query. It should return `35 tables, 55 functions`:
    ```sql
