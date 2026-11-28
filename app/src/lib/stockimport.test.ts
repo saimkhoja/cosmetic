@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { IMPCOLS, impStock } from './xlsx';
+import { IMPCOLS, impParse, impStock } from './xlsx';
 
 const P = (id: string, name: string, extra = {}) => ({ id, name, sku: 'SK-' + id, active: true, is_bundle: false, per_carton: 24, barcodes: [] as string[], ...extra });
 const known = [P('1', 'Shea body lotion 400 ml', { barcodes: ['6001234567890'] }), P('2', 'Brush set', { is_bundle: true, per_carton: 0 }), P('3', 'Old soap', { active: false })];
-// the item template's columns: Name, Category, Gross, Net, Pcs per carton, pc, half, dozen, carton, Opening cartons, Opening pcs, Reorder, SKU, Barcode
-const row = (...v: (string | number)[]) => v;
+// the item template's columns: Name, Category, Gross, Net, Pcs per carton, (Cost per pc), pc, half, dozen, carton, Opening cartons, Opening pcs, Reorder, SKU, Barcode
+// the rows below are written without the cost per pc; it goes in empty after the pcs per carton
+const row = (...v: (string | number)[]) => [...v.slice(0, 5), '', ...v.slice(5)];
 
 describe('adding stock from the item template', () => {
   it('has the gross and the net carton cost', () => expect(IMPCOLS.slice(2, 4)).toEqual(['Gross carton cost USD', 'Net carton cost USD']));
@@ -25,5 +26,23 @@ describe('adding stock from the item template', () => {
     expect(r[0].msg).toMatch(/below the cost/);
     expect(r[1].msg).toMatch(/archived/);
     expect(r[4].msg).toMatch(/twice/);
+  });
+});
+
+describe('the cost per pc column', () => {
+  const H = ['Name', 'Category', 'Gross carton cost USD', 'Net carton cost USD', 'Pcs per carton', 'Cost per pc USD', 'Price per pc USD'];
+  it('is in the template, after the pcs per carton', () => expect(IMPCOLS.slice(4, 7)).toEqual(['Pcs per carton', 'Cost per pc USD', 'Price per pc USD']));
+  it('gives the gross carton cost when only the cost per pc is there', () => {
+    const r = impParse([H, ['Rose mist', 'Fragrance', '', '', 36, 2.5, 3.5]], [], []);
+    expect([r[0].status, r[0].o.carton_cost]).toEqual(['ok', 90]);
+  });
+  it('a file with a Cost per pc column and no carton cost column is read', () => {
+    const r = impParse([['Name', 'Pcs per carton', 'Cost per pc USD', 'Price per pc USD'], ['Soap bar', 24, 0.5, 0.8]], [], []);
+    expect([r[0].status, r[0].o.carton_cost]).toEqual(['ok', 12]);
+  });
+  it('refuses a carton cost and a cost per pc that do not agree', () => {
+    const r = impParse([H, ['Rose mist', 'Fragrance', 100, '', 36, 2.5, 3.5]], [], []);
+    expect(r[0].status).toBe('bad');
+    expect(r[0].msg).toMatch(/do not agree/);
   });
 });

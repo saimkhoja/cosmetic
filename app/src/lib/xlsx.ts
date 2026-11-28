@@ -1,11 +1,13 @@
 // Excel (.xlsx) and CSV reading/writing with no outside library, so import works offline.
 import { barcodesOf, itemProblem, MAX_BARCODES, splitBarcodes } from './items';
 
-export const IMPCOLS = ['Name', 'Category', 'Gross carton cost USD', 'Net carton cost USD', 'Pcs per carton', 'Price per pc USD', 'Price per half dozen USD', 'Price per dozen USD', 'Price per carton USD', 'Opening cartons', 'Opening pcs', 'Reorder at (pcs)', 'SKU', 'Barcode'];
+export const IMPCOLS = ['Name', 'Category', 'Gross carton cost USD', 'Net carton cost USD', 'Pcs per carton', 'Cost per pc USD', 'Price per pc USD', 'Price per half dozen USD', 'Price per dozen USD', 'Price per carton USD', 'Opening cartons', 'Opening pcs', 'Reorder at (pcs)', 'SKU', 'Barcode'];
 const IMPKEYS: Record<string, string[]> = {
   name: ['name', 'item', 'itemname', 'nom', 'article', 'designation', 'produit'], category: ['category', 'categorie', 'cat'],
   cartonCost: ['cartoncost', 'costcarton', 'costofcarton', 'costofonecarton', 'coutcarton', 'prixachatcarton', 'grosscartoncost', 'grosscost', 'grosscostcarton', 'grosscostofonecarton', 'coutbrutcarton', 'coutbrut', 'prixachatbrutcarton'],
   netCost: ['netcartoncost', 'netcost', 'netcostcarton', 'netcostofonecarton', 'coutnetcarton', 'coutnet', 'prixachatnetcarton'],
+  // the cost of one pc: for those who count cost by the pc; the gross carton cost is then it times the pcs per carton
+  pcCost: ['costperpc', 'costpc', 'pccost', 'costperpiece', 'unitcost', 'costunit', 'grosscostperpc', 'coutparpiece', 'coutpiece', 'coutunitaire', 'prixachatpiece', 'prixachatparpiece'],
   perCarton: ['pcspercarton', 'piecespercarton', 'percarton', 'pcscarton', 'qtypercarton', 'pcsparcarton', 'piecesparcarton'],
   pc: ['priceperpc', 'pricepc', 'pcprice', 'priceperpiece', 'prixpiece', 'prixparpiece'], half: ['priceperhalfdozen', 'pricehalfdozen', 'halfdozenprice', 'priceper6', 'prixdemidouzaine', 'prixpardemidouzaine'], dzn: ['priceperdozen', 'pricedozen', 'dozenprice', 'prixdouzaine', 'prixpardouzaine'],
   ctn: ['pricepercarton', 'pricecarton', 'cartonprice', 'prixcarton', 'prixparcarton'], openCtn: ['openingcartons', 'cartons', 'stockcartons', 'openingstockcartons'],
@@ -108,7 +110,8 @@ export function zipStore(files: { name: string; data: string }[]): Blob {
 export function templateXlsx(): Blob {
   const X = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   const col = (i: number) => String.fromCharCode(65 + i);
-  const rows: (string | number)[][] = [IMPCOLS, ['Aloe vera gel 300 ml', 'Skin care', 60, '', 24, 4, 23, 45, 90, 5, 0, 24, '', ''], ['Argan oil shampoo 500 ml', 'Hair care', 72, 66, 12, 9, 50, '', 100, 2, 6, 12, '', ''], ['Rose body mist 100 ml', 'Fragrance', 84, '', 36, 3.5, '', 38, '', 3, 0, 36, '', '']];
+  // the cost by the carton (Aloe, Argan) or by the pc (Rose: 2.5 a pc, 36 pcs = 90 a carton)
+  const rows: (string | number)[][] = [IMPCOLS, ['Aloe vera gel 300 ml', 'Skin care', 60, '', 24, '', 4, 23, 45, 90, 5, 0, 24, '', ''], ['Argan oil shampoo 500 ml', 'Hair care', 72, 66, 12, '', 9, 50, '', 100, 2, 6, 12, '', ''], ['Rose body mist 100 ml', 'Fragrance', '', '', 36, 2.5, 3.5, '', 38, '', 3, 0, 36, '', '']];
   const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols>${IMPCOLS.map((_, i) => `<col min="${i + 1}" max="${i + 1}" width="${i === 0 ? 34 : i === 1 ? 16 : 19}" customWidth="1"/>`).join('')}</cols><sheetData>${rows.map((r, ri) => `<row r="${ri + 1}">${r.map((v, ci) => (v === '' ? '' : typeof v === 'number' ? `<c r="${col(ci)}${ri + 1}"><v>${v}</v></c>` : `<c r="${col(ci)}${ri + 1}" t="inlineStr"><is><t>${X(v)}</t></is></c>`)).join('')}</row>`).join('')}</sheetData></worksheet>`;
   return zipStore([
     { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
@@ -130,8 +133,9 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
   if (hi < 0) throw new Error('No header row found. The first row needs column names such as Name, Category, Carton cost USD. Download the template to see them.');
   const col: Record<string, number> = {};
   rows[hi].forEach((h, i) => { const k = hkey(h); Object.entries(IMPKEYS).forEach(([f, al]) => { if (col[f] === undefined && al.includes(k)) col[f] = i; }); });
-  const label: Record<string, string> = { name: 'Name', cartonCost: 'Carton cost USD', perCarton: 'Pcs per carton' };
-  const miss = Object.keys(label).filter((f) => col[f] === undefined);
+  const label: Record<string, string> = { name: 'Name', cartonCost: 'Carton cost USD (or Cost per pc USD)', perCarton: 'Pcs per carton' };
+  // the cost comes as a gross carton cost, or as a cost per pc
+  const miss = Object.keys(label).filter((f) => col[f] === undefined && !(f === 'cartonCost' && col.pcCost !== undefined));
   if (miss.length) throw new Error('Missing columns: ' + miss.map((f) => label[f]).join(', '));
   const g = (r: Cell[], f: string) => (col[f] === undefined ? '' : r[col[f]] ?? '');
   // what the catalogue has, and what the rows above already used
@@ -144,7 +148,14 @@ export function impParse(rows: Cell[][], existingNames: string[], existingSkus: 
     const oc = inum(g(r, 'openCtn')), op = inum(g(r, 'openPcs')), ro = inum(g(r, 'reorder'));
     const o = { name, category: String(g(r, 'category')).trim().replace(/\s+/g, ' ').slice(0, 30) || 'Other', carton_cost: inum(g(r, 'cartonCost')), net_cost: inum(g(r, 'netCost')), per_carton: inum(g(r, 'perCarton')), pc: (() => { const v = inum(g(r, 'pc')); return isNaN(v) ? 0 : v; })(), half: isNaN(hz) ? 0 : hz, dzn: isNaN(dz) ? 0 : dz, ctn: isNaN(ct) ? 0 : ct,
       open_cartons: isNaN(oc) ? 0 : oc, open_pcs: isNaN(op) ? 0 : op, reorder: isNaN(ro) ? null : ro };
+    // a cost per pc gives the gross carton cost when that is empty; given both, they must agree (to the cent per pc)
+    const pcc = inum(g(r, 'pcCost')), pccBad = String(g(r, 'pcCost')).trim() !== '' && (isNaN(pcc) || pcc < 0);
+    if (!pccBad && !isNaN(pcc) && o.per_carton > 0) {
+      if (isNaN(o.carton_cost)) o.carton_cost = Math.round(pcc * o.per_carton * 10000) / 10000;
+    }
     const row: ImportRow = { n: hi + i + 2, o, sku, barcode, status: 'ok', msg: '', qty: 0 };
+    if (pccBad) { row.status = 'bad'; row.msg = 'Cost per pc must be a number, or left empty'; out.push(row); return; }
+    if (!isNaN(pcc) && o.per_carton > 0 && Math.abs(o.carton_cost / o.per_carton - pcc) > 0.005) { row.status = 'bad'; row.msg = `The gross carton cost and the cost per pc do not agree (${o.carton_cost} / ${o.per_carton} pcs is not ${pcc} a pc)`; out.push(row); return; }
     // an item already in the catalogue (by its code, name or a barcode) is updated from the row and gets its stock
     const known = (!!sku && skus0.has(sku.toLowerCase())) || (!!name && names0.has(name.toLowerCase())) || bl.some((b) => codes0.has(b));
     if (name && names.has(name.toLowerCase())) { row.status = 'bad'; row.msg = 'This name is in the file twice'; }
